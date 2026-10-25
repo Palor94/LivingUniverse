@@ -4,11 +4,12 @@ import {promises as fs} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createApp} from '../app/server.mjs';
+import {confirmFolders} from './folder-preview-client.mjs';
 
 async function fixture(fn){const temp=await fs.mkdtemp(path.join(os.tmpdir(),'living-universe-test-'));const root=path.join(temp,'resources');await fs.mkdir(root);let app;let base;
   async function start(dir=path.join(temp,'data')){app=await createApp({root,dataDir:dir});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+app.server.address().port;}
   async function request(route,data,method){const res=await fetch(base+route,{method:method||(data?'POST':'GET'),headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});return {status:res.status,value:await res.json()};}
-  async function call(...args){const result=await request(...args);assert.ok(result.status<300,JSON.stringify(result));return result.value;}
+  async function call(...args){if(['/api/assign-folder','/api/sort-folders'].includes(args[0]))return confirmFolders(call,args[0],args[1]);const result=await request(...args);assert.ok(result.status<300,JSON.stringify(result));return result.value;}
   try{await start();await fn({root,temp,call,request,get app(){return app;},restart:async dir=>{await app.close();await start(dir);}});}finally{if(app)await app.close();assert.equal(path.dirname(path.resolve(temp)),path.resolve(os.tmpdir()));assert.ok(path.basename(temp).startsWith('living-universe-test-'));await fs.rm(temp,{recursive:true,force:true});}}
 
 test('field autosave, cover regions, rename, reference protection, reversible removal, and portable backups',()=>fixture(async({root,temp,call,request,restart})=>{

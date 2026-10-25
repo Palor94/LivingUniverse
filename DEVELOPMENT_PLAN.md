@@ -1,5 +1,17 @@
 # Development plan
 
+## Media-library phases requested by the user
+
+Phase 1 implemented: page-scoped checkbox/Ctrl/Shift selection, additive bulk character assignment, additive tags with explicit tag removal, explicit categorization completion, status filtering, and a fixed filtered sequence with save-and-next/previous. No physical file operations or canonical changes occur in these bulk actions. Completion is persisted in one additive table and included in exports. See README for use and migration rollback.
+
+Phase 2 implemented: mandatory folder preview/confirmation with counts and representative samples; metadata-based scan reports; retained missing/unavailable records; staged possible moves and explicit path relinking or import-as-new. Current canon is fingerprint-checked before relinking. Two additive observation tables are included in backups, with rollback scripts.
+
+Phase 3 implemented: optional folder-scoped or collection-wide SHA-256 analysis, browser-local versioned dHash image fingerprints, cached results invalidated by live file metadata, and paginated manual exact-group/similar-pair comparisons. Windows cloud recall flags gate uncached reads unless downloads are explicitly enabled. No automatic file or metadata merging/deletion. Crops and substantially changed generations remain a limitation of the initial visual hash.
+
+Phase 4 implemented: custom grouped vocabulary, stable tag IDs with editable names/groups, single-item and additive/removal bulk labels, structured filtering/search, and explicit legacy-text mapping that retains original text. Optional structured labels remain separate from character links and canonical reference approval. Additive migration and export support preserve older data.
+
+Phase 5 review foundation implemented: optional local approved-reference hash suggestions with provenance, manual multi-character additive acceptance, rejection/reopening, separate human face/body feedback, suppression of repeated rejected evidence, stale-evidence checks, and export/restore. This baseline is not AI recognition. Local learned encoders, local vision-language models, and external APIs are compared in `docs/ASSISTED_SORTING.md`; actual AI model selection, a held-out benchmark, and provider connection remain pending the user's preference. No external upload, paid call, model installation, automatic assignment, or canon mutation is enabled.
+
 ## 1. Character identity library: first useful prototype
 
 Implemented in the first local build: editable characters/profiles, folder discovery and explicit assignments, shared media, sorting inbox, tags and notes, directed relationships, per-character reviews, versioned canon, reference integrity checks, side-by-side reference comparison, export/restore, and a laptop launcher. Integration checks cover persistence, canon boundaries, shared assignments, missing originals, video range delivery, and restore. Face/crop tools, richer feature fields, duplicate reconciliation, and bulk individual selection remain later increments.

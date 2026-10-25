@@ -9,6 +9,7 @@
 !/docs/
 /docs/*
 !/docs/VISUAL_IDENTITY.md
+!/docs/ASSISTED_SORTING.md
 !/package.json
 !/Start Living Universe.cmd
 !/app/

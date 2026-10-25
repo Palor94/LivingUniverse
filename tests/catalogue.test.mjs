@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
 import {createApp} from '../app/server.mjs';
+import {confirmFolders} from './folder-preview-client.mjs';
 
 test('private catalogue: shared media, immutable canon, persistence, restore, and original preservation',async()=>{
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'living-universe-test-'));
@@ -14,8 +15,9 @@ test('private catalogue: shared media, immutable canon, persistence, restore, an
   async function start(dataDir){app=await createApp({root,dataDir});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));return 'http://127.0.0.1:'+app.server.address().port;}
   const dataDir=path.join(temp,'data');let base=await start(dataDir);
   async function request(route,data,method){const r=await fetch(base+route,{method:method||(data?'POST':'GET'),headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});return {status:r.status,value:await r.json()};}
-  const call=async(...args)=>{const r=await request(...args);assert.ok(r.status<300,JSON.stringify(r));return r.value;};
+  const call=async(...args)=>{if(['/api/assign-folder','/api/sort-folders'].includes(args[0]))return confirmFolders(call,args[0],args[1]);const r=await request(...args);assert.ok(r.status<300,JSON.stringify(r));return r.value;};
   try{
+    const storage=await call('/api/storage');assert.equal(storage.database,path.resolve(dataDir,'universe.sqlite'));assert.equal(storage.resource_root,root);assert.equal(storage.characters,0);assert.equal(storage.media,0);
     const scan=await call('/api/scan',{});assert.equal(scan.added,2);assert.equal((await call('/api/scan',{})).added,0);
     const peter=await call('/api/characters',{name:'Pákozdi'});const attila=await call('/api/characters',{name:'Attila'});
     const items=(await call('/api/media')).items;const image=items.find(m=>m.kind==='image');const video=items.find(m=>m.kind==='video');
@@ -55,19 +57,19 @@ test('one-click folder sorting reuses characters, preserves shared assignments, 
   for(const folder of ['Attila','Dezső']){await fs.mkdir(path.join(root,folder));await fs.writeFile(path.join(root,folder,'portrait.png'),'fixture');await fs.writeFile(path.join(root,folder,'scene.mp4'),'fixture');}
   let app;let base;
   async function start(dataDir){app=await createApp({root,dataDir});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+app.server.address().port;}
-  async function call(route,data,method){const r=await fetch(base+route,{method:method||(data?'POST':'GET'),headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});const value=await r.json();assert.ok(r.ok,JSON.stringify(value));return value;}
+  async function call(route,data,method){if(['/api/assign-folder','/api/sort-folders'].includes(route))return confirmFolders(call,route,data);const r=await fetch(base+route,{method:method||(data?'POST':'GET'),headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});const value=await r.json();assert.ok(r.ok,JSON.stringify(value));return value;}
   await start(path.join(temp,'data'));
   try{
     await call('/api/scan',{});const attila=await call('/api/characters',{name:'Attila'});
     const one=(await call('/api/media?folder=Attila')).items[0];const other=await call('/api/characters',{name:'Other character'});
     await call('/api/media/'+one.id,{character_ids:[other.id]},'PUT');
     const result=await call('/api/sort-folders',{folders:['Attila','Dezső']});assert.equal(result.results[0].character_id,attila.id);assert.equal(result.results.reduce((s,r)=>s+r.added,0),4);
-    assert.equal((await call('/api/media/'+one.id)).characters.length,2);assert.equal((await call('/api/state')).stats.inbox,0);assert.equal((await call('/api/characters/'+attila.id)).canon,null);
+    assert.equal((await call('/api/media/'+one.id)).characters.length,2);assert.equal((await call('/api/state')).stats.inbox,4);assert.equal((await call('/api/characters/'+attila.id)).canon,null);
     assert.equal((await call('/api/sort-folders',{folders:['Attila','Dezső']})).results.reduce((s,r)=>s+r.added,0),0);
-    await call('/api/characters/'+attila.id,{...attila,name:'Attila renamed'},'PUT');await fs.writeFile(path.join(root,'Attila','new.png'),'new fixture');await call('/api/scan',{});
-    const repeated=await call('/api/sort-folders',{folders:['Attila']});assert.equal(repeated.results[0].character_id,attila.id);assert.equal(repeated.results[0].added,1);assert.equal((await call('/api/state')).characters.length,3);
-    const backup=await call('/api/export');await app.close();await start(path.join(temp,'restored'));await call('/api/restore',backup);assert.equal((await call('/api/sort-folders',{folders:['Attila']})).results[0].character_id,attila.id);
-    const bad=await fetch(base+'/api/sort-folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folders:['Dezső','not a folder']})});assert.equal(bad.status,400);
+    await call('/api/characters/'+attila.id,{...attila,name:'Attila renamed'},'PUT');await fs.writeFile(path.join(root,'Attila renamed','new.png'),'new fixture');await call('/api/scan',{});
+    const repeated=await call('/api/sort-folders',{folders:['Attila renamed']});assert.equal(repeated.results[0].character_id,attila.id);assert.equal(repeated.results[0].added,1);assert.equal((await call('/api/state')).characters.length,3);
+    const backup=await call('/api/export');await app.close();await start(path.join(temp,'restored'));await call('/api/restore',backup);assert.equal((await call('/api/sort-folders',{folders:['Attila renamed']})).results[0].character_id,attila.id);
+    const bad=await fetch(base+'/api/sort-folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folders:['Dezső','not a folder']})});assert.equal(bad.status,409);
   }finally{await app.close();assert.equal(path.dirname(path.resolve(temp)),path.resolve(os.tmpdir()));assert.ok(path.basename(temp).startsWith('living-universe-test-'));await fs.rm(temp,{recursive:true,force:true});}
 });
 

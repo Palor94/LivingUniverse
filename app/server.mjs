@@ -6,6 +6,14 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 import {installEnhancements,extraTables} from './enhancements.mjs';
+import {installCatalogueActions} from './catalogue-actions.mjs';
+import {installReconciliation} from './reconciliation.mjs';
+import {installDuplicates} from './duplicates.mjs';
+import {installTaxonomy} from './taxonomy.mjs';
+import {installSuggestions} from './suggestions.mjs';
+import {installFolderSync} from './folder-sync.mjs';
+import {installVideoCovers} from './video-covers.mjs';
+import {installLocations} from './locations.mjs';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRoot = path.resolve(appDir, '..');
@@ -36,34 +44,23 @@ export async function createApp(options={}) {
   const one = (q,...args) => db.prepare(q).get(...args);
   const run = (q,...args) => db.prepare(q).run(...args);
   function transaction(fn) {db.exec('BEGIN IMMEDIATE');try {const value=fn();db.exec('COMMIT');return value;}catch(e){db.exec('ROLLBACK');throw e;}}
-  function character(cid) {const c=one('SELECT * FROM characters WHERE id=?',cid);if(!c)throw fail('Character not found',404);return {...c,cover_crop:one('SELECT cover_crop FROM character_ui WHERE character_id=?',cid)?.cover_crop||null};}
+  function character(cid) {const c=one('SELECT * FROM characters WHERE id=?',cid);if(!c)throw fail('Character not found',404);return {...c,cover_frame:videoCovers.details(c.id,c.cover_id),cover_crop:one('SELECT cover_crop FROM character_ui WHERE character_id=?',cid)?.cover_crop||null};}
   function asset(mid) {const m=one('SELECT * FROM media WHERE id=?',mid);if(!m)throw fail('Media not found',404);return m;}
   function canon(cid) {return one('SELECT * FROM canon WHERE character_id=? ORDER BY rowid DESC LIMIT 1',cid);}
+  function characterDeletionBlock(cid){
+    if(one("SELECT 1 FROM depictions d WHERE d.character_id=? AND NOT EXISTS(SELECT 1 FROM application_settings s WHERE s.key='erased_media:'||d.media_id) LIMIT 1",cid))return 'This character still has assigned media, including recoverable copies in Removed items. Unassign or permanently erase that media first.';
+    if(one('SELECT 1 FROM canon WHERE character_id=? LIMIT 1',cid)||one('SELECT 1 FROM reviews WHERE character_id=? LIMIT 1',cid)||one('SELECT 1 FROM sorting_suggestions WHERE character_id=? LIMIT 1',cid)||one('SELECT 1 FROM folder_changes WHERE character_id=? LIMIT 1',cid)||one('SELECT 1 FROM character_cover_frames WHERE character_id=? LIMIT 1',cid)||one('SELECT 1 FROM character_ui WHERE merged_into=? OR (character_id=? AND merged_into IS NOT NULL) LIMIT 1',cid,cid))return 'This character has identity, review, or other recorded history that must be preserved and cannot be deleted here.';
+    return null;
+  }
   function mediaDetails(m) {
-    return {...m, ...one('SELECT tags,notes FROM media_notes WHERE media_id=?',m.id),characters:all('SELECT c.id,c.name FROM characters c JOIN depictions d ON c.id=d.character_id LEFT JOIN character_ui u ON u.character_id=c.id WHERE d.media_id=? AND u.merged_into IS NULL',m.id),reviews:all('SELECT * FROM reviews WHERE media_id=? ORDER BY rowid',m.id),moves:all('SELECT * FROM file_moves WHERE media_id=? ORDER BY rowid DESC',m.id),canonicalFor:all('SELECT character_id FROM canon c WHERE c.rowid=(SELECT MAX(c2.rowid) FROM canon c2 WHERE c2.character_id=c.character_id) AND EXISTS(SELECT 1 FROM json_each(c.references_json) WHERE json_extract(value,\'$.media_id\')=?)',m.id).map(c=>c.character_id)};
+    return {...m,location:locations.details(m.id),structured_tags:taxonomy.details(m.id),scan:reconciliation.details(m.id),...catalogue.details(m.id), ...one('SELECT tags,notes FROM media_notes WHERE media_id=?',m.id),characters:all('SELECT c.id,c.name FROM characters c JOIN depictions d ON c.id=d.character_id LEFT JOIN character_ui u ON u.character_id=c.id WHERE d.media_id=? AND u.merged_into IS NULL',m.id),reviews:all('SELECT * FROM reviews WHERE media_id=? ORDER BY rowid',m.id),moves:all('SELECT * FROM file_moves WHERE media_id=? ORDER BY rowid DESC',m.id),canonicalFor:all('SELECT character_id FROM canon c WHERE c.rowid=(SELECT MAX(c2.rowid) FROM canon c2 WHERE c2.character_id=c.character_id) AND EXISTS(SELECT 1 FROM json_each(c.references_json) WHERE json_extract(value,\'$.media_id\')=?)',m.id).map(c=>c.character_id)};
   }
   let scanning=false;
   let lastScan=null;
   async function scan() {
     if(scanning||moving.size)throw fail('A scan or file move is already running. Please wait.',409);
     scanning=true;
-    const items=[];const errors=[];
-    async function walk(dir) {
-      let entries;try{entries=await fs.readdir(dir,{withFileTypes:true});}catch{errors.push(path.relative(root,dir));return;}
-      for(const e of entries){
-        if(e.name.startsWith('.')||ignored.has(e.name))continue;
-        const full=path.join(dir,e.name);
-        if(e.isSymbolicLink())continue;
-        if(e.isDirectory()){await walk(full);continue;}
-        const mime=types[path.extname(e.name).toLowerCase()];if(!mime||!e.isFile())continue;
-        try{const s=await fs.stat(full);const rel=path.relative(root,full);items.push({rel,folder:rel.includes(path.sep)?rel.split(path.sep)[0]:'',kind:mime.startsWith('video')?'video':'image',size:s.size,modified:s.mtime.toISOString()});}catch{errors.push(path.relative(root,full));}
-      }
-    }
-    try{
-      await walk(root);let added=0;
-      transaction(()=>{for(const m of items){const result=run('INSERT OR IGNORE INTO media VALUES(?,?,?,?,?,?,?)',id(),m.rel,m.folder,m.kind,m.size,m.modified,now());added+=Number(result.changes);}});
-      lastScan={found:items.length,added,errors};return lastScan;
-    }finally{scanning=false;}
+    try{lastScan=await reconciliation.scan();return lastScan;}finally{scanning=false;}
   }
   async function safeFile(m) {
     const full=path.resolve(root,m.relative_path);
@@ -83,6 +80,14 @@ export async function createApp(options={}) {
     return {dir,full:path.join(dir,path.basename(m.relative_path)),relative:path.join(folder,path.basename(m.relative_path)),folder};
   }
   const enhancements=installEnhancements({db,root,dataDir,all,one,run,transaction,asset,character,canon,safeFile,fingerprint,moving,isScanning:()=>scanning,fail});
+  const catalogue=installCatalogueActions({all,one,run,transaction,fail});
+  const reconciliation=installReconciliation({db,root,types,ignored,all,one,run,transaction,fail,fingerprint,isBusy:()=>scanning||moving.size>0});
+  const duplicates=installDuplicates({db,all,one,run,fail,safeFile,fingerprint,isBusy:()=>scanning||moving.size>0,availability:options.duplicateAvailability});
+  const taxonomy=installTaxonomy({db,all,one,run,transaction,fail});
+  const suggestions=installSuggestions({db,all,one,run,transaction,fail,safeFile});
+  const folderSync=installFolderSync({db,root,dataDir,all,one,run,transaction,fail,fingerprint,moving,isScanning:()=>scanning});
+  const videoCovers=installVideoCovers({db,all,one,run,transaction,fail,safeFile});
+  const locations=installLocations({db,root,all,one,run,transaction,fail,setLocation:catalogue.setLocation,relocate:enhancements.relocate});
   const server=http.createServer(async(req,res)=>{
     const json=(value,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
     try{
@@ -97,19 +102,42 @@ export async function createApp(options={}) {
         if(!String(req.headers['content-type']).startsWith('application/json'))throw fail('Expected JSON',415);
         let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>(p==='/api/restore'?50e6:2e6))throw fail('Request is too large',413);}try{body=JSON.parse(raw||'{}');}catch{throw fail('Invalid JSON');}
       }
+      if(folderSync.isBusy()&&['POST','PUT'].includes(req.method))throw fail('Folder synchronization is running. Please wait before editing or scanning.',409);
+      if(await folderSync.handle({p,body,req,json}))return;
+      if(await videoCovers.handle({p,body,req,res,json}))return;
+      if(await locations.handle({p,body,req,json}))return;
+      if(await reconciliation.handle({p,body,req,url,json}))return;
+      if(await duplicates.handle({p,body,req,url,json}))return;
+      if(await taxonomy.handle({p,body,req,url,json}))return;
+      if(await suggestions.handle({p,body,req,url,json}))return;
       if(await enhancements.handle({p,body,req,json}))return;
-      if(p==='/api/state'&&req.method==='GET')return json({characters:all(`SELECT c.*,u.cover_crop,(SELECT COUNT(*) FROM depictions d JOIN active_media m ON m.id=d.media_id WHERE d.character_id=c.id) media_count FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL ORDER BY name COLLATE NOCASE`),protagonist:enhancements.protagonist(),folder_owners:all('SELECT * FROM sorted_folders'),folders:all('SELECT folder,COUNT(*) count FROM active_media GROUP BY folder ORDER BY folder'),stats:{media:one('SELECT COUNT(*) n FROM active_media').n,images:one("SELECT COUNT(*) n FROM active_media WHERE kind='image'").n,videos:one("SELECT COUNT(*) n FROM active_media WHERE kind='video'").n,inbox:one('SELECT COUNT(*) n FROM active_media m WHERE NOT EXISTS(SELECT 1 FROM depictions d WHERE d.media_id=m.id)').n},scanning,lastScan});
+      if(await catalogue.handle({p,body,req,json}))return;
+      if(p==='/api/storage'&&req.method==='GET')return json({data_directory:path.resolve(dataDir),database:path.resolve(dataDir,'universe.sqlite'),resource_root:root,characters:one('SELECT COUNT(*) n FROM characters').n,media:one('SELECT COUNT(*) n FROM media').n});
+      if(p==='/api/state'&&req.method==='GET')return json({characters:all(`SELECT c.*,u.cover_crop,(SELECT COUNT(*) FROM depictions d JOIN active_media m ON m.id=d.media_id WHERE d.character_id=c.id) media_count FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL ORDER BY name COLLATE NOCASE`).map(c=>({...c,cover_frame:videoCovers.details(c.id,c.cover_id)})),protagonist:enhancements.protagonist(),folder_owners:all('SELECT * FROM sorted_folders'),folders:all('SELECT folder,COUNT(*) count FROM active_media GROUP BY folder ORDER BY folder'),stats:{media:one('SELECT COUNT(*) n FROM active_media').n,images:one("SELECT COUNT(*) n FROM active_media WHERE kind='image'").n,videos:one("SELECT COUNT(*) n FROM active_media WHERE kind='video'").n,inbox:one('SELECT COUNT(*) n FROM active_media m WHERE NOT EXISTS(SELECT 1 FROM media_categorization s WHERE s.media_id=m.id AND s.complete=1) AND NOT '+catalogue.locationSQL).n},scanning,lastScan});
       if(p==='/api/scan'&&req.method==='POST')return json(await scan());
       if(p==='/api/characters'&&req.method==='POST'){
         const name=str(body.name,200).trim();if(!name)throw fail('Please enter a name or working title.');const cid=id();run('INSERT INTO characters(id,name,created_at) VALUES(?,?,?)',cid,name,now());return json(character(cid),201);
       }
       const cm=p.match(/^\/api\/characters\/([^/]+)$/);
       if(cm){const cid=cm[1];const c=character(cid);
-        if(req.method==='GET')return json({...c,canon:canon(cid)||null,history:all('SELECT * FROM canon WHERE character_id=? ORDER BY rowid DESC',cid),relationships:all('SELECT r.*,c.name target_name FROM relationships r JOIN characters c ON c.id=r.target_id WHERE source_id=?',cid)});
+        if(req.method==='GET')return json({...c,deletion_block:characterDeletionBlock(cid),canon:canon(cid)||null,history:all('SELECT * FROM canon WHERE character_id=? ORDER BY rowid DESC',cid),relationships:all('SELECT r.*,c.name target_name FROM relationships r JOIN characters c ON c.id=r.target_id WHERE source_id=?',cid)});
+        if(req.method==='DELETE'){
+          transaction(()=>{
+            const blocked=characterDeletionBlock(cid);if(blocked)throw fail(blocked,409);
+            const snapshot={character:c,relationships:all('SELECT * FROM relationships WHERE source_id=? OR target_id=?',cid,cid),folders:all('SELECT * FROM sorted_folders WHERE character_id=?',cid),erased_media_links:all('SELECT * FROM depictions WHERE character_id=?',cid),deleted_at:now()};
+            run('INSERT INTO application_settings(key,value) VALUES(?,?)','deleted_character:'+cid,JSON.stringify(snapshot));
+            run('DELETE FROM relationships WHERE source_id=? OR target_id=?',cid,cid);
+            run('DELETE FROM sorted_folders WHERE character_id=?',cid);
+            run('DELETE FROM depictions WHERE character_id=?',cid);
+            run('DELETE FROM character_ui WHERE character_id=?',cid);
+            run("DELETE FROM application_settings WHERE key='protagonist' AND value=?",cid);
+            run('DELETE FROM characters WHERE id=?',cid);
+          });return json({ok:true});
+        }
         if(req.method==='PUT'){
           const name=str(body.name,200).trim();if(!name)throw fail('A character needs a name or title.');
           if(body.cover_id){asset(body.cover_id);if(!one('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?',body.cover_id,cid))throw fail('Assign this character to the cover first.');}
-          run('UPDATE characters SET name=?,aliases=?,biography=?,personality=?,appearance=?,notes=?,cover_id=? WHERE id=?',name,str(body.aliases,1000),str(body.biography),str(body.personality),str(body.appearance),str(body.notes),body.cover_id||null,cid);return json(character(cid));
+          await folderSync.renameCharacter(cid,name);run('UPDATE characters SET name=?,aliases=?,biography=?,personality=?,appearance=?,notes=?,cover_id=? WHERE id=?',name,str(body.aliases,1000),str(body.biography),str(body.personality),str(body.appearance),str(body.notes),body.cover_id||null,cid);return json(character(cid));
         }
       }
       const ca=p.match(/^\/api\/characters\/([^/]+)\/canon$/);
@@ -135,11 +163,25 @@ export async function createApp(options={}) {
       if(p==='/api/media'&&req.method==='GET'){
         const where=[];const args=[];
         if(url.searchParams.get('character')){where.push('EXISTS(SELECT 1 FROM depictions d WHERE d.media_id=m.id AND d.character_id=?)');args.push(url.searchParams.get('character'));}
-        if(url.searchParams.get('inbox')==='1')where.push('NOT EXISTS(SELECT 1 FROM depictions d WHERE d.media_id=m.id)');
+        const completed='EXISTS(SELECT 1 FROM media_categorization s WHERE s.media_id=m.id AND s.complete=1)';
+        const count='(SELECT COUNT(*) FROM depictions d LEFT JOIN character_ui u ON u.character_id=d.character_id WHERE d.media_id=m.id AND u.merged_into IS NULL)';
+        if(url.searchParams.get('inbox')==='1')where.push('NOT '+completed+' AND NOT '+catalogue.locationSQL);
+        if(url.searchParams.get('role')==='location')where.push(catalogue.locationSQL);
+        if(url.searchParams.get('role')==='character')where.push('NOT '+catalogue.locationSQL);
+        const status=url.searchParams.get('status');
+        if(status==='location')where.push(catalogue.locationSQL);
+        if(status==='complete')where.push(completed);
+        if(status==='unassigned')where.push('NOT '+catalogue.locationSQL+' AND NOT '+completed+' AND '+count+'=0');
+        if(status==='pending')where.push('NOT '+catalogue.locationSQL+' AND NOT '+completed+' AND '+count+'=1');
+        if(status==='multiple')where.push('NOT '+catalogue.locationSQL+' AND NOT '+completed+' AND '+count+'>1');
         if(url.searchParams.has('folder')){where.push('m.folder=?');args.push(url.searchParams.get('folder'));}
         if(['image','video'].includes(url.searchParams.get('kind'))){where.push('m.kind=?');args.push(url.searchParams.get('kind'));}
-        const search=url.searchParams.get('search');if(search){where.push("(m.relative_path LIKE ? OR EXISTS(SELECT 1 FROM media_notes n WHERE n.media_id=m.id AND (n.tags LIKE ? OR n.notes LIKE ?)))");args.push(...Array(3).fill('%'+str(search,200)+'%'));}
-        const clause=where.length?' WHERE '+where.join(' AND '):'';const offset=Math.max(0,Number(url.searchParams.get('offset'))||0);const rows=all('SELECT m.* FROM active_media m'+clause+' ORDER BY m.relative_path LIMIT 48 OFFSET ?',...args,offset);return json({total:one('SELECT COUNT(*) n FROM active_media m'+clause,...args).n,items:rows.map(mediaDetails)});
+        if(url.searchParams.get('structured_tag')){where.push('EXISTS(SELECT 1 FROM media_tags mt WHERE mt.media_id=m.id AND mt.tag_id=?)');args.push(url.searchParams.get('structured_tag'));}
+        if(url.searchParams.get('location_id')){where.push('EXISTS(SELECT 1 FROM media_locations ml WHERE ml.media_id=m.id AND ml.location_id=?)');args.push(url.searchParams.get('location_id'));}
+        const search=url.searchParams.get('search');if(search){where.push("(m.relative_path LIKE ? OR EXISTS(SELECT 1 FROM media_notes n WHERE n.media_id=m.id AND (n.tags LIKE ? OR n.notes LIKE ?)) OR EXISTS(SELECT 1 FROM media_tags mt JOIN structured_tags t ON t.id=mt.tag_id JOIN tag_groups g ON g.id=t.group_id WHERE mt.media_id=m.id AND (t.name LIKE ? OR g.name LIKE ?)))");args.push(...Array(5).fill('%'+str(search,200)+'%'));}
+        const clause=where.length?' WHERE '+where.join(' AND '):'';
+        if(url.searchParams.get('ids_only')==='1')return json({ids:all('SELECT m.id FROM active_media m'+clause+' ORDER BY m.relative_path',...args).map(m=>m.id)});
+        const offset=Math.max(0,Number(url.searchParams.get('offset'))||0);const rows=all('SELECT m.* FROM active_media m'+clause+' ORDER BY m.relative_path LIMIT 48 OFFSET ?',...args,offset);return json({total:one('SELECT COUNT(*) n FROM active_media m'+clause,...args).n,items:rows.map(mediaDetails)});
       }
       const move=p.match(/^\/api\/media\/([^/]+)\/move(?:\/(preview))?$/);
       if(move&&req.method==='POST'){
@@ -169,8 +211,10 @@ export async function createApp(options={}) {
         if(req.method==='GET')return json(mediaDetails(m));
         if(req.method==='PUT'){
           if(!Array.isArray(body.character_ids))throw fail('Choose characters');const archived=all('SELECT d.character_id FROM depictions d JOIN character_ui u ON u.character_id=d.character_id WHERE d.media_id=? AND u.merged_into IS NOT NULL',mid).map(d=>d.character_id);const cids=[...new Set([...body.character_ids,...archived])];cids.forEach(character);
+          if(body.categorization_complete!==undefined&&typeof body.categorization_complete!=='boolean')throw fail('Invalid categorization status.');
           const current=mediaDetails(m).canonicalFor;if(current.some(cid=>!cids.includes(cid)))throw fail('This is an approved reference. Remove it through a new canon revision before unassigning its character.');
-          transaction(()=>{run('DELETE FROM depictions WHERE media_id=?',mid);for(const cid of cids)run('INSERT INTO depictions VALUES(?,?)',mid,cid);run('UPDATE characters SET cover_id=NULL WHERE cover_id=? AND id NOT IN (SELECT character_id FROM depictions WHERE media_id=?)',mid,mid);run('INSERT INTO media_notes VALUES(?,?,?) ON CONFLICT(media_id) DO UPDATE SET tags=excluded.tags,notes=excluded.notes',mid,str(body.tags,2000),str(body.notes));});return json(mediaDetails(m));
+          if(body.location_reference===false&&body.location_id)throw fail('A specific location must be classified as a location reference.');if(body.location_id)body.location_id=await locations.prepare(body.location_id);
+          transaction(()=>{if(body.location_reference!==undefined)catalogue.setLocation(mid,body.location_reference);if(body.structured_tag_ids!==undefined)taxonomy.set(mid,body.structured_tag_ids);if(body.location_id!==undefined)locations.set(mid,body.location_id);run('DELETE FROM depictions WHERE media_id=?',mid);for(const cid of cids)run('INSERT INTO depictions VALUES(?,?)',mid,cid);run('UPDATE characters SET cover_id=NULL WHERE cover_id=? AND id NOT IN (SELECT character_id FROM depictions WHERE media_id=?)',mid,mid);run('INSERT INTO media_notes VALUES(?,?,?) ON CONFLICT(media_id) DO UPDATE SET tags=excluded.tags,notes=excluded.notes',mid,str(body.tags,2000),str(body.notes));if(body.categorization_complete!==undefined)catalogue.setComplete(mid,body.categorization_complete);});return json(mediaDetails(m));
         }
       }
       const mr=p.match(/^\/api\/media\/([^/]+)\/review$/);
@@ -209,7 +253,7 @@ export async function createApp(options={}) {
         if(body.schema_version!==1)throw fail('Unsupported backup version');
         if(one('SELECT COUNT(*) n FROM characters').n||one('SELECT COUNT(*) n FROM media').n)throw fail('Restore requires an empty catalogue. Use a separate data directory to avoid overwriting your work.');
         const tables={characters:['id','name','aliases','biography','personality','appearance','notes','cover_id','created_at'],media:['id','relative_path','folder','kind','size','modified_at','created_at'],depictions:['media_id','character_id'],media_notes:['media_id','tags','notes'],reviews:['id','media_id','character_id','decision','rating','notes','created_at'],canon:['id','character_id','parent_id','appearance','references_json','reason','created_at'],relationships:['id','source_id','target_id','description']};
-        transaction(()=>{for(const [t,cols] of Object.entries(tables)){if(!Array.isArray(body[t]))throw fail('Incomplete backup');for(const row of body[t]){if(t==='media'&&(path.isAbsolute(row.relative_path)||path.relative(root,path.resolve(root,row.relative_path)).startsWith('..')))throw fail('Invalid media path in backup');run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??null));}}if(body.sorted_folders!==undefined){if(!Array.isArray(body.sorted_folders))throw fail('Invalid folder assignments in backup');for(const r of body.sorted_folders)run('INSERT INTO sorted_folders VALUES(?,?)',r.folder,r.character_id);}if(body.file_moves!==undefined){if(!Array.isArray(body.file_moves))throw fail('Invalid move history');for(const r of body.file_moves)run('INSERT INTO file_moves VALUES(?,?,?,?,?,?,?)',r.id,r.media_id,r.from_path,r.to_path,r.status,r.sha256,r.created_at);}for(const [t,cols] of Object.entries(extraTables)){if(body[t]===undefined)continue;if(!Array.isArray(body[t]))throw fail('Invalid additional backup records');for(const row of body[t])run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??null));}});return json({ok:true});
+        transaction(()=>{taxonomy.prepareRestore(body);for(const [t,cols] of Object.entries(tables)){if(!Array.isArray(body[t]))throw fail('Incomplete backup');for(const row of body[t]){if(t==='media'&&(path.isAbsolute(row.relative_path)||path.relative(root,path.resolve(root,row.relative_path)).startsWith('..')))throw fail('Invalid media path in backup');run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??null));}}if(body.sorted_folders!==undefined){if(!Array.isArray(body.sorted_folders))throw fail('Invalid folder assignments in backup');for(const r of body.sorted_folders)run('INSERT INTO sorted_folders VALUES(?,?)',r.folder,r.character_id);}if(body.file_moves!==undefined){if(!Array.isArray(body.file_moves))throw fail('Invalid move history');for(const r of body.file_moves)run('INSERT INTO file_moves VALUES(?,?,?,?,?,?,?)',r.id,r.media_id,r.from_path,r.to_path,r.status,r.sha256,r.created_at);}for(const [t,cols] of Object.entries(extraTables)){if(body[t]===undefined)continue;if(!Array.isArray(body[t]))throw fail('Invalid additional backup records');for(const row of body[t])run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??null));}});return json({ok:true});
       }
       const fm=p.match(/^\/media\/([^/]+)$/);
       if(fm&&['GET','HEAD'].includes(req.method)){
@@ -218,13 +262,13 @@ export async function createApp(options={}) {
         const headers={'Content-Type':types[path.extname(full).toLowerCase()]||'application/octet-stream','Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':'private, max-age=60','X-Content-Type-Options':'nosniff'};if(status===206)headers['Content-Range']=`bytes ${start}-${end}/${s.size}`;
         res.writeHead(status,headers);if(req.method==='HEAD')return res.end();const stream=createReadStream(full,{start,end});stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);return;
       }
-      if(req.method==='GET'&&['/','/style.css','/client.js','/enhancements.js'].includes(p)){
+      if(req.method==='GET'&&['/','/style.css','/client.js','/enhancements.js','/sorting.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/media-form.js'].includes(p)){
         const file=path.join(appDir,'public',p==='/'?'index.html':p.slice(1));const data=await fs.readFile(file);res.writeHead(200,{'Content-Type':p.endsWith('.css')?'text/css':p.endsWith('.js')?'text/javascript':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",'X-Content-Type-Options':'nosniff'});return res.end(data);
       }
       throw fail('Not found',404);
     }catch(e){if(!res.headersSent)json({error:e.status?e.message:'The operation could not be completed. Your original media has not been changed.'},e.status||500);else res.destroy();}
   });
-  return {server,db,root,dataDir,close:()=>new Promise(resolve=>server.close(()=>{db.close();resolve();}))};
+  return {server,db,root,dataDir,folderSync,close:()=>new Promise(resolve=>server.close(()=>{db.close();resolve();}))};
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

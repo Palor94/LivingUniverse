@@ -1,5 +1,7 @@
 @echo off
 cd /d "%~dp0"
+rem Bootstrap the verified backup in the actual desktop environment. Never overwrite a catalogue.
+set "LIVING_UNIVERSE_DATA=%USERPROFILE%\AppData\Local\LivingUniverse\desktop-catalogue"
 set "LIVING_UNIVERSE_NODE=node"
 where node >nul 2>nul
 if errorlevel 1 (
@@ -11,7 +13,13 @@ if not "%LIVING_UNIVERSE_NODE%"=="node" if not exist "%LIVING_UNIVERSE_NODE%" (
     pause
     exit /b 1
 )
+"%LIVING_UNIVERSE_NODE%" app/bootstrap.mjs
+if errorlevel 1 (
+    pause
+    exit /b 1
+)
 echo Open http://127.0.0.1:4317 in your browser once the server starts.
 echo Keep this window open while using Living Universe.
+echo Database folder: %LIVING_UNIVERSE_DATA%
 "%LIVING_UNIVERSE_NODE%" app/server.mjs
 pause

@@ -1,14 +1,32 @@
 import {promises as fs,constants} from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 
 export const extraTables={
   character_ui:['character_id','cover_crop','merged_into'],
+  character_cover_frames:['character_id','media_id','time_seconds','data_url','source_crop_json','source_size','source_mtime','captured_at'],
   media_hidden:['media_id','original_path','physical','created_at'],
-  application_settings:['key','value']
+  application_settings:['key','value'],
+  media_categorization:['media_id','complete','updated_at'],
+  media_roles:['media_id','role','updated_at'],
+  folder_changes:['id','character_id','source','destination','status','manifest_json','error','created_at','updated_at'],
+  media_scan_state:['media_id','state','observed_size','observed_mtime','checked_at','error'],
+  scan_candidates:['relative_path','folder','kind','size','modified_at','candidate_ids'],
+  media_fingerprints:['media_id','signature','sha256','visual_hash','visual_version','width','height','checked_at'],
+  tag_groups:['id','name','name_key'],
+  structured_tags:['id','group_id','name','name_key'],
+  locations:['id','name','name_key','tag_id','folder','created_at'],
+  media_locations:['media_id','location_id'],
+  media_tags:['media_id','tag_id'],
+  legacy_tag_mappings:['source_key','tag_id','source_text','created_at'],
+  sorting_suggestions:['id','media_id','character_id','canon_id','method','target_signature','target_sha256','evidence_json','context_key','created_at'],
+  suggestion_feedback:['id','suggestion_id','decision','notes','face_verdict','body_verdict','created_at']
 };
 export function installEnhancements(ctx){
   const {db,root,dataDir,all,one,run,transaction,asset,character,canon,safeFile,fingerprint,moving,isScanning,fail}=ctx;
+  db.exec(readFileSync(new URL('./migrations/002-media-categorization.up.sql',import.meta.url),'utf8'));
+  db.exec(readFileSync(new URL('./migrations/007-location-references.up.sql',import.meta.url),'utf8'));
   db.exec(`CREATE TABLE IF NOT EXISTS character_ui(character_id TEXT PRIMARY KEY REFERENCES characters(id),cover_crop TEXT,merged_into TEXT REFERENCES characters(id));
     CREATE TABLE IF NOT EXISTS media_hidden(media_id TEXT PRIMARY KEY REFERENCES media(id),original_path TEXT NOT NULL,physical INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS application_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -51,7 +69,7 @@ export function installEnhancements(ctx){
     if((match=p.match(/^\/api\/characters\/([^/]+)\/cover-crop$/))&&req.method==='POST'){
       const c=character(match[1]);const m=asset(body.media_id);if(m.kind!=='image'||!one('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?',m.id,c.id))throw fail('Choose an assigned picture for the cover.');
       const r=body.crop;if(!r||!['x','y','w','h'].every(k=>Number.isFinite(r[k]))||r.x<0||r.y<0||r.w<0.01||r.h<0.01||r.x+r.w>1.001||r.y+r.h>1.001)throw fail('Draw a valid cover crop inside the picture.');
-      transaction(()=>{run('UPDATE characters SET cover_id=? WHERE id=?',m.id,c.id);run('INSERT INTO character_ui(character_id,cover_crop) VALUES(?,?) ON CONFLICT(character_id) DO UPDATE SET cover_crop=excluded.cover_crop',c.id,JSON.stringify({media_id:m.id,...r}));});json({ok:true});return true;
+      transaction(()=>{run('DELETE FROM character_cover_frames WHERE character_id=?',c.id);run('UPDATE characters SET cover_id=? WHERE id=?',m.id,c.id);run('INSERT INTO character_ui(character_id,cover_crop) VALUES(?,?) ON CONFLICT(character_id) DO UPDATE SET cover_crop=excluded.cover_crop',c.id,JSON.stringify({media_id:m.id,...r}));});json({ok:true});return true;
     }
     if((match=p.match(/^\/api\/media\/([^/]+)\/rename$/))&&req.method==='POST'){
       const m=asset(match[1]);const name=String(body.filename||'').trim();if(path.basename(name)!==name||/[\\/]/.test(name))throw fail('Enter a filename, without a folder path.');if(path.extname(name).toLowerCase()!==path.extname(m.relative_path).toLowerCase())throw fail('Keep the existing file extension.');
@@ -65,8 +83,30 @@ export function installEnhancements(ctx){
       let result={};if(body.mode==='file')result=await relocate(m.id,path.join('.living-universe-trash',m.id,path.basename(m.relative_path)));
       transaction(()=>{run('INSERT INTO media_hidden VALUES(?,?,?,?)',m.id,m.relative_path,body.mode==='file'?1:0,now());run('UPDATE characters SET cover_id=NULL WHERE cover_id=?',m.id);});json({...result,ok:true});return true;
     }
-    if(p==='/api/removed'&&req.method==='GET'){json({items:all('SELECT m.*,h.original_path,h.physical,h.created_at removed_at FROM media_hidden h JOIN media m ON m.id=h.media_id ORDER BY h.created_at DESC')});return true;}
+    if(p==='/api/removed'&&req.method==='GET'){json({capabilities:{permanent_erasure:true},items:all("SELECT m.*,h.original_path,h.physical,h.created_at removed_at,EXISTS(SELECT 1 FROM canon c,json_each(c.references_json) r WHERE json_extract(r.value,'$.media_id')=m.id) protected FROM media_hidden h JOIN media m ON m.id=h.media_id WHERE NOT EXISTS(SELECT 1 FROM application_settings s WHERE s.key='erased_media:'||m.id) ORDER BY h.created_at DESC")});return true;}
+    if((match=p.match(/^\/api\/media\/([^/]+)\/erase-item$/))&&req.method==='POST'){
+      const m=asset(match[1]),h=one('SELECT * FROM media_hidden WHERE media_id=?',m.id);
+      if(!h)throw fail('Only items in Removed items can be erased.',409);
+      if(body.confirm!==true||body.expected_path!==m.relative_path)throw fail('Review the item and confirm permanent erasure again.',409);
+      if(one('SELECT 1 FROM application_settings WHERE key=?','erased_media:'+m.id)){json({ok:true,already_erased:true});return true;}
+      if(one("SELECT 1 FROM canon c,json_each(c.references_json) r WHERE json_extract(r.value,'$.media_id')=? LIMIT 1",m.id))throw fail('This media is part of approved identity history and cannot be permanently erased.',409);
+      if(moving.has(m.id)||isScanning())throw fail('A file operation is running. Please retry.',409);
+      moving.add(m.id);
+      try{
+        if(h.physical){
+          const expected=path.join('.living-universe-trash',m.id,path.basename(h.original_path));
+          if(m.relative_path!==expected)throw fail('The file is outside its recoverable trash location. Nothing was erased.',409);
+          const full=inside(path.resolve(root,expected));
+          const realRoot=await fs.realpath(root),realParent=await fs.realpath(path.dirname(full));
+          if(realParent!==path.join(realRoot,'.living-universe-trash',m.id))throw fail('Trash location points elsewhere. Nothing was erased.',409);
+          try{const info=await fs.lstat(full);if(!info.isFile()||info.isSymbolicLink())throw fail('Only regular files in application trash can be erased.',409);await fs.unlink(full);}catch(e){if(e.code!=='ENOENT')throw e;}
+        }
+        run('INSERT INTO application_settings(key,value) VALUES(?,?)','erased_media:'+m.id,JSON.stringify({erased_at:now(),physical:!!h.physical,path:m.relative_path}));
+        json({ok:true,physical:!!h.physical});return true;
+      }finally{moving.delete(m.id);}
+    }
     if((match=p.match(/^\/api\/media\/([^/]+)\/restore-item$/))&&req.method==='POST'){
+      if(one('SELECT 1 FROM application_settings WHERE key=?','erased_media:'+match[1]))throw fail('This removed item was permanently erased and cannot be restored here.',409);
       const h=one('SELECT * FROM media_hidden WHERE media_id=?',match[1]);if(!h)throw fail('Removed item not found.',404);let result={};if(h.physical)result=await relocate(h.media_id,h.original_path);run('DELETE FROM media_hidden WHERE media_id=?',h.media_id);json({...result,ok:true});return true;
     }
     if(p==='/api/palor-merge/preview'&&req.method==='GET'){
