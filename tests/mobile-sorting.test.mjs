@@ -25,7 +25,7 @@ test('private mobile sorting shares catalogue, detects conflicts, retries safely
     app.db.prepare("INSERT INTO reviews VALUES(?,?,?,'approve',5,'Keep review',?)").run(reviewId,mid,a,'2026-10-27');
     app.db.prepare('INSERT INTO canon VALUES(?,?,NULL,?,?,?,?)').run(canonId,a,'Approved description',JSON.stringify([{media_id:mid,role:'face',sha256:'a'.repeat(64)}]),'Approved','2026-10-27');
     app.db.prepare("INSERT INTO structured_tags VALUES('group-setting-test','group-setting','M7 truckstop','m7 truckstop')").run();
-    app.db.prepare('INSERT INTO locations VALUES(?,?,?,?,NULL,?)').run(locationId,'M7 truckstop','m7 truckstop','group-setting-test','2026-10-27');
+    app.db.prepare('INSERT INTO locations(id,name,name_key,tag_id,folder,created_at) VALUES(?,?,?,?,NULL,?)').run(locationId,'M7 truckstop','m7 truckstop','group-setting-test','2026-10-27');
     assert.equal((await request('/api/sorting/images',null,'GET',{})).status,403);
     const session=await request('/api/session');write={...auth,Origin:origin,'X-LU-CSRF':session.data.csrf};
     assert.equal((await request('/api/sorting/images')).data.total,3);

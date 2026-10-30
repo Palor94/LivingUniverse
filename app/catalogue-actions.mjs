@@ -1,7 +1,7 @@
 // Logical catalogue operations only: no filesystem or canonical-identity writes.
 export function installCatalogueActions({all,one,run,transaction,fail}){
   const locationSQL="EXISTS(SELECT 1 FROM media_roles r WHERE r.media_id=m.id AND r.role='location')";
-  function setLocation(mid,value){if(typeof value!=='boolean')throw fail('Invalid location-reference choice.');if(value)run("INSERT INTO media_roles VALUES(?,'location',?) ON CONFLICT(media_id) DO UPDATE SET role=excluded.role,updated_at=excluded.updated_at",mid,new Date().toISOString());else{run('DELETE FROM media_location_links WHERE media_id=?',mid);run('DELETE FROM media_locations WHERE media_id=?',mid);run('DELETE FROM media_roles WHERE media_id=?',mid);}}
+  function setLocation(mid,value){if(typeof value!=='boolean')throw fail('Invalid location-reference choice.');if(value)run("INSERT INTO media_roles VALUES(?,'location',?) ON CONFLICT(media_id) DO UPDATE SET role=excluded.role,updated_at=excluded.updated_at",mid,new Date().toISOString());else run('DELETE FROM media_roles WHERE media_id=?',mid);}
   const tokens=text=>String(text||'').split(/[,\n]/).map(t=>t.trim()).filter(Boolean);
   const key=text=>text.normalize('NFC').toLocaleLowerCase();
   function setComplete(mid,complete){

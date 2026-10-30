@@ -13,8 +13,8 @@ export function retainMediaSearch(input){
 
 export function mediaFormValues(data,complete){
   const location=data.get('location_id');
-  if(data.has('location_multi')){const places=data.getAll('location_ids');return {character_ids:data.getAll('character'),tags:data.get('tags')||'',notes:data.get('notes')||'',structured_tag_ids:data.getAll('structured_tag'),location_reference:places.length>0||data.has('location_reference'),location_ids:places,location_id:places[0]||null,...(typeof complete==='boolean'?{categorization_complete:complete}:{})};}
-  return {character_ids:data.getAll('character'),tags:data.get('tags')||'',notes:data.get('notes')||'',structured_tag_ids:data.getAll('structured_tag'),location_reference:data.has('location_id')?Boolean(location):data.has('location_reference'),...(data.has('location_id')?{location_id:location&&location!=='__unspecified__'?location:null}:{}),...(typeof complete==='boolean'?{categorization_complete:complete}:{})};
+  if(data.has('location_multi')){const places=data.getAll('location_ids');return {character_ids:data.getAll('character'),tags:data.get('tags')||'',notes:data.get('notes')||'',structured_tag_ids:data.getAll('structured_tag'),location_reference:data.has('location_reference'),location_ids:places,location_id:places[0]||null,...(typeof complete==='boolean'?{categorization_complete:complete}:{})};}
+  return {character_ids:data.getAll('character'),tags:data.get('tags')||'',notes:data.get('notes')||'',structured_tag_ids:data.getAll('structured_tag'),location_reference:data.has('location_reference')||location==='__unspecified__',...(data.has('location_id')?{location_id:location&&location!=='__unspecified__'?location:null}:{}),...(typeof complete==='boolean'?{categorization_complete:complete}:{})};
 }
 
 export async function mediaFormPayload(form,complete){

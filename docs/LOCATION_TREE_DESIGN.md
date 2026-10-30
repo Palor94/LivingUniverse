@@ -1,5 +1,13 @@
 # Hierarchical locations: technical design
 
+Implementation update, 2026-10-30: the following text is the earlier design.
+The next phase is now implemented on the development branch; see
+[operation, exact schema and recovery](LOCATION_HIERARCHY.md). The final schema
+keeps English/category/description in existing location_profiles, adds the
+authoritative parent to locations, and synchronizes the legacy parent field.
+Background assignment and media role are independent. Canvas promotion, travel
+connections and deletion remain unimplemented. No live migration was performed.
+
 Prepared 2026-10-30 after the hashtag implementation and full passing regression
 suite. **Design only. No location schema migration, catalogue promotion, canvas
 approval, place rename or file operation is implemented by this document.**

@@ -5,7 +5,7 @@ import {mediaFormValues,mediaFormPayload,refreshMediaReviewControls} from '../ap
 
 test('location dropdown and structured labels serialize without losing multiple character assignments',()=>{
   const f=new FormData();for(const cid of ['Palor','Pákozdi'])f.append('character',cid);f.append('structured_tag','shirtless');f.set('location_id','m7-location');f.set('notes','Keep note');
-  const finished=mediaFormValues(f,true);assert.equal(finished.categorization_complete,true);assert.deepEqual(finished.character_ids,['Palor','Pákozdi']);assert.deepEqual(finished.structured_tag_ids,['shirtless']);assert.equal(finished.location_id,'m7-location');assert.equal(finished.location_reference,true);f.set('location_id','');assert.equal(mediaFormValues(f,false).location_reference,false);f.set('location_id','__unspecified__');assert.equal(mediaFormValues(f).location_id,null);assert.equal(mediaFormValues(f).location_reference,true);
+  const finished=mediaFormValues(f,true);assert.equal(finished.categorization_complete,true);assert.deepEqual(finished.character_ids,['Palor','Pákozdi']);assert.deepEqual(finished.structured_tag_ids,['shirtless']);assert.equal(finished.location_id,'m7-location');assert.equal(finished.location_reference,false);f.set('location_id','');assert.equal(mediaFormValues(f,false).location_reference,false);f.set('location_id','__unspecified__');assert.equal(mediaFormValues(f).location_id,null);assert.equal(mediaFormValues(f).location_reference,true);
 });
 
 test('Finish sorting explicitly completes multicharacter items; Save for later explicitly keeps review',async()=>{

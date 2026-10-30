@@ -1,5 +1,11 @@
 # Helyszínszerkesztő
 
+2026-10-30: a szerkesztő hierarchikus helyszínfává bővült. A név szülőnként
+egyedi; a háttérhelyszín nem változtat képrendezési besorolást. Új helyekhez nem
+kötelező strukturált címke; a régi címke átnevezése csak ütközésmentesen történik.
+A korábbi működés alábbi leírását felülírja a
+[hierarchikus helyszínkezelés dokumentációja](LOCATION_HIERARCHY.md).
+
 A laptop oldalsávjában a **Helyszínek** gomb, telefonon a **Helyszínek** fül nyitja meg. A lista tartalmazza a konkrét helyszíneket és a még önálló helyszíncímkéket is. A név, típus és az opcionális angol név alapján lehet keresni.
 
 Szerkeszthető: magyar megjelenített név, típus, opcionális angol keresési név, leírás, valamint a nagyobb helyszín, amelyhez tartozik. Például Strand / strand / Beach, egy konkrét településhez kapcsolva. Az üres adatokat a program nem találja ki. A kapcsolat nem alkothat kört. Ez a későbbi térkép alapadatait tárolja; nem valósít meg térképet vagy világ-szimulációt.

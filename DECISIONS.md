@@ -1,5 +1,32 @@
 # Decisions
 
+## 2026-10-30: Hierarchical Locations and independent image backgrounds
+
+Implement the next phase on a separate development branch. Location identity is
+the existing UUID; names are unique among siblings, including the root namespace,
+and may repeat under different parents. Migration 022 rebuilds the location table
+with a canonical parent column, verified backup and atomic integrity checks.
+Retain profile metadata in the existing table, with synchronized compatibility
+parent fields. Preserve all media/event IDs and links, text, canon and file bytes.
+
+The new user requirement supersedes the earlier coupling of exact-place selection
+and location-reference classification. Background links never change media_roles,
+completion or character assignments. An explicit role checkbox controls the
+separate reference collection; switching it off keeps background links. Existing
+role choices are preserved during migration. Generic tags do not select places.
+
+Locations now opens the editable, expandable catalogue tree. Keep the existing
+canvas as a separate plan, with no automatic promotion. Parent changes have a
+visible preview, cycle/depth/sibling guards, optimistic versions, audit history
+and compensating undo. New tree places need no structured vocabulary tag.
+Reject schema downgrade rather than dropping homonyms or retained edit history.
+
+The previous 161-test baseline and the final 174-test suite pass on disposable
+databases. Desktop browser checks use synthetic data. No live migration, original
+media operation, deployment or paid AI call occurred. See
+docs/LOCATION_HIERARCHY.md. Phase three remains a design in
+docs/AI_MEDIA_ANALYSIS_PLAN.md, beginning with a mock analysis/review pipeline.
+
 ## 2026-10-30: Bilingual Media Notes hashtags
 
 Extract explicit Media Notes hashtags on desktop/mobile saves using deterministic

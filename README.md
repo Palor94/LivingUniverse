@@ -1,5 +1,17 @@
 # Living Universe
 
+### Hierarchikus helyszínfa
+
+A **Locations / Helyszínek** menüpontban kinyitható helyszínfa, magyar nevek,
+szülőnként egyedi nevek, gyermekhelyek és visszavonható ágáthelyezés érhető el.
+Különböző szülők alatt két **Strand** külön UUID-val tárolható. A kép
+háttérhelyszíne független a karakterkép rendezési besorolásától; nem lesz tőle
+automatikusan helyszínreferencia. Meglévő adatokhoz ellenőrzött migrációs mentés,
+export/restore és védett visszaállítás tartozik.
+[Használat és migráció 022](docs/LOCATION_HIERARCHY.md).
+[A következő AI-képelemzési fázis terve](docs/AI_MEDIA_ANALYSIS_PLAN.md).
+A változat fejlesztői ágon készült; éles adatmigráció vagy telepítés nem történt.
+
 ### Jegyzetekből kinyert, kétnyelvű címkék
 
 A Media Notes mezőben a `#mosolygó` és `#full_body` jellegű hashtagek mentéskor

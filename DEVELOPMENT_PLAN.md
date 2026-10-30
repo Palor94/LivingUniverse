@@ -1,5 +1,21 @@
 # Development plan
 
+## 2026-10-30: Hierarchical Locations implemented in development
+
+Completed: parent/child catalogue tree, same-name places under different parents,
+qualified Hungarian breadcrumbs and optional English names, explicit subtree
+reparenting, interactive desktop/mobile editor, safe migration 022, verified
+pre-migration backup, portable old/new restore and guarded undo/downgrade. Exact
+background assignments preserve character sorting roles and completion. Existing
+IDs, media/event links, notes and canon remain intact. The canvas stays a separate
+plan. Full suite: 174 passing tests, including 13 new hierarchy tests; prior phase
+baseline: 161 passing tests. No production deployment or live-data migration.
+
+Operation and recovery: docs/LOCATION_HIERARCHY.md. Next: implement the mock-adapter
+analysis job/review foundation described in docs/AI_MEDIA_ANALYSIS_PLAN.md.
+Actual model selection, reference-based exact-place recognition and optional
+external API access remain later, explicitly evaluated steps.
+
 ## 2026-10-30: Media Notes hashtags and bilingual vocabulary
 
 Implemented and tested on a separate development branch: automatic deterministic

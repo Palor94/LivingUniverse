@@ -85,6 +85,7 @@ export function createMobileServer({config,all,one,run,transaction,mcpChanges=nu
         }
       }
       if(locationEditor){
+        if(p==='/api/location-editor/undo'&&req.method==='PUT')return json(locationEditor.undo(body));
         if(p==='/api/location-editor'&&req.method==='GET')return json(locationEditor.list());
         if(p==='/api/location-editor'&&req.method==='PUT')return json(locationEditor.create(body));
         const place=p.match(/^\/api\/location-editor\/([^/]+)$/);if(place&&['GET','PUT'].includes(req.method)){let id;try{id=decodeURIComponent(place[1]);}catch{throw fail('Invalid location identifier.');}return json(req.method==='GET'?locationEditor.get(id):locationEditor.save(id,body));}
@@ -177,7 +178,7 @@ export function createMobileServer({config,all,one,run,transaction,mcpChanges=nu
           else run('INSERT INTO relationships(id,source_id,target_id,description) VALUES(?,?,?,?) ON CONFLICT(source_id,target_id) DO UPDATE SET description=excluded.description',randomBytes(16).toString('hex'),source,target,body.description);});
         return json(details(source));
       }
-      const assets={'/':['mobile.html','text/html; charset=utf-8'],'/mobile.js':['mobile.js','text/javascript'],'/mobile.css':['mobile.css','text/css'],'/mobile-sorting.js':['mobile-sorting.js','text/javascript'],'/mobile-create.js':['mobile-create.js','text/javascript'],'/location-editor.js':['location-editor.js','text/javascript']};
+      const assets={'/':['mobile.html','text/html; charset=utf-8'],'/mobile.js':['mobile.js','text/javascript'],'/mobile.css':['mobile.css','text/css'],'/mobile-sorting.js':['mobile-sorting.js','text/javascript'],'/mobile-create.js':['mobile-create.js','text/javascript'],'/location-editor.js':['location-editor.js','text/javascript'],'/location-tree-model.js':['location-tree-model.js','text/javascript']};
       if(req.method==='GET'&&Object.hasOwn(assets,p)){const [file,type]=assets[p],content=await fs.readFile(new URL('./public/'+file,import.meta.url));res.writeHead(200,{...headers,'Content-Type':type});return res.end(content);}
       throw fail('This operation is not available in the mobile editor.',404);
     }catch(err){json({error:err.status?err.message:'The edit could not be saved. Your local draft is retained.'},err.status||500);}
