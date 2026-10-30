@@ -1,5 +1,131 @@
 # Decisions
 
+## 2026-10-29: Original-image delivery to connected assistants
+
+The user requested actual image bytes instead of thumbnails. Shared read tools now return unchanged original bytes with format, dimensions and hash; canon-bound reads still verify the immutable fingerprint. Preserve the 20 MiB/40 MP source limits. The documented 10 MiB Secure MCP Tunnel envelope requires 6 MiB inline plus hash-bound read chunks for larger images. Private Tailscale image downloads serve originals; no public file endpoint, new credentials, canon/profile changes or paid calls. Reuse image content in the versioned widget without duplicating base64 in metadata. Do not imply native generator handoff from MCP transport success. See docs/ORIGINAL_IMAGES.md.
+
+## 2026-10-28: Immediately reveal generated character media
+
+Successful registration already links the output to all manifest characters.
+After an actively watched generation succeeds, open the existing character media
+tab, clear display filters and show generated outputs newest-first. Use identical
+ordering for the viewer queue. Reopening past history does not redirect on its
+own; completed runs provide an explicit gallery button. Keep appearance reviews,
+sorting completion and canon independent. Paused Sogni workflows receive a
+specific review-required error instead of suggesting that an image was saved.
+
+## 2026-10-28: Explicit Krea identity LoRA preset
+
+The user selected Krea 2 Identity Edit v1.2 with Mystic X at 1 and Realism Engine
+v3 at 0.8. Verified the live Sogni catalogue IDs `krea2-mystic-x` and
+`krea2-realism-engine` and compatibility with `krea2_identity_edit_v1_2`; the
+hosted edit selector is `krea-identity-edit`. Preserve order and exact numeric
+strengths in protected local configuration, immutable manifests and outbound
+`loras`/`loraStrengths`. Display the preset before approval. Configuration changes
+invalidate prior pending/approved plans for execution, never alter their history.
+Invalid or incompatible LoRA settings disable the provider rather than dropping
+adapters. API-key setup preserves compatible saved LoRAs. No reference upload,
+generation, canon change or content-filter change is part of this configuration.
+
+## 2026-10-28: Desktop Sogni character workshop
+
+Add a Generálás Sognival dossier tab with explicit approved-reference selection,
+scene/format input, exact-plan preview, separate human approval and execution,
+status/history and opening registered results in the existing media reviewer.
+Reuse the existing generation service, immutable manifests, canon/hash checks and
+recoverable registration. Desktop writes require the existing exact loopback
+origin plus a dedicated server-held CSRF token; no provider keys enter the page.
+The new routes are character-scoped, Sogni-only and absent from mobile/MCP/gateway
+route allowlists. Local approval is attributed as local-creator. Preparation
+never sends externally; uncertain runs never automatically resubmit. No schema
+change, canonical promotion or production generation is part of this UI work.
+
+## 2026-10-28: Sogni reference-edit provider
+
+Add Sogni to the existing generation tools and catalogue registration, with
+model-specific reference limits and one explicit durable `edit_image` workflow.
+Keep exact canon/hash and private upload/cost approval unchanged. Preserve the
+upstream workflow ID immediately, never automatically restart uncertain work,
+and retrieve bounded outputs through the public-only DNS-pinned downloader.
+Signed PUTs pin public DNS and never forward account credentials to storage.
+Windows setup stores a DPAPI-encrypted key beside the existing local database,
+outside OneDrive, and preserves other provider configuration. Setup sends no
+private media and starts no paid run. Live access/fidelity require a separate
+authorized test. See docs/IMAGE_GENERATION.md.
+
+## 2026-10-28: Reference-conditioned image API runs
+
+Extend the existing authenticated service, tunnel and Grok OAuth dispatcher instead
+of creating another catalogue. Keep provider keys and recovery artifacts local,
+outside OneDrive/Git. Exact current canon revisions and original fingerprints bind
+each character slot; preparation sends nothing externally. Private human approval
+of the exact prompt/references and separate API cost is required even in trusted
+text mode. Generation output remains unreviewed media. Existing explicit canon
+approval is unchanged. Preserve immutable manifests, receipts and recoverable
+withdrawal; never automatically resubmit an uncertain paid request. Native host
+image generation/attachment handoff remains unverified. Mock provider tests do not
+prove paid provider access or identity fidelity. See docs/IMAGE_GENERATION.md.
+
+## 2026-10-27: Shared character event archive
+
+Events are durable shared catalogue records, linked to dossiers through participants,
+not copied into biographies or duplicated per character. Preserve chronology
+uncertainty, provenance, consequences, roles, knowledge, timeline and all revisions.
+Source identities survive corrections and prevent repeated imports. Draft saving
+never approves story or visual canon. Explicit local creator decisions use an
+expected version and record a reason; edits of approved events require reapproval.
+No Gyula/Sanyi or Márk/Nicolas merge or Fantasy Den transcript import is executed.
+
+Use the existing Node/SQLite, desktop dossier, export and MCP conventions. Verify
+an online backup before the first event migration, keep runtime state outside
+OneDrive, and validate imported snapshots transactionally. AI read tools default
+to approved public knowledge, with explicit participant knowledge projections;
+private/draft retrieval additionally requires existing local admin permission.
+No new remote writes, approval bypass, credentials or mobile routes are enabled.
+See docs/STORY_EVENTS.md for limits and recovery instructions.
+
+## Opt-in trusted MCP text writes
+
+The user no longer wants repeated database-write approval. An operator-owned local
+`approval_mode: trusted` permits future authenticated text/profile and directed
+relationship proposals to be applied without a separate review-page decision.
+Default/omitted mode remains `review`; the mode is not a model-supplied argument.
+Snapshot the mode in each immutable proposal so old pending review requests and
+rejected requests cannot be silently unlocked. Keep all existing field limits,
+stale-record checks, atomic receipts, protected administrator notes and canonical
+history. Audit trusted configuration separately from actual human approval. A
+request to discuss information does not by itself request saving. No new public
+endpoint, SQL access, media operation, deletion or automatic canon approval is
+authorized. The user can restore review mode by local configuration, without any
+database recovery or rollback of newer edits.
+
+## Recoverable bulk removal in Needs sorting
+
+The user requested a top-toolbar removal action for selected inbox items. Snapshot
+only the current page's selected IDs, then show filenames, count and an explicit
+choice between catalogue-only removal and moving originals to application trash.
+Reuse the existing per-item remove endpoint and its reference protections; never
+permanently erase, expand to other pages or transfer metadata between files. Run
+sequentially, report failures and warnings by filename, and stop between items if
+the user cancels or closes the dialog. Removed items retain their existing IDs,
+associations and history and use the existing restore flow.
+
+## Private mobile text editor
+
+The user subsequently authorized a small mobile image-sorting prototype on this same private listener. It adds ID-bound bounded previews and logical per-image assignments, tags, existing locations and explicit completion, using the existing catalogue helpers. Saves compare a content version atomically, retain browser drafts on failure, and allow safe identical retries. No physical file operations, canon changes, new public exposure, or database migration are introduced. See docs/MOBILE_ACCESS.md.
+
+After external OneDrive moves/deletions, the phone can explicitly invoke the existing metadata scanner through a narrow authenticated/CSRF-protected route without supplying paths. Missing/unavailable scan observations are excluded from mobile image lists by default, with a reversible visibility checkbox. Records, IDs and sorting decisions remain intact; possible moved-file candidates still need desktop confirmation. Scanning does not force OneDrive synchronization, download image contents or infer identity from folder names.
+
+The user then approved phone batch confirmation for unique filename + size + modification-time matches. A short-lived preview token fixes the exact one-to-one batch; ambiguous/competing matches remain separate. Shared relink validation preserves current canonical fingerprints, rejects symlinks and reappearing old paths, and revalidates files/catalogue before one atomic transaction. A verified online SQLite backup precedes commit, with local mutations blocked while preparing. Retries do not duplicate journal entries. This changes stored locations only; it neither moves originals nor changes identities, associations or completion. See docs/MOBILE_ACCESS.md.
+
+The user also authorized mobile creation of characters and location tags. Character creation is name-only, uses the existing UUID identity and empty defaults, checks normalized name collisions, and preserves later edits on retries. Location labels reuse the existing location/setting-tag operation without filesystem creation. Both are narrow authenticated/CSRF-protected writes; sorting drafts survive inline creation, and new selections are assigned to an image only when its sorting form is saved. Canon and existing primary-name/folder management are unaffected.
+
+The user subsequently requested a OneDrive directory alongside mobile character creation. Use the existing folder manager's Windows-name, boundary, symlink and ownership checks; create or reuse a same-named ordinary directory without touching its contents. Record the new character and folder-owner link atomically after successful directory validation. On database failure, remove only the operation's own empty new directory; leave existing folders/files alone. Retained creation UUIDs make retries safe. No existing-character folder backfill or media reassignment is implied, and location tags remain logical labels.
+
+Approved scope: Tailscale Serve HTTPS to a separate loopback listener in the same Node process and SQLite connection; the full desktop listener stays private to localhost. Exact configured Tailscale login and HTTPS origin, bounded JSON, CSRF tokens, cross-site rejection and an explicit route allowlist guard remote reads/writes. Only profile text and directed relationships are editable; names, canonical approvals, media operations, exports and restores remain desktop-only. Configuration and the active database stay outside OneDrive. No Funnel or paid service is enabled. The user separately approved replacing the default allow-all tailnet grant with their account accessing this laptop on TCP 443, leaving existing unrelated policy settings intact.
+
+Mobile browser drafts preserve original values and unsaved text; atomic compare-before-write catches stale edits and requires explicit conflict resolution. Updated desktop profile/relationship requests also provide expected values. No schema migration or duplicate database is introduced. Browser storage is recoverable draft storage with normal eviction/clearing limits, not an authoritative offline database. Setup requires an existing catalogue and never restores or replaces it. See docs/MOBILE_ACCESS.md for enablement, limitations and rollback.
+
 ## Finish sorting explicitly; select exact locations inline
 
 The user expects sorting to finish when saving the current item. Replace the hidden prerequisite of ticking completion with explicit Finish sorting actions (including Ctrl+Enter). These declare completion even with multiple characters; Save for later explicitly retains/reopens review, and Previous/Next preserve current status. Assignment by itself still never implies completion. The named examples were distinct root copies of byte-identical files already completed in character folders; repair only the two user-identified root IDs after exporting a backup. Do not merge/delete duplicates or infer that all copies share annotations.
@@ -89,3 +215,92 @@ Use versioned, provider-neutral exports for valuable user data. Keep provider re
 ## 2026-10-24: Repository boundary
 
 Initialize Git for source and project documentation only. Default-deny tracking of the existing private media collection. No remote, upload, automatic import, or paid service has been configured.
+
+## Compact desktop sorting with token pickers
+
+The user requested a drawing-based sorting-dialog update: independent vertical character/location lists, quick-search bubbles, Palor always last among character bubbles, a standalone Save beside Save & move, no shortcut-help paragraph, and a discreet scan state under the file controls. Unique unselected matches are selected after a short typing pause; empty searches never select anything and removable bubbles preserve stable IDs. Save explicitly completes categorization and stays in the current viewer; existing Finish/Next, duplicate-return, creation, notes, tags and physical-move confirmations keep their behavior.
+
+Multiple location bubbles are explicit assignments, not inferred from tags. Additive migration 015 stores secondary links in media_location_links while preserving the original media_locations primary row. Exports include secondary links; imports clear/restore them in foreign-key order. Existing single-location clients keep secondary links when retaining the same primary and replace the location set when explicitly changing it. The primary location remains the physical destination for location Save & move. No original files or canon are modified by the new pickers. Export a backup before rollback; 015 down drops secondary links only and preserves primary locations.
+
+## Unified location profiles and label renaming
+
+The user requested a Helyszínek editor on desktop and mobile. It synchronizes an explicitly saved location name with its linked structured label while preserving IDs and all primary/secondary media associations. Optional English search name, free-text type, description and a cycle-checked parent location are stored in additive migration 016; unknowns stay empty. Existing standalone setting tags are editable without changing their tag IDs and receive a location row only on an actual edit. Conflicting names/shared labels are refused rather than merged. Optimistic versions, explicit Save and browser drafts protect concurrent edits. Existing folders, originals, canon and narrative data are untouched. See docs/LOCATION_EDITOR.md for operation, export and rollback.
+
+## Recoverable cleanup of missing catalogue paths
+
+The user requested bulk removal in Scan report / missing files. The Missing paths view has page-scoped checkboxes, select/clear controls and an explicit preview/confirm action. Current category counts exclude records already in Removed items. Selected records must still be marked missing, absent within a currently readable ordinary resource/parent directory, unrelated to pending move candidates, and outside current approved canon. Unknown/unavailable parents, symlinks and reappearing files are retained. Missing paths are not treated as proof of permanent OneDrive deletion.
+
+Confirmation creates a verified online SQLite backup, revalidates each item, and reuses the normal catalogue-only removal helper. Records go to media_hidden with physical=0, keeping IDs, associations, reviews, tags and history recoverable through the existing Removed items / Restore action. No filesystem deletion, record erasure, or mobile destructive endpoint is added. Failures/changed records are reported individually; replaying the same preview token returns the original result. No real records are removed merely by opening the report or deploying the feature.
+
+## 2026-10-28: Shared native and resumable image uploads
+
+Extend the existing verified import service with immutable multiple-character targets, ChatGPT native fileParams and bounded resumable MCP chunks. All transports retain current authentication and trusted saving policy. Record working reference candidates separately; no automatic canon, profile changes, overwrites or new public routes. Validate actual image bytes and associations before reporting success. Store temporary chunks and thumbnails outside OneDrive. See docs/MEDIA_UPLOADS.md.
+
+## 2026-10-29: Shared ghost-profile template and explicit field review
+
+Implement a versioned, extensible common template independently of character records. Unknowns remain empty/null. Preserve legacy texts, directed relationships and visual canon. Store typed values, source, interpretation, fact/impression/hypothesis and creator/public visibility. Proposal generation never approves data, even with trusted MCP writes. Explicit local field selection creates an attributed revision with immutable prior snapshots. Use existing exported settings storage without a new database migration. See docs/GHOST_PROFILE.md for scope, tests and subsequent simulation phases.
+
+## 2026-10-29: Selected high-quality reference delivery with explicit originals
+
+The user clarified that usable generator references and speed matter more than transferring every original. List responses remain metadata-only. Explicit selected image reads default to a 2048 px / 3 MiB high-quality reference; fitting JPEG/PNG originals pass through unchanged. Exact full files remain an image_quality:original option with hash-bound chunks above the inline budget. Approved source hashes are verified before derivation, derived and source hashes are distinct, originals/canon/auth remain unchanged. Native client-to-generator file handoff is not inferred from MCP visual access. See docs/ORIGINAL_IMAGES.md.
+
+## 2026-10-29: Minimize retained reference-selection data
+
+At the user's explicit request, reference removal now scrubs removed image membership from historical canon reference lists, clears affected free-text explanations, strips related MCP reference-proposal payload/receipt copies and invalidates pending approval. Local matching evidence using removed references is deleted. Revision IDs and approved appearance remain; completed generation manifests retain actual execution inputs. New reference-only revisions store a minimal reason rather than model-authored source narratives. This is a deliberate exception to immutable reference membership, applied only when the user saves the character's approved selection; no startup-wide rewrite is performed. Existing backups remain independently restorable and may contain old information.
+
+## 2026-10-29: One-off cleanup of existing reference history
+
+The user explicitly requested applying reference retention to all existing profiles. The local maintenance script app/clean-reference-history.mjs makes a verified SQLite backup and cleans a single transaction. It preserves complete current canon rows (including current reasons), appearance data, characters, media, relationships and generation manifests by hash. It removes obsolete reference memberships and reference-only historical commentary; appearance-changing rationale remains unless attached to removed reference data. The initial broader variant that would clear all reasons was rejected by automatic approval review and was not executed. The narrowed operation completed on 54 profiles: 64 historical reference lists cleaned, 141 obsolete explanations cleared and one completed historical reference proposal explanation cleared. Private backup/report remain outside Git. No startup-wide rewrite or public maintenance endpoint is enabled.
+
+## 2026-10-29: Ghost import compatibility and private creator review
+
+Accept type as a transport alias of kind, reject contradictory aliases, normalize unknown text null to empty, and report validation errors per named field. Never infer provenance or approval. Ghost proposals return the existing private-origin /ghost-profile/<character_id> review URL. Reuse creator login, Origin and CSRF protection for file intake and explicit field review; record the authenticated actor. No model-call approval or newly public creator endpoint is introduced. Native embedded Grok UI is unverified.
+
+## 2026-10-29: Question-by-question ghost-profile review
+
+Use a native modal dialog with one proposed field at a time, editable answers, accept/skip/back, resumable tab-local drafts and a final explicit summary save. Interim choices never write the approved profile. Optional intimate-anatomy prompts append only user-entered details to the existing anatomy field; unknown measurements remain unknown. Existing profile/canon boundaries and version checks remain unchanged.
+
+## 2026-10-29: Template character and integrated regular profiles (user correction)
+
+Supersede the per-character Ghost profile tab. Present one non-playable template character with stable system:ghost-profile identity in the creator collection. Keep it outside playable/story participants and media assignment. Its versioned fields define all regular character profiles. Place downloads, JSON intake, review and accepted structured values directly on desktop/mobile regular profiles. Preserve existing accepted structured values and legacy prose without migration or automatic overwrites. Adding a field creates an empty input for all existing/new characters; no field content is inferred. Provide a label/group/type editor on the template character.
+
+## 2026-10-29: Legacy-first layout and full narrative profile proposals
+
+At user request keep the original profile and relationships above the template-derived profile section on desktop and mobile. Full-generation exports explicitly request narrative background, personality, sexuality, speech and appearance in addition to internal traits/scales. Include current legacy/approved context and directed relationships without private administrator notes. Prioritize these narrative sections in the review wizard; optional follow-up answers append to their approved profile texts only at final user approval. New fictional details must remain labelled hypotheses with truthful provenance.
+
+## 2026-10-29: Separate optional sexual-preference fields
+
+At explicit user request add four neutral, optional text fields for preferences concerning penis, anal area, tongue and hand use. Shared schema propagation leaves existing values, canon and knowledge boundaries unchanged. Include the fields in generation-package metadata and field-review questions. Live rollout uses an explicit template revision and verified backup; no preferences are inferred or automatically populated.
+
+## 2026-10-30: Derived profile overview for every template area
+
+Render a creator-side overview above the existing profile and detailed shared fields. Cover every template group, custom groups and directed relationships; summarize only accepted structured values or explicitly labelled legacy source text. Preserve hypothesis/impression/private distinctions and show unknown areas without inference. Pending proposals and admin notes are excluded. Recompute after explicit approval; no external generation cost or canonical data mutation.
+
+## 2026-10-30: Shared anatomy and body-hair generation guidance
+
+At explicit user request attach editable guidance to the shared anatomy and appearance_detail text fields; retain stable field IDs and all accepted values. Full profile-generation packages include the A–D anatomy/body-hair checklist and the current template guidance. Guidance distinguishes explicitly supplied information from creative adult-fiction proposals; it does not infer intimate measurements from build, ancestry or unseen photographs, and does not assert every depicted person is fictional. New proposed details remain hypothesis/creator. Keep the existing JSON values format and separate approval. No automatic profile population or reference/canon changes.
+
+
+## 2026-10-30: Explicit import-capacity recovery
+
+Provide bounded import listing and idempotent cancellation on the shared authenticated
+MCP service and private editor. Cancellation ends the session, releases reservation,
+and removes only temporary chunks; committed media, links and receipts survive.
+Reuse the existing exported event journal as a persistent tombstone, without a
+schema migration. Preserve trusted/review authorization, serialize against active
+byte processing and surface retryable cleanup failures. Never infer that an old
+session should be cancelled without a user request.
+
+
+## 2026-10-30: Shared profile-template editing through MCP
+
+Expose character-independent bounded template reads and authenticated targeted
+edits through the existing ChatGPT stdio and Grok OAuth transports. Reuse the
+creator template validator/persistence; preserve omitted properties, existing
+IDs/types/scales/source mappings and every character value. Explicit trusted
+template edits need no extra conversational confirmation; review mode continues
+through the private creator editor. Version checks, atomic idempotency receipts,
+attributed before/after history and existing export/restore apply. Character
+proposals remain a separate human-reviewed workflow and old proposals become
+stale after template changes. No automatic live-template content change occurs
+merely by deploying this capability.

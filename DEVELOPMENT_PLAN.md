@@ -28,6 +28,21 @@ Acceptance: changing a name preserves links; approval survives restart; rejectin
 
 ## 2. One reference-aware image provider
 
+Implemented foundation (2026-10-28): optional OpenAI/xAI/Sogni reference-edit adapters,
+exact approved revision/hash selection, immutable multi-character manifests,
+private per-run upload/cost approval, asynchronous attempts, recoverable verified
+registration, receipts, withdrawal, MCP tools and mobile review. Providers remain
+disabled until locally configured. Native host handoff is unverified. See
+`docs/IMAGE_GENERATION.md`. Live provider access and the held-out identity benchmark
+below remain to be evaluated with explicit user authorization.
+
+Desktop Sogni workshop (2026-10-28): a character dossier tab now supports scene
+input, approved-reference selection, preview, separate upload/cost approval and
+generation, polling, run history and opening saved outputs for review. It uses
+the same protected generation service and adds no schema migration or automatic
+canon approval. Desktop controls retain prompt/selection drafts while navigating
+and retain request keys after an ambiguous preparation response.
+
 Implement capability discovery, explicit reference selection, cost preview, and a complete generation manifest. Evaluate Pákozdi on fixed held-out scenes spanning views, expressions, clothing, and body visibility. User review determines whether the provider is useful. Record rejected attempts and cost per accepted result.
 
 ## 3. Improve consistency based on evidence
@@ -41,3 +56,13 @@ Add per-character spatial bindings, confusion checks, approved scene keyframes, 
 ## 5. Broader living world
 
 Extend relationships, conversations, memory, knowledge boundaries, locations, and timelines around the same stable character IDs. Visual identity remains part of every relevant milestone.
+
+## 2026-10-29: Structured character profiles
+
+Implemented source: shared extensible ghost template, field review, provenance and visibility, legacy-text proposals, JSON AI workflow, MCP read/proposal tools, conflict protection and export/restore. See docs/GHOST_PROFILE.md. Concrete subjective memories, selective scene context, story clock, background-event reconciliation and dynamic character state remain subsequent phases.
+
+Reference retention update (2026-10-29): explicit reference removal now scrubs historical reference memberships, associated reasons and proposal copies. Completed generation manifests and offline backups remain separate. Covered by reference-retention and catalogue integration tests.
+
+2026-10-29 user correction implemented: separate non-playable template character; remove per-character Ghost tab; integrate shared fields, accepted values and download/upload controls into regular desktop/mobile profiles. Template additions appear empty for all characters.
+
+2026-10-30: Shared anatomy/appearance_detail field guidance now covers the supplied A–D checklist; full-generation package version 2 exports the current shared guidance. Existing field values and canon remain unchanged.

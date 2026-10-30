@@ -2,6 +2,12 @@
 
 Status: architectural specification, not implemented functionality. Research checked 2026-10-24. No media has been inspected or submitted to external services.
 
+2026-10-28 implementation update: the reference-conditioned API run, immutable
+manifest, private approval and verified output-registration foundation is now
+implemented in [Image generation](IMAGE_GENERATION.md). Providers remain disabled
+until configured; training, regional identity control and measured fidelity remain
+future work. The sections below retain the broader design and its limitations.
+
 ## 1. Protected canon
 
 An identity lock protects the approved definition within Living Universe. It cannot force an external model to obey that definition. Generated images start unreviewed. Approval means an output is acceptable for its reviewed context, not that it becomes a new identity template.
@@ -68,3 +74,7 @@ As a concrete published billing example, [Runway API pricing](https://docs.dev.r
 Create a fixed benchmark with approved references and held-out evidence across frontal/profile/three-quarter faces, full-body and seated views, expressions, lighting, wardrobe, two-character interactions, and later movement. Score face structure, eyes, apparent age, body build/proportions, distinctive features, and cross-character mixing independently. User judgment is authoritative. Report acceptance rate, failure categories, sample size, and cost per accepted result; do not advertise an invented accuracy percentage.
 
 The achievable target is a curated workflow producing recognizably consistent approved results with documented failure rates. Unlimited future scenes are an application ambition, not a guarantee that every model output will be faithful.
+
+## User-selected reference retention exception (2026-10-29)
+
+Removing a reference also removes its historical reference memberships and associated explanatory notes/proposal copies, preserving revision IDs and appearance. Matching suggestions based on the removed reference are deleted. Pending modified proposals become conflicts and require a new review. Reference-only revisions use minimal reasons. This overrides the earlier default of retaining all retired reference data. Completed generation input manifests and pre-existing backup snapshots remain distinct records; removal does not alter source media provenance or rewrite executed generation history.

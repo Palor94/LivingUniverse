@@ -2,9 +2,11 @@ import {promises as fs,readFileSync} from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {tagKey} from './taxonomy.mjs';
+import {createLocationEditor} from './location-editor.mjs';
 
 export function installLocations({db,root,all,one,run,transaction,fail,setLocation,relocate}){
   db.exec(readFileSync(new URL('./migrations/010-specific-locations.up.sql',import.meta.url),'utf8'));
+  db.exec(readFileSync(new URL('./migrations/015-multiple-locations.up.sql',import.meta.url),'utf8'));
   const previews=new Map();
   async function folderPath(relative){
     if(typeof relative!=='string'||!relative.trim()||path.isAbsolute(relative))throw fail('Choose a relative location folder.');const parts=relative.split(/[\\/]/);
@@ -16,6 +18,7 @@ export function installLocations({db,root,all,one,run,transaction,fail,setLocati
   }
   const get=id=>one('SELECT l.*,t.name tag_name FROM locations l LEFT JOIN structured_tags t ON t.id=l.tag_id WHERE l.id=?',id);
   const details=mid=>one('SELECT l.id,l.name,l.tag_id,l.folder FROM media_locations ml JOIN locations l ON l.id=ml.location_id WHERE ml.media_id=?',mid)||null;
+  const allDetails=mid=>all('SELECT l.id,l.name,l.tag_id,l.folder,MAX(p.is_primary) is_primary FROM (SELECT location_id,1 is_primary FROM media_locations WHERE media_id=? UNION ALL SELECT location_id,0 is_primary FROM media_location_links WHERE media_id=?) p JOIN locations l ON l.id=p.location_id GROUP BY l.id ORDER BY is_primary DESC,l.name,l.id',mid,mid);
   function ensureRecord(name,folder){return transaction(()=>{let place=one('SELECT * FROM locations WHERE name_key=?',tagKey(name));if(place){if(folder&&place.folder&&place.folder!==folder)throw fail('Another location uses this name with a different folder. Choose a distinct location name.',409);if(folder)run('UPDATE locations SET folder=? WHERE id=?',folder,place.id);return get(place.id);}if(!one("SELECT 1 FROM tag_groups WHERE id='group-setting'"))run("INSERT INTO tag_groups VALUES('group-setting','Setting & location','setting & location')");let tag=one("SELECT id FROM structured_tags WHERE group_id='group-setting' AND name_key=?",tagKey(name));if(!tag){tag={id:randomUUID()};run("INSERT INTO structured_tags VALUES(?,'group-setting',?,?)",tag.id,name,tagKey(name));}const id=randomUUID();run('INSERT INTO locations VALUES(?,?,?,?,?,?)',id,name,tagKey(name),tag.id,folder,new Date().toISOString());return get(id);});}
   async function prepare(value){if(typeof value!=='string'||!value.startsWith('folder:'))return value;const selected=await folderPath(value.slice(7));if(!(await fs.stat(selected.full)).isDirectory())throw fail('Location folder is unavailable.');if(one('SELECT 1 FROM sorted_folders WHERE folder=?',selected.relative))throw fail('Choose a location folder, not a character folder.');const existing=one('SELECT id FROM locations WHERE folder=?',selected.relative);return existing?.id||ensureRecord(path.basename(selected.relative),selected.relative).id;}
   function resolve(value){
@@ -23,12 +26,17 @@ export function installLocations({db,root,all,one,run,transaction,fail,setLocati
     if(value.startsWith('tag:')){const tid=value.slice(4),tag=one("SELECT * FROM structured_tags WHERE id=? AND group_id='group-setting'",tid);if(!tag)throw fail('Choose an existing location tag.');place=one('SELECT * FROM locations WHERE tag_id=?',tid);if(place)return place;const duplicate=one('SELECT * FROM locations WHERE name_key=?',tagKey(tag.name));if(duplicate)return duplicate;const id=randomUUID();run('INSERT INTO locations VALUES(?,?,?,?,?,?)',id,tag.name,tagKey(tag.name),tid,null,new Date().toISOString());return get(id);}
     throw fail('Choose an existing location.');
   }
-  function set(mid,value){if(value===null||value===''){run('DELETE FROM media_locations WHERE media_id=?',mid);return;}const place=resolve(value);run('INSERT INTO media_locations VALUES(?,?) ON CONFLICT(media_id) DO UPDATE SET location_id=excluded.location_id',mid,place.id);setLocation(mid,true);if(place.tag_id)run('INSERT OR IGNORE INTO media_tags VALUES(?,?)',mid,place.tag_id);}
+  function set(mid,value){if(value===null||value===''){run('DELETE FROM media_location_links WHERE media_id=?',mid);run('DELETE FROM media_locations WHERE media_id=?',mid);return;}const place=resolve(value);if(details(mid)?.id!==place.id)run('DELETE FROM media_location_links WHERE media_id=?',mid);run('INSERT INTO media_locations VALUES(?,?) ON CONFLICT(media_id) DO UPDATE SET location_id=excluded.location_id',mid,place.id);setLocation(mid,true);if(place.tag_id)run('INSERT OR IGNORE INTO media_tags VALUES(?,?)',mid,place.tag_id);}
+  function setMany(mid,values){if(!Array.isArray(values)||values.length>100||values.some(v=>typeof v!=='string'))throw fail('Choose up to 100 existing locations.');const places=[...new Map(values.map(value=>{const p=resolve(value);return[p.id,p];})).values()];const primary=places.find(p=>p.id===details(mid)?.id)||places[0];set(mid,primary?.id??null);run('DELETE FROM media_location_links WHERE media_id=?',mid);for(const p of places){if(p.id!==primary.id)run('INSERT INTO media_location_links VALUES(?,?)',mid,p.id);if(p.tag_id)run('INSERT OR IGNORE INTO media_tags VALUES(?,?)',mid,p.tag_id);}}
   async function folderOptions(){const folders=[];async function walk(relative,depth){if(depth>3||folders.length>=200)return;try{const dir=await folderPath(relative);await fs.access(dir.full);folders.push(dir.relative);for(const e of await fs.readdir(dir.full,{withFileTypes:true}))if(e.isDirectory()&&!e.isSymbolicLink()&&!e.name.startsWith('.'))await walk(path.join(relative,e.name),depth+1);}catch{}}
     for(const base of ['Helyszín','Locations','Location references'])await walk(base,0);return folders;
   }
   async function handle({p,body,req,json}){
-    if(p==='/api/locations'&&req.method==='GET'){json({items:all('SELECT l.*,(SELECT COUNT(*) FROM media_locations ml JOIN active_media m ON m.id=ml.media_id WHERE ml.location_id=l.id) media_count FROM locations l ORDER BY name'),tags:all("SELECT * FROM structured_tags WHERE group_id='group-setting' ORDER BY name"),folders:await folderOptions()});return true;}
+    if(p==='/api/location-editor'&&req.method==='GET'){json(editor.list());return true;}
+    if(p==='/api/location-editor'&&req.method==='PUT'){json(editor.create(body));return true;}
+    const entry=p.match(/^\/api\/location-editor\/([^/]+)$/);
+    if(entry&&['GET','PUT'].includes(req.method)){let id;try{id=decodeURIComponent(entry[1]);}catch{throw fail('Invalid location identifier.');}json(req.method==='GET'?editor.get(id):editor.save(id,body));return true;}
+    if(p==='/api/locations'&&req.method==='GET'){json({items:all('SELECT l.*,p.english_name,p.category,(SELECT COUNT(*) FROM active_media m WHERE EXISTS(SELECT 1 FROM media_locations ml WHERE ml.media_id=m.id AND ml.location_id=l.id) OR EXISTS(SELECT 1 FROM media_location_links ml WHERE ml.media_id=m.id AND ml.location_id=l.id)) media_count FROM locations l LEFT JOIN location_profiles p ON p.location_id=l.id ORDER BY l.name'),tags:all("SELECT * FROM structured_tags WHERE group_id='group-setting' ORDER BY name"),folders:await folderOptions()});return true;}
     if(p==='/api/locations'&&req.method==='POST'){
       const name=typeof body.name==='string'?body.name.trim().normalize('NFC'):'';if(!name||name.length>100)throw fail('Enter a location name of 1–100 characters.');if(!['tag','folder'].includes(body.kind||'tag'))throw fail('Choose a location tag or folder.');let folder=null;
       if(body.kind==='folder'){const selected=await folderPath(body.folder||path.join('Helyszín',name));if(one('SELECT 1 FROM sorted_folders WHERE folder=?',selected.relative)||one('SELECT 1 FROM characters WHERE name=?',selected.relative))throw fail('This folder belongs to a character. Choose a location folder.');await fs.mkdir(selected.full,{recursive:true});await folderPath(selected.relative);folder=selected.relative;}
@@ -45,5 +53,7 @@ export function installLocations({db,root,all,one,run,transaction,fail,setLocati
     }
     return false;
   }
-  return {handle,details,set,prepare};
+  function createTag(name){if(typeof name!=='string'||!name.trim()||name.trim().length>100||/[\x00-\x1f\x7f]/.test(name))throw fail('Enter a location name of 1–100 characters.');return ensureRecord(name.trim().normalize('NFC'),null);}
+  const editor=createLocationEditor({db,all,one,run,transaction,fail,createTag,resolve});
+  return {handle,details,allDetails,set,setMany,prepare,createTag,editor};
 }

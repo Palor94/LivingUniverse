@@ -1,7 +1,8 @@
 import {differenceHash,visualVersion} from './image-hash.js';
+import {mediaFormPayload} from './media-form.js';
 
 export function installDuplicatesUI({$,$$,esc,api,action,toast,openDialog,mediaDialog,getState,refresh:ctxRefresh}){
-  let scanning=false,stop=false,mode='exact',threshold=6,comparisonGroups=[],comparisonIndex=0;
+  let scanning=false,stop=false,mode='exact',threshold=6,comparisonGroups=[],comparisonIndex=0,recordContext=null;
   async function hashImage(item){
     const image=new Image();
     await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{image.src='';reject(Error('Image decoding timed out'));},20000);image.onload=()=>{clearTimeout(timer);resolve();};image.onerror=()=>{clearTimeout(timer);reject(Error('Browser cannot decode this image'));};image.src=`/media/${encodeURIComponent(item.id)}?fingerprint=${item.visual.sha256}`;});
@@ -44,7 +45,7 @@ export function installDuplicatesUI({$,$$,esc,api,action,toast,openDialog,mediaD
     openDialog('Compare files',`<p>Unfinished copies are shown first. Move to trash removes that copy in one click; restore it from Removed items. This uses the application’s recoverable trash, not Windows Recycle Bin. Notes and assignments are not transferred to the remaining copy.</p><button id="duplicate-back">Back to matches</button><div class="toolbar"><button id="duplicate-group-prev" ${comparisonIndex===0?'disabled':''}>Previous group</button><span>Group ${comparisonIndex+1} / ${comparisonGroups.length}</span><button id="duplicate-group-next" ${comparisonIndex+1>=comparisonGroups.length?'disabled':''}>Next group</button></div><div class="duplicate-comparison">${visible.map(m=>`<article>${m.kind==='image'?`<img src="/media/${encodeURIComponent(m.id)}" loading="lazy" alt="${esc(m.relative_path)}">`:`<video src="/media/${encodeURIComponent(m.id)}" controls preload="metadata"></video>`}<p>${esc(m.relative_path)}</p><p>${esc(m.characters.join(', ')||'No assigned characters')}${m.canonical?' · Canonical reference (current or historical)':''}</p><p class="${m.categorization_complete?'muted':'duplicate-unfinished'}">${m.categorization_complete?'Sorting complete':'Not finished sorting · preferred spare copy'}</p><button data-duplicate-open="${esc(m.id)}">Open record</button><button type="button" class="danger" data-duplicate-trash="${esc(m.id)}" ${m.canonical||group.items.length<2?'disabled':''}>${m.canonical?'Protected reference':'Move to trash'}</button></article>`).join('')}</div><div class="toolbar"><button id="duplicate-members-prev" ${page===0?'disabled':''}>Previous copies in this group</button><span>${page+1}–${Math.min(page+12,group.items.length)} / ${group.items.length}</span><button id="duplicate-members-next" ${page+12>=group.items.length?'disabled':''}>More copies in this group</button></div>`);
     $('#duplicate-group-prev').onclick=()=>{if(group.removing||comparisonIndex===0)return;comparisonIndex--;compare(comparisonGroups[comparisonIndex],offset);};
     $('#duplicate-group-next').onclick=()=>{if(group.removing||comparisonIndex+1>=comparisonGroups.length)return;comparisonIndex++;compare(comparisonGroups[comparisonIndex],offset);};
-    $('#duplicate-back').onclick=action(()=>results(offset));$('#duplicate-members-prev').onclick=()=>compare(group,offset,page-12);$('#duplicate-members-next').onclick=()=>compare(group,offset,page+12);for(const b of $$('[data-duplicate-open]'))b.onclick=action(()=>mediaDialog(b.dataset.duplicateOpen));
+    $('#duplicate-back').onclick=action(()=>results(offset));$('#duplicate-members-prev').onclick=()=>compare(group,offset,page-12);$('#duplicate-members-next').onclick=()=>compare(group,offset,page+12);for(const b of $$('[data-duplicate-open]'))b.onclick=action(async()=>{recordContext={group,offset,page,index:comparisonIndex,mid:b.dataset.duplicateOpen};await mediaDialog(b.dataset.duplicateOpen);});
     for(const b of $$('[data-duplicate-trash]'))b.onclick=async()=>{
       if(group.removing||group.items.length<2)return;
       group.removing=true;for(const button of $$('[data-duplicate-trash]'))button.disabled=true;
@@ -59,6 +60,18 @@ export function installDuplicatesUI({$,$$,esc,api,action,toast,openDialog,mediaD
     }
 
   }
-  function controls(){$('.sidebar-bottom').insertAdjacentHTML('afterbegin','<button id="duplicate-tool">Duplicates & similar pictures</button>');$('#duplicate-tool').onclick=action(home);}
-  return {controls};
+  async function returnAfterSave(mid){
+    if(!recordContext||recordContext.mid!==mid)return false;
+    const context=recordContext,fresh=await api('/api/media/'+encodeURIComponent(mid));
+    for(const entry of comparisonGroups)for(const item of entry.items)if(item.id===mid){item.relative_path=fresh.relative_path;item.characters=fresh.characters.map(c=>c.name);item.categorization_complete=fresh.categorization_complete;item.canonical=item.canonical||Boolean(fresh.canonicalFor?.length);}
+    comparisonIndex=context.index;recordContext=null;compare(context.group,context.offset,context.page);return true;
+  }
+  function viewer(m){
+    if(!recordContext||recordContext.mid!==m.id)return;
+    $('.dialog-head').insertAdjacentHTML('afterend','<div class="viewer-sort-nav"><button type="button" id="return-duplicate-comparison">← Back to duplicate comparison</button><small>Saves current edits and keeps the current sorting status.</small></div>');
+    $('#return-duplicate-comparison').onclick=action(async e=>{const button=e.currentTarget;button.disabled=true;try{await api('/api/media/'+encodeURIComponent(m.id),await mediaFormPayload($('#media-form'),$('#categorization-complete').checked),'PUT');await ctxRefresh();await returnAfterSave(m.id);}finally{button.disabled=false;}});
+    $('#sort-save-next').textContent='Finish sorting & return to duplicates';
+  }
+  function controls(){$('.sidebar-bottom').insertAdjacentHTML('afterbegin','<button id="duplicate-tool">Duplicates & similar pictures</button>');$('#duplicate-tool').onclick=action(home);$('#dialog')?.addEventListener('close',()=>{recordContext=null;});}
+  return {controls,viewer,returnAfterSave};
 }

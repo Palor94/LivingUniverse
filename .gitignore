@@ -8,17 +8,41 @@
 !/DEVELOPMENT_PLAN.md
 !/docs/
 /docs/*
+!/docs/*.md
 !/docs/VISUAL_IDENTITY.md
 !/docs/ASSISTED_SORTING.md
 !/package.json
 !/Start Living Universe.cmd
+!/Enable Mobile Access.cmd
+!/docs/MOBILE_ACCESS.md
+!/docs/MCP_WRITES.md
+!/mcp/
+/mcp/*
+!/mcp/*.mjs
+!/mcp/*.ps1
+!/mcp/*.cmd
 !/app/
 !/tests/
+!/RECOVERY.md
+!/Backup Living Universe.cmd
+!/Verify Living Universe Backup.cmd
+!/ops/
+/ops/*
+!/ops/backup/
+/ops/backup/*
+!/ops/backup/*.mjs
+!/ops/backup/*.ps1
+!/ops/backup/components.json
 /app/**/node_modules/
 /app/**/__pycache__/
 
 # Secrets, dependencies, Python caches, and local databases.
 .env
+mobile-access.json
+mcp-writes.json
+mcp-config.json
+mcp-tunnel-key.xml
+living-universe.yaml
 .env.*
 !.env.example
 node_modules/
@@ -37,3 +61,17 @@ __pycache__/
 *.sqlite3-wal
 *.sqlite3-shm
 *.sqlite3-journal
+*.dpapi
+*.bundle
+
+!/docs/GROK_INTEGRATION.md
+!/docs/IMAGE_GENERATION.md
+image-generation.json
+generation-results/
+
+!/docs/MEDIA_UPLOADS.md
+
+!/docs/GHOST_PROFILE.md
+
+!/docs/ORIGINAL_IMAGES.md
+!/docs/MCP_INTEGRATION.md

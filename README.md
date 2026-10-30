@@ -1,5 +1,24 @@
 # Living Universe
 
+## Mentés és helyreállítás
+
+A közös alkalmazás- és ChatGPT/Grok-csatlakozóforrás a GitHub `Palor94/LivingUniverse` repository `main` ágán található. A mentési egységek, az egykattintásos friss mentés és az elkülönített helyreállítás belépőpontja: **[RECOVERY.md](RECOVERY.md)**. A privát adatbázis, helyszíntervek, helyi fájl-visszaállítási állományok és titkosított beállítások külön, dátumozott OneDrive-mentést kapnak; az eredeti médiatár a meglévő OneDrive-gyökérben marad.
+
+**Reference-conditioned image APIs:** optional OpenAI/xAI adapters use approved
+canon revisions, original hashes, private per-run approval, recoverable output
+registration and provenance through ChatGPT MCP and Grok chat/Bot tools. Providers
+remain disabled until configured. Native chat-host image handoff is unverified.
+See [setup, use, security, tests and rollback](docs/IMAGE_GENERATION.md).
+
+**Character events & history:** each dossier now has a shared, sourced event
+timeline with uncertain chronology, participants, locations, separate story-canon
+review and immutable revisions. Imported events start unapproved; profiles,
+relationships, media and visual canon are preserved. The first upgraded startup
+backs up the existing database before migration 017. See
+[operation, AI retrieval, migration and rollback](docs/STORY_EVENTS.md).
+
+Private iPad/iPhone text editing through Tailscale Serve is available as an optional restricted listener. It shares the existing local database, saves browser drafts, checks for cross-device conflicts, and blocks file operations and canonical approvals. See [mobile setup and security](docs/MOBILE_ACCESS.md). Enablement needs an exact Tailscale identity/origin in local configuration; desktop access remains unchanged.
+
 A personal fictional universe with persistent character identity, visual references, memory, and history.
 
 Current state: a working local character and media library. No AI provider is connected. No world simulation or face recognition is implemented yet.
@@ -134,10 +153,56 @@ Scanning does not download image contents intentionally. Opening media may cause
 
 Run `node app/server.mjs` to launch and `node --test tests/*.test.mjs` for the focused regression suite. The service listens on the laptop's loopback address only and blocks cross-site browser requests. It has no public hosting or remote access configuration.
 
-Current limitations: no face recognition, AI generation, world conversations, reliable crop-resistant similarity, or reference-region crops. Cover-region selection, bulk selection, optional duplicate review, and local Hungarian name suggestions are available. A rescan discovers new paths and suggests metadata-matched external moves for manual confirmation. It never automatically merges duplicates or repairs uncertain paths. Approved references receive SHA-256 fingerprints when approved; **Check reference files** detects missing or changed originals on demand. This verifies bytes, not visual correctness. Do not replace approved reference files in place.
+Current limitations: no face recognition, world conversations, reliable crop-resistant similarity, or reference-region crops. Cover-region selection, bulk selection, optional duplicate review, and local Hungarian name suggestions are available. A rescan discovers new paths and suggests metadata-matched external moves for manual confirmation. It never automatically merges duplicates or repairs uncertain paths. Approved references receive SHA-256 fingerprints when approved; **Check reference files** detects missing or changed originals on demand. This verifies bytes, not visual correctness. Do not replace approved reference files in place.
 
 Start with [the vision](PROJECT_VISION.md), [decisions](DECISIONS.md), [development plan](DEVELOPMENT_PLAN.md), and [visual identity design](docs/VISUAL_IDENTITY.md).
 
 The living-world section is an explicitly marked future workspace. Generation and storytelling integrations follow incrementally.
 
-Git records changes to source and documentation so they can be compared and recovered. The ignore rules intentionally exclude private media and user data. Git is not a backup of the media collection. A remote repository has not been configured.
+Git records changes to source and documentation so they can be compared and recovered. The ignore rules intentionally exclude private media and user data. Git is not a backup of the media collection. The configured private source repository is Palor94/LivingUniverse. See RECOVERY.md for the separate private data backups.
+
+## Grok and verified media imports
+
+Sogni reference-image generation is available through the same generation tools.
+For a direct desktop workflow, open a character and choose **Generálás Sognival**:
+write the scene, select approved references, prepare/review the request, approve
+the exact upload/cost plan and start one image. History and saved result review
+are available on that tab; successful generation does not approve canon.
+Open **Connect Sogni.cmd** to save your API key in a masked Windows dialog, then
+restart Living Universe and refresh the connected client. The encrypted key stays
+beside the existing local catalogue, outside OneDrive. Setup sends no images and
+starts no paid request. Each generation still requires the private exact-plan
+upload/cost approval. See [image generation and Sogni setup](docs/IMAGE_GENERATION.md#sogni-connection-28-october-2026).
+See [Grok integration](docs/GROK_INTEGRATION.md) for the OAuth-protected HTTP connector, shared catalogue, private media upload fallback, provenance, limits, setup and rollback. ChatGPT retains its existing private tunnel. Native Grok attachment and generation handoff must be verified separately from API capability.
+
+
+## Original images through MCP
+
+Selected image reads now return high-quality references (up to 2048 px / 3 MiB) for ChatGPT/Grok. Lists stay metadata-only. Exact original files are an explicit option; large originals use lossless read chunks or the existing private Tailscale connection. See [limits, client behavior and original downloads](docs/ORIGINAL_IMAGES.md).
+
+## Shared image uploads
+
+ChatGPT native file inputs, resumable MCP image chunks and the private upload page use the same verified import service and support multiple target characters. See [setup, limits and recovery](docs/MEDIA_UPLOADS.md).
+
+### Szellemprofil
+
+A karaktergyűjtemény külön, nem játszható Szellemprofil sablonkaraktere adja a közös mezőszerkezetet. A mezők, az elfogadott adatok és az AI-csomag letöltése/javaslathalmaz feltöltése a karakterek rendes profilján jelennek meg. Használat és csatlakozási feltételek: [docs/GHOST_PROFILE.md](docs/GHOST_PROFILE.md). A futó alkalmazást újra kell indítani a friss backendhez.
+
+
+### Import capacity recovery
+
+ChatGPT/Grok can list import sessions with `list_media_imports` and close an
+unwanted session with `cancel_media_import`. This frees its upload reservation
+and removes temporary chunks while preserving all saved images and character
+links. The private Tailscale editor also provides `/media-imports`, linked from
+each upload page. See [media uploads](docs/MEDIA_UPLOADS.md#list-and-cancel-imports-2026-10-30)
+for permissions, retry/cleanup status and connector refresh steps.
+
+
+### Közös profilsablon a ChatGPT/Grok pluginból
+
+A get_profile_template olvassa a közös mezőszerkezetet és kitöltési útmutatókat;
+az update_profile_template trusted módban menti az explicit kért mezőmódosítást,
+bővítést vagy átrendezést. Verzióellenőrzés, ismétlésvédelem és előzmény védi;
+a meglévő karakterértékek és kánon változatlanok. Részletek:
+[Közös profilsablon](docs/GHOST_PROFILE.md).

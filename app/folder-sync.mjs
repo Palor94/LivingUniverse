@@ -70,11 +70,39 @@ export function installFolderSync({db,root,dataDir,all,one,run,transaction,fail,
     }finally{busy=false;moving.delete('folder-name-sync');}
   }
   async function renameCharacter(cid,name){const c=one('SELECT name FROM characters WHERE id=?',cid);if(!c)throw fail('Character not found',404);if(c.name===name)return {completed:[],errors:[]};return synchronize({character_id:cid,name,rename:true});}
+  async function createCharacterWithFolder(cid,name){
+    validFolder(name);
+    if(busy||moving.size||isScanning())throw fail('Wait for the current scan or file operation.',409);
+    busy=true;let created=false,createdStat=null,folder=name,full=null;
+    function validate(){
+      const existing=one('SELECT * FROM characters WHERE id=?',cid);
+      if(existing&&(existing.name!==name||one('SELECT 1 FROM character_ui WHERE character_id=? AND merged_into IS NOT NULL',cid)))throw fail('This creation request belongs to another character. Reload the character list.',409);
+      if(characters().some(c=>c.id!==cid&&key(c.name.trim())===key(name)))throw fail('A character already has this name. Choose the existing character or use a distinct name.',409);
+      if(all('SELECT * FROM sorted_folders').some(o=>key(o.folder)===key(folder)&&o.character_id!==cid))throw fail('This folder already belongs to another character. Choose a distinct name.',409);
+      if(all('SELECT folder FROM locations WHERE folder IS NOT NULL').some(l=>key(l.folder.split(/[\\/]/)[0])===key(folder)))throw fail('This folder is used for locations. Choose a distinct character name.',409);
+      return existing;
+    }
+    try{
+      const entries=(await fs.readdir(root,{withFileTypes:true})).filter(e=>key(e.name)===key(name));
+      if(entries.length>1)throw fail('Several folders match this name. Review them on the laptop.',409);
+      if(entries.length)folder=entries[0].name;
+      validate();full=await checked(folder,false);
+      try{await fs.mkdir(full);created=true;}catch(e){if(e.code!=='EEXIST')throw e;}
+      await checked(folder);const stat=await fs.lstat(full);if(!stat.isDirectory())throw fail('A file already uses this name. Choose a distinct character name.',409);if(created)createdStat=stat;
+      transaction(()=>{const existing=validate();if(!existing)run('INSERT INTO characters(id,name,created_at) VALUES(?,?,?)',cid,name,now());run('INSERT INTO sorted_folders VALUES(?,?) ON CONFLICT(folder) DO NOTHING',folder,cid);});
+      return {folder,folder_created:created};
+    }catch(e){
+      // Only remove our own still-empty directory after a database failure.
+      // Existing folders and any files added concurrently are never removed.
+      if(createdStat){try{await checked(folder);const current=await fs.lstat(full);if(current.ino===createdStat.ino&&current.isDirectory()&&!current.isSymbolicLink())await fs.rmdir(full);}catch{}}
+      if(e.status)throw e;throw fail('The character folder could not be created. Check OneDrive availability and retry; existing files were not changed.',409);
+    }finally{busy=false;}
+  }
   async function handle({p,body,req,json}){
     if(p==='/api/folder-names'&&req.method==='GET'){const r=await plansFor(),token=randomUUID();for(const [k,v] of previews)if(v.expires<Date.now())previews.delete(k);previews.set(token,{signature:signature(r),expires:Date.now()+900000});json({token,plans:r.plans.map(({files,dirs,...p})=>({...p,file_count:files.length})),unmapped:r.unmapped,history:all('SELECT id,source,destination,status,error,created_at FROM folder_changes ORDER BY rowid DESC LIMIT 50')});return true;}
     if(p==='/api/folder-names/sync'&&req.method==='POST'){const preview=previews.get(body.token);if(!preview||preview.expires<Date.now())throw fail('Open a fresh folder-name preview before synchronizing.',409);const result=await synchronize({expectedSignature:preview.signature});previews.delete(body.token);json(result);return true;}
     const match=p.match(/^\/api\/characters\/([^/]+)\/profile-field$/);if(match&&req.method==='POST'&&body.field==='name'){const name=String(body.value??'').trim();if(!name||name.length>200)throw fail('Enter a character name of 1–200 characters.');json({ok:true,folder_sync:await renameCharacter(match[1],name)});return true;}
     return false;
   }
-  return {handle,renameCharacter,synchronize,isBusy:()=>busy};
+  return {handle,renameCharacter,synchronize,createCharacterWithFolder,isBusy:()=>busy};
 }

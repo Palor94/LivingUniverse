@@ -4,6 +4,16 @@ import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 
 export const extraTables={
+  media_imports:['id','request_key','request_hash','character_id','provenance_json','created_at','expires_at'],
+  imported_media_blobs:['sha256','media_id'],
+  media_import_items:['id','import_id','slot_key','status','sha256','media_id','filename','content_type','size','provenance_json','error_code','created_at'],
+  media_import_events:['id','import_id','slot_key','event','error_code','created_at'],
+  media_import_targets:['import_id','character_id'],
+  media_import_metadata:['import_id','title','description','reference_candidate'],
+  media_uploads:['id','import_id','slot_key','request_hash','filename','content_type','size','sha256','received_bytes','status','error_code','created_at','expires_at'],
+  media_upload_chunks:['upload_id','offset','size','sha256'],
+  media_image_edits:['id','media_id','status','original_sha256','cropped_sha256','crop_json','original_size','original_mtime','created_at','restored_at'],
+  mcp_changes:['id','request_key','request_hash','change_hash','operation','payload_json','status','created_at','expires_at','approved_by','approved_at','applied_at','result_json'],
   character_ui:['character_id','cover_crop','merged_into'],
   character_cover_frames:['character_id','media_id','time_seconds','data_url','source_crop_json','source_size','source_mtime','captured_at'],
   media_hidden:['media_id','original_path','physical','created_at'],
@@ -17,11 +27,21 @@ export const extraTables={
   tag_groups:['id','name','name_key'],
   structured_tags:['id','group_id','name','name_key'],
   locations:['id','name','name_key','tag_id','folder','created_at'],
+  location_profiles:['location_id','english_name','category','description','parent_id'],
   media_locations:['media_id','location_id'],
+  media_location_links:['media_id','location_id'],
   media_tags:['media_id','tag_id'],
   legacy_tag_mappings:['source_key','tag_id','source_text','created_at'],
   sorting_suggestions:['id','media_id','character_id','canon_id','method','target_signature','target_sha256','evidence_json','context_key','created_at'],
-  suggestion_feedback:['id','suggestion_id','decision','notes','face_verdict','body_verdict','created_at']
+  suggestion_feedback:['id','suggestion_id','decision','notes','face_verdict','body_verdict','created_at'],
+  story_events:['id','version','request_key','request_hash','import_key','created_at'],
+  story_event_revisions:['event_id','version','status','payload_json','actor','reason','created_at'],
+  story_event_participants:['event_id','character_id','role','knows'],
+  story_event_locations:['event_id','location_id'],
+  story_event_source_keys:['source_key','event_id','system','external_id'],
+  image_generation_runs:['id','request_key','request_hash','manifest_json','manifest_hash','status','created_at','expires_at','approved_by','approved_at','error_code'],
+  image_generation_outputs:['run_id','media_id','sha256','size','receipt_json','created_at'],
+  image_generation_events:['id','run_id','event','actor','detail','created_at']
 };
 export function installEnhancements(ctx){
   const {db,root,dataDir,all,one,run,transaction,asset,character,canon,safeFile,fingerprint,moving,isScanning,fail}=ctx;
@@ -32,6 +52,7 @@ export function installEnhancements(ctx){
     CREATE TABLE IF NOT EXISTS application_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
     CREATE VIEW IF NOT EXISTS active_media AS SELECT m.* FROM media m WHERE NOT EXISTS(SELECT 1 FROM media_hidden h WHERE h.media_id=m.id);`);
   const now=()=>new Date().toISOString();
+  function removeCatalogue(mid){const m=asset(mid);if(one('SELECT 1 FROM media_hidden WHERE media_id=?',mid))return {ok:true,already_removed:true};if(one("SELECT 1 FROM canon c WHERE c.rowid=(SELECT MAX(c2.rowid) FROM canon c2 WHERE c2.character_id=c.character_id) AND EXISTS(SELECT 1 FROM json_each(c.references_json) WHERE json_extract(value,'$.media_id')=?)",mid))throw fail('This file is an approved identity reference.',409);transaction(()=>{run('INSERT INTO media_hidden VALUES(?,?,0,?)',mid,m.relative_path,now());run('UPDATE characters SET cover_id=NULL WHERE cover_id=?',mid);});return {ok:true};}
   const inside=(full)=>{const relative=path.relative(root,path.resolve(full));if(!relative||relative.startsWith('..')||path.isAbsolute(relative))throw fail('Destination must stay inside the resource folder.',403);return path.resolve(full);};
   async function safeDestination(relative){
     const segments=relative.split(/[\\/]/);if(segments.some(s=>!s||s==='.'||s==='..'||/[<>:"|?*]/.test(s)||/[. ]$/.test(s)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(s)))throw fail('Invalid destination name.');
@@ -63,7 +84,7 @@ export function installEnhancements(ctx){
   async function handle({p,body,req,json}){
     let match;
     if((match=p.match(/^\/api\/characters\/([^/]+)\/profile-field$/))&&req.method==='POST'){
-      character(match[1]);if(!['name','aliases','biography','personality','appearance','notes'].includes(body.field))throw fail('Unknown profile field.');const value=String(body.value??'').slice(0,body.field==='name'?200:30000);if(body.field==='name'&&!value.trim())throw fail('A character needs a name.');run(`UPDATE characters SET ${body.field}=? WHERE id=?`,value,match[1]);json({ok:true});return true;
+      const current=character(match[1]);if(!['name','aliases','biography','personality','sexuality','speech_style','appearance','notes'].includes(body.field))throw fail('Unknown profile field.');const value=String(body.value??'').slice(0,body.field==='name'?200:30000);if(body.field==='name'&&!value.trim())throw fail('A character needs a name.');if(Object.hasOwn(body,'expected')&&current[body.field]!==body.expected&&current[body.field]!==value)throw fail('This field changed on another device. Your text is still in the editor; compare it with the latest saved version before retrying.',409);run(`UPDATE characters SET ${body.field}=? WHERE id=?`,value,match[1]);json({ok:true});return true;
     }
     if(p==='/api/protagonist'&&req.method==='GET'){json({character:protagonist()});return true;}
     if((match=p.match(/^\/api\/characters\/([^/]+)\/cover-crop$/))&&req.method==='POST'){
@@ -80,6 +101,7 @@ export function installEnhancements(ctx){
       const protectedBy=all("SELECT character_id FROM canon c WHERE c.rowid=(SELECT MAX(c2.rowid) FROM canon c2 WHERE c2.character_id=c.character_id) AND EXISTS(SELECT 1 FROM json_each(c.references_json) WHERE json_extract(value,'$.media_id')=?)",m.id);
       if(protectedBy.length)throw fail('This file is an approved identity reference. Remove it from the current approved identity first; earlier identity history will be retained.',409);
       if(!['catalogue','file'].includes(body.mode))throw fail('Choose catalogue only, or file and catalogue.');
+      if(body.mode==='catalogue'){json(removeCatalogue(m.id));return true;}
       let result={};if(body.mode==='file')result=await relocate(m.id,path.join('.living-universe-trash',m.id,path.basename(m.relative_path)));
       transaction(()=>{run('INSERT INTO media_hidden VALUES(?,?,?,?)',m.id,m.relative_path,body.mode==='file'?1:0,now());run('UPDATE characters SET cover_id=NULL WHERE cover_id=?',m.id);});json({...result,ok:true});return true;
     }
@@ -125,7 +147,7 @@ export function installEnhancements(ctx){
           for(const r of all('SELECT * FROM relationships WHERE source_id=? OR target_id=?',source.id,source.id)){const from=r.source_id===source.id?target.id:r.source_id,to=r.target_id===source.id?target.id:r.target_id;if(from===to)continue;const old=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',from,to);run('INSERT INTO relationships VALUES(?,?,?,?) ON CONFLICT(source_id,target_id) DO UPDATE SET description=excluded.description',randomUUID(),from,to,old&&old.description!==r.description?old.description+'\n'+r.description:r.description);}
           run('UPDATE sorted_folders SET character_id=? WHERE character_id=?',target.id,source.id);
           run('INSERT INTO character_ui(character_id,merged_into) VALUES(?,?) ON CONFLICT(character_id) DO UPDATE SET merged_into=excluded.merged_into',source.id,target.id);
-          for(const field of ['biography','personality','appearance','notes']){const current=character(target.id)[field];if(source[field]&&!current)run(`UPDATE characters SET ${field}=? WHERE id=?`,source[field],target.id);else if(source[field]&&current!==source[field])run('UPDATE characters SET notes=notes||? WHERE id=?','\nPreserved '+source.name+' '+field+': '+source[field],target.id);}
+          for(const field of ['biography','personality','sexuality','speech_style','appearance','notes']){const current=character(target.id)[field];if(source[field]&&!current)run(`UPDATE characters SET ${field}=? WHERE id=?`,source[field],target.id);else if(source[field]&&current!==source[field])run('UPDATE characters SET notes=notes||? WHERE id=?','\nPreserved '+source.name+' '+field+': '+source[field],target.id);}
         }
         const aliases=[...new Set([target.aliases,'Tibor','Palor',...sources.map(c=>c.aliases)].filter(Boolean))].join(', ');run('UPDATE characters SET name=?,aliases=? WHERE id=?','Palor',aliases,target.id);
         run("INSERT INTO application_settings VALUES('protagonist',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",target.id);
@@ -137,5 +159,5 @@ export function installEnhancements(ctx){
     }
     return false;
   }
-  return {handle,crop,protagonist,relocate};
+  return {handle,crop,protagonist,relocate,removeCatalogue};
 }
