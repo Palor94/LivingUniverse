@@ -1,3 +1,4 @@
+import {organized,resourceRoot} from './storage-layout.mjs';
 // Runs in the same Windows environment as the desktop launcher, not the coding host.
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
@@ -24,7 +25,7 @@ export async function ensureDesktopCatalogue({dataDir,seed,manifest}){
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
-  const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-  try{const result=await ensureDesktopCatalogue({dataDir:process.env.LIVING_UNIVERSE_DATA,seed:path.join(root,'backups','desktop-recovery-20261025.sqlite'),manifest:path.join(root,'backups','desktop-recovery-20261025.json')});console.log(result.created?'Recovered catalogue installed in Windows local storage.':'Existing desktop catalogue preserved.');console.log(`${result.counts.characters} character records; ${result.counts.media} media records.`);console.log(result.database);}
+  const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),mediaRoot=resourceRoot(root),seedRoot=organized(mediaRoot)?path.join(mediaRoot,'90_BACKUPS','Legacy','backups'):path.join(root,'backups');
+  try{const result=await ensureDesktopCatalogue({dataDir:process.env.LIVING_UNIVERSE_DATA,seed:path.join(seedRoot,'desktop-recovery-20261025.sqlite'),manifest:path.join(seedRoot,'desktop-recovery-20261025.json')});console.log(result.created?'Recovered catalogue installed in Windows local storage.':'Existing desktop catalogue preserved.');console.log(`${result.counts.characters} character records; ${result.counts.media} media records.`);console.log(result.database);}
   catch(e){console.error('Living Universe could not open its catalogue: '+e.message);process.exitCode=1;}
 }

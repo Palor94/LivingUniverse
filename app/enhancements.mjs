@@ -1,3 +1,4 @@
+import {catalogueFolder,trashFolder,mediaDestinationAllowed} from './storage-layout.mjs';
 import {promises as fs,constants} from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -58,7 +59,7 @@ export function installEnhancements(ctx){
     const segments=relative.split(/[\\/]/);if(segments.some(s=>!s||s==='.'||s==='..'||/[<>:"|?*]/.test(s)||/[. ]$/.test(s)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(s)))throw fail('Invalid destination name.');
     if(segments.some(s=>s.startsWith('.')&&s!=='.living-universe-trash'))throw fail('This application folder is reserved.');
     if(['app','tests','docs','node_modules','backups'].includes(segments[0].toLowerCase()))throw fail('Choose a media folder.');
-    const full=inside(path.join(root,...segments));let parent=path.dirname(full);
+    if(!mediaDestinationAllowed(root,relative))throw fail('Choose a media destination, not system, imports, exports or backups.');const full=inside(path.join(root,...segments));let parent=path.dirname(full);
     while(parent!==root){try{const real=await fs.realpath(parent);inside(real);break;}catch(e){if(e.code!=='ENOENT')throw e;parent=path.dirname(parent);}}
     return full;
   }
@@ -74,7 +75,7 @@ export function installEnhancements(ctx){
       await fs.mkdir(path.dirname(dest),{recursive:true});await safeDestination(relative);
       await fs.copyFile(source,dest,constants.COPYFILE_EXCL);
       const hash=await fingerprint(source);if(hash!==await fingerprint(dest))throw fail('Copy verification failed; the original is retained.',409);
-      transaction(()=>{run('UPDATE media SET relative_path=?,folder=? WHERE id=?',relative,relative.includes(path.sep)?relative.split(path.sep)[0]:'',mid);run('UPDATE file_moves SET status=?,sha256=? WHERE id=?','catalogued',hash,moveId);});
+      transaction(()=>{run('UPDATE media SET relative_path=?,folder=? WHERE id=?',relative,catalogueFolder(root,relative),mid);run('UPDATE file_moves SET status=?,sha256=? WHERE id=?','catalogued',hash,moveId);});
       try{inside(source);await fs.unlink(source);}catch{run('UPDATE file_moves SET status=? WHERE id=?','source_retained',moveId);return {warning:'The new copy is verified, but the old source could not be removed. Both copies were kept.',from:m.relative_path,to:relative};}
       run('UPDATE file_moves SET status=? WHERE id=?','complete',moveId);return {from:m.relative_path,to:relative};
     }catch(e){if(logged)run("UPDATE file_moves SET status='needs_review' WHERE id=? AND status='preparing'",moveId);if(e.status)throw e;throw fail('The file operation could not finish. Check OneDrive availability and move history. The source or verified copy is retained.',409);}finally{moving.delete(mid);}
@@ -102,7 +103,7 @@ export function installEnhancements(ctx){
       if(protectedBy.length)throw fail('This file is an approved identity reference. Remove it from the current approved identity first; earlier identity history will be retained.',409);
       if(!['catalogue','file'].includes(body.mode))throw fail('Choose catalogue only, or file and catalogue.');
       if(body.mode==='catalogue'){json(removeCatalogue(m.id));return true;}
-      let result={};if(body.mode==='file')result=await relocate(m.id,path.join('.living-universe-trash',m.id,path.basename(m.relative_path)));
+      let result={};if(body.mode==='file')result=await relocate(m.id,path.join(trashFolder(root),m.id,path.basename(m.relative_path)));
       transaction(()=>{run('INSERT INTO media_hidden VALUES(?,?,?,?)',m.id,m.relative_path,body.mode==='file'?1:0,now());run('UPDATE characters SET cover_id=NULL WHERE cover_id=?',m.id);});json({...result,ok:true});return true;
     }
     if(p==='/api/removed'&&req.method==='GET'){json({capabilities:{permanent_erasure:true},items:all("SELECT m.*,h.original_path,h.physical,h.created_at removed_at,EXISTS(SELECT 1 FROM canon c,json_each(c.references_json) r WHERE json_extract(r.value,'$.media_id')=m.id) protected FROM media_hidden h JOIN media m ON m.id=h.media_id WHERE NOT EXISTS(SELECT 1 FROM application_settings s WHERE s.key='erased_media:'||m.id) ORDER BY h.created_at DESC")});return true;}
@@ -116,11 +117,11 @@ export function installEnhancements(ctx){
       moving.add(m.id);
       try{
         if(h.physical){
-          const expected=path.join('.living-universe-trash',m.id,path.basename(h.original_path));
+          const expected=path.join(trashFolder(root),m.id,path.basename(h.original_path));
           if(m.relative_path!==expected)throw fail('The file is outside its recoverable trash location. Nothing was erased.',409);
           const full=inside(path.resolve(root,expected));
           const realRoot=await fs.realpath(root),realParent=await fs.realpath(path.dirname(full));
-          if(realParent!==path.join(realRoot,'.living-universe-trash',m.id))throw fail('Trash location points elsewhere. Nothing was erased.',409);
+          if(realParent!==path.join(realRoot,trashFolder(root),m.id))throw fail('Trash location points elsewhere. Nothing was erased.',409);
           try{const info=await fs.lstat(full);if(!info.isFile()||info.isSymbolicLink())throw fail('Only regular files in application trash can be erased.',409);await fs.unlink(full);}catch(e){if(e.code!=='ENOENT')throw e;}
         }
         run('INSERT INTO application_settings(key,value) VALUES(?,?)','erased_media:'+m.id,JSON.stringify({erased_at:now(),physical:!!h.physical,path:m.relative_path}));

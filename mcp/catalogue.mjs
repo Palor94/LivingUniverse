@@ -11,7 +11,7 @@ import {createEventReader} from '../app/story-events.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const roles=['face','body','detail','general'];
-const blocked=new Set(['app','tests','docs','backups','node_modules']);
+const blocked=new Set(['app','tests','docs','backups','node_modules','00_system','30_imports','40_exports','90_backups','99_archive']);
 export class CatalogueError extends Error{constructor(code,message,recoverable=false){super(message);this.code=code;this.recoverable=recoverable;}}
 const fail=(code,message,recoverable=false)=>{throw new CatalogueError(code,message,recoverable);};
 const identifier=value=>{if(typeof value!=='string'||!UUID.test(value))fail('INVALID_ID','Use a stable catalogue UUID, never a filename or path.');return value;};

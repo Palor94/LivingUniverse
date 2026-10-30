@@ -1,3 +1,4 @@
+import {refreshTunnelProfileSource} from './profile-source.mjs';
 import {spawn} from 'node:child_process';
 import {readFile,readdir,access} from 'node:fs/promises';
 import path from 'node:path';
@@ -8,6 +9,7 @@ export async function launch({selfTest=false,newKey=false,unattended=false,onOut
   const base=path.join(process.env.LOCALAPPDATA,'LivingUniverse','mcp-runtime');
   let client='';if(!selfTest){const versions=(await readdir(base)).filter(v=>/^v\d+\.\d+\.\d+$/.test(v)).sort((a,b)=>b.localeCompare(a,'en',{numeric:true}));
     if(!versions.length)throw Error('The official tunnel client has not been installed at '+base);client=path.join(base,versions[0],'tunnel-client.exe');await access(client);}
+  if(!selfTest)await refreshTunnelProfileSource({project:path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),profileDirectory:path.join(base,'profiles')});
   const systemRoot=process.env.SystemRoot||'C:\\Windows';
   const powershell=path.join(systemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe');
   const source=await readFile(new URL('./run-tunnel.ps1',import.meta.url),'utf8');

@@ -1,3 +1,4 @@
+import {resourceRoot,characterFolder,characterParent} from './storage-layout.mjs';
 import {forgetRemovedReferences} from './reference-retention.mjs';
 import {installGhostProfiles} from './ghost-profile.mjs';
 import {installLocationCanvas} from './location-canvas.mjs';
@@ -32,7 +33,7 @@ import {createCatalogue as openMcpCatalogue} from '../mcp/catalogue.mjs';
 import {backupBeforeStoryMigration,installStoryEvents} from './story-events.mjs';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
-const defaultRoot = path.resolve(appDir, '..');
+const defaultRoot = resourceRoot(path.resolve(appDir, '..'));
 const types = {'.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.webp':'image/webp','.gif':'image/gif','.avif':'image/avif','.bmp':'image/bmp','.mp4':'video/mp4','.mov':'video/quicktime','.m4v':'video/mp4','.webm':'video/webm'};
 const ignored = new Set(['.git','.codex','.agents','node_modules','app','tests','docs','backups']);
 const id = () => randomUUID();
@@ -100,7 +101,7 @@ export async function createApp(options={}) {
   async function fingerprint(file){const hash=createHash('sha256');for await(const chunk of createReadStream(file))hash.update(chunk);return hash.digest('hex');}
   async function destinationFor(m,folder){
     if(typeof folder!=='string'||!folder.trim()||folder!==folder.trim()||folder==='.'||folder==='..'||/[\\/:*?"<>|]/.test(folder)||/[. ]$/.test(folder)||ignored.has(folder.toLowerCase())||folder.startsWith('.')||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(folder))throw fail('Choose a valid character folder name.');
-    const dir=path.resolve(root,folder);if(!dir.startsWith(root+path.sep)||path.dirname(dir)!==root)throw fail('The destination must be inside your resource folder.');
+    folder=characterFolder(root,folder);const dir=path.resolve(root,folder);if(!dir.startsWith(root+path.sep)||path.dirname(dir)!==characterParent(root))throw fail('The destination must be inside your resource folder.');
     try{const real=await fs.realpath(dir);const realRoot=await fs.realpath(root);if(!real.startsWith(realRoot+path.sep))throw fail('The destination points outside your resource folder.',403);if(!(await fs.stat(real)).isDirectory())throw fail('The destination is not a folder.');}catch(e){if(e.code!=='ENOENT')throw e;}
     return {dir,full:path.join(dir,path.basename(m.relative_path)),relative:path.join(folder,path.basename(m.relative_path)),folder};
   }
@@ -124,7 +125,7 @@ export async function createApp(options={}) {
   }catch{mcpWriteConfig=null;console.error('MCP changes disabled: invalid local configuration. Desktop and read-only access remain available.');}
   let previewMedia=null;
   async function saveCanon(options){
-    const {characterId,appearance='',references,reason='',expectedRevisionId,expectedReferences,expectedFingerprints,afterSave}=options,checkRevision=Object.hasOwn(options,'expectedRevisionId'),checkReferences=Object.hasOwn(options,'expectedReferences');character(characterId);if(!Array.isArray(references))throw fail('Invalid reference selection');
+    const {characterId,appearance='',references,reason='',expectedRevisionId,expectedReferences,expectedFingerprints,afterSave}=options,checkRevision=Object.hasOwn(options,'expectedRevisionId')&&options.expectedRevisionId!==undefined,checkReferences=Object.hasOwn(options,'expectedReferences')&&options.expectedReferences!==undefined;character(characterId);if(!Array.isArray(references))throw fail('Invalid reference selection');
     for(const r of references){if(!r||!one('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?',r.media_id,characterId))throw fail('References must be assigned to this character.');if(!['face','body','detail','general'].includes(r.role))throw fail('Choose a reference role.');}
     const prior=canon(characterId);if(checkRevision&&(prior?.id??null)!==(expectedRevisionId??null))throw fail('The approved identity changed. Retrieve the character and prepare the proposal again.',409);const previous=prior?JSON.parse(prior.references_json):[],snapshots=[];
     for(const r of references){const m=asset(r.media_id);if(m.kind!=='image'||!one('SELECT 1 FROM active_media WHERE id=?',r.media_id))throw fail('References must be active images.');const sha256=await fingerprint(await safeFile(m)),expected=previous.find(x=>x.media_id===r.media_id)?.sha256;if(expected&&expected!==sha256)throw fail('An approved reference file has changed. Restore the original, or explicitly remove the reference before approving its replacement.');if(expectedFingerprints&&Object.hasOwn(expectedFingerprints,r.media_id)&&expectedFingerprints[r.media_id]!==sha256)throw fail('A selected image changed after human approval. Prepare a new reference proposal.',409);snapshots.push({media_id:r.media_id,role:r.role,sha256});}
@@ -304,7 +305,7 @@ export async function createApp(options={}) {
         if(moving.has(mid)||scanning)throw fail('A move or scan is running. Please retry when it finishes.',409);
         moving.add(mid);const moveId=id();run('INSERT INTO file_moves VALUES(?,?,?,?,?,?,?)',moveId,mid,m.relative_path,dest.relative,'preparing',null,now());
         try{
-          await fs.mkdir(dest.dir,{recursive:false}).catch(e=>{if(e.code!=='EEXIST')throw e;});await destinationFor(m,body.folder);
+          await fs.mkdir(characterParent(root),{recursive:true});await fs.mkdir(dest.dir,{recursive:false}).catch(e=>{if(e.code!=='EEXIST')throw e;});await destinationFor(m,body.folder);
           // Both absolute paths have been checked inside the resource root. Copy exclusively,
           // verify bytes, and update the catalogue before removing the original source.
           await fs.copyFile(source,dest.full,constants.COPYFILE_EXCL);

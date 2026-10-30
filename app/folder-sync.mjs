@@ -1,3 +1,4 @@
+import {organized,characterFolder,characterParent,storageEntries} from './storage-layout.mjs';
 import {promises as fs,constants,readFileSync} from 'node:fs';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
@@ -11,15 +12,15 @@ export function installFolderSync({db,root,dataDir,all,one,run,transaction,fail,
   const characters=()=>all('SELECT c.* FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL');
   function validFolder(name){if(typeof name!=='string'||!name.trim()||name!==name.trim()||name.length>200||name.startsWith('.')||/[\\/:*?"<>|\x00-\x1f]/.test(name)||/[. ]$/.test(name)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(name)||['app','tests','docs','backups','node_modules'].includes(name.toLowerCase()))throw fail('The character name must also be a valid Windows folder name (no /, :, trailing dots, or reserved names).');return name;}
   async function checked(relative,exists=true){const full=path.resolve(root,relative),rel=path.relative(root,full);if(!rel||rel.startsWith('..')||path.isAbsolute(rel))throw fail('Folder must stay inside the resource directory.',403);let probe=full;while(probe!==root){try{const stat=await fs.lstat(probe);if(stat.isSymbolicLink())throw fail('Linked folders or files cannot be renamed.',403);const real=await fs.realpath(probe),realRoot=await fs.realpath(root),r=path.relative(realRoot,real);if(r.startsWith('..')||path.isAbsolute(r))throw fail('Folder points outside the resource directory.',403);return full;}catch(e){if(e.code!=='ENOENT'||(exists&&probe===full))throw e;probe=path.dirname(probe);}}return full;}
-  async function inventory(folder){const files=[],dirs=[];async function walk(relative){const full=await checked(relative);for(const e of await fs.readdir(full,{withFileTypes:true})){const rel=path.join(relative,e.name);if(e.isSymbolicLink())throw fail('A folder contains a symbolic link. Review it before synchronizing.',409);if(e.isDirectory()){dirs.push(rel);await walk(rel);}else if(e.isFile()){const s=await fs.stat(await checked(rel));files.push({from:rel,size:s.size,mtime:s.mtimeMs});}else throw fail('A folder contains an unsupported filesystem entry.',409);}}await walk(folder);return {files,dirs};}
-  function candidates(c,folder){const k=key(folder),aliases=[c.aliases,...String(c.aliases||'').split(/[,\n]/)].filter(Boolean);return key(c.name)===k||aliases.some(a=>key(a.trim())===k)||key(c.name).endsWith(' - '+k);}
+  async function inventory(folder){const files=[],dirs=[];async function walk(relative){const full=await checked(relative);for(const e of await storageEntries(full)){const rel=path.join(relative,e.name);if(e.isSymbolicLink())throw fail('A folder contains a symbolic link. Review it before synchronizing.',409);if(e.isDirectory()){dirs.push(rel);await walk(rel);}else if(e.isFile()){const s=await fs.stat(await checked(rel));files.push({from:rel,size:s.size,mtime:s.mtimeMs});}else throw fail('A folder contains an unsupported filesystem entry.',409);}}await walk(folder);return {files,dirs};}
+  function candidates(c,folder){const k=key(path.basename(folder)),aliases=[c.aliases,...String(c.aliases||'').split(/[,\n]/)].filter(Boolean);return key(c.name)===k||aliases.some(a=>key(a.trim())===k)||key(c.name).endsWith(' - '+k);}
   function ownership(){const chars=characters(),owners=new Map(all('SELECT * FROM sorted_folders').filter(o=>chars.some(c=>c.id===o.character_id)).map(o=>[o.folder,o.character_id]));
     for(const {folder} of all("SELECT DISTINCT folder FROM media WHERE folder<>''")){if(owners.has(folder))continue;const matches=chars.filter(c=>candidates(c,folder)&&one('SELECT 1 FROM depictions d JOIN media m ON m.id=d.media_id WHERE d.character_id=? AND m.folder=? LIMIT 1',c.id,folder));if(matches.length===1)owners.set(folder,matches[0].id);}
     return {chars,owners};
   }
   async function plansFor(cid=null,newName=null){const {chars,owners}=ownership(),plans=[],unmapped=[];const allFolders=all("SELECT folder,COUNT(*) count FROM media WHERE folder<>'' GROUP BY folder");
-    for(const {folder,count} of allFolders){const owner=owners.get(folder);if(!owner){if(!cid)unmapped.push({folder,count,reason:'No unique established character ownership'});continue;}if(cid&&owner!==cid)continue;const c=chars.find(c=>c.id===owner),destination=cid&&newName!==null?newName:c.name;if(folder===destination)continue;const p={source:folder,destination,character_id:owner,character_name:c.name,count,files:[],dirs:[],blocked:null};
-      try{validFolder(folder);validFolder(destination);if(chars.some(other=>other.id!==owner&&key(other.name)===key(destination)))throw fail('Another character has this folder name. Rename one character first.',409);if([...owners].some(([f,id])=>id!==owner&&key(f)===key(destination)))throw fail('The receiving folder belongs to another character.',409);
+    for(const {folder,count} of allFolders){const owner=owners.get(folder);if(!owner){if(!cid)unmapped.push({folder,count,reason:'No unique established character ownership'});continue;}if(cid&&owner!==cid)continue;const c=chars.find(c=>c.id===owner),destination=characterFolder(root,cid&&newName!==null?newName:c.name);if(folder===destination)continue;const p={source:folder,destination,character_id:owner,character_name:c.name,count,files:[],dirs:[],blocked:null};
+      try{if(organized(root)&&!folder.startsWith('10_CHARACTERS'+path.sep))throw fail('Choose an established character folder.');validFolder(path.basename(folder));validFolder(path.basename(destination));if(chars.some(other=>other.id!==owner&&key(characterFolder(root,other.name))===key(destination)))throw fail('Another character has this folder name. Rename one character first.',409);if([...owners].some(([f,id])=>id!==owner&&key(f)===key(destination)))throw fail('The receiving folder belongs to another character.',409);
         if(all('SELECT relative_path FROM media WHERE folder=?',folder).some(m=>!m.relative_path.startsWith(folder+path.sep)))throw fail('Catalogue folder metadata needs reconciliation before renaming.',409);
         const entries=await inventory(folder);p.files=entries.files;p.dirs=entries.dirs; // Metadata only; no OneDrive content downloads.
         for(const file of p.files){file.to=path.join(destination,path.relative(folder,file.from));const existing=one('SELECT id FROM media WHERE relative_path=?',file.to);if(existing&&file.to!==file.from&&key(folder)!==key(destination))throw fail('A receiving path already has a catalogue record: '+file.to,409);}
@@ -73,19 +74,19 @@ export function installFolderSync({db,root,dataDir,all,one,run,transaction,fail,
   async function createCharacterWithFolder(cid,name){
     validFolder(name);
     if(busy||moving.size||isScanning())throw fail('Wait for the current scan or file operation.',409);
-    busy=true;let created=false,createdStat=null,folder=name,full=null;
+    busy=true;let created=false,createdStat=null,folder=characterFolder(root,name),full=null;
     function validate(){
       const existing=one('SELECT * FROM characters WHERE id=?',cid);
       if(existing&&(existing.name!==name||one('SELECT 1 FROM character_ui WHERE character_id=? AND merged_into IS NOT NULL',cid)))throw fail('This creation request belongs to another character. Reload the character list.',409);
       if(characters().some(c=>c.id!==cid&&key(c.name.trim())===key(name)))throw fail('A character already has this name. Choose the existing character or use a distinct name.',409);
       if(all('SELECT * FROM sorted_folders').some(o=>key(o.folder)===key(folder)&&o.character_id!==cid))throw fail('This folder already belongs to another character. Choose a distinct name.',409);
-      if(all('SELECT folder FROM locations WHERE folder IS NOT NULL').some(l=>key(l.folder.split(/[\\/]/)[0])===key(folder)))throw fail('This folder is used for locations. Choose a distinct character name.',409);
+      if(all('SELECT folder FROM locations WHERE folder IS NOT NULL').some(l=>key(l.folder)===key(folder)))throw fail('This folder is used for locations. Choose a distinct character name.',409);
       return existing;
     }
     try{
-      const entries=(await fs.readdir(root,{withFileTypes:true})).filter(e=>key(e.name)===key(name));
+      if(organized(root))await fs.mkdir(characterParent(root),{recursive:true});const entries=(await storageEntries(characterParent(root))).filter(e=>key(e.name)===key(name));
       if(entries.length>1)throw fail('Several folders match this name. Review them on the laptop.',409);
-      if(entries.length)folder=entries[0].name;
+      if(entries.length)folder=characterFolder(root,entries[0].name);
       validate();full=await checked(folder,false);
       try{await fs.mkdir(full);created=true;}catch(e){if(e.code!=='EEXIST')throw e;}
       await checked(folder);const stat=await fs.lstat(full);if(!stat.isDirectory())throw fail('A file already uses this name. Choose a distinct character name.',409);if(created)createdStat=stat;

@@ -304,3 +304,8 @@ attributed before/after history and existing export/restore apply. Character
 proposals remain a separate human-reviewed workflow and old proposals become
 stale after template changes. No automatic live-template content change occurs
 merely by deploying this capability.
+
+
+## 2026-10-30: Explicit organized OneDrive layout
+
+An opt-in storage-layout.json separates runtime source, character folders, shared media, staging, exports, backups and archive. Keep the live database and credentials outside OneDrive. IDs, depiction links, canon and immutable historical manifests survive journalled path migration. Scanner skips system/import/export/backup/archive trees. Imports commit once into shared Unassigned; character creation/rename/moves resolve nested folders. Consistent snapshots are staged locally and may publish only into the exact reserved 90_BACKUPS destination, which is excluded from media scans.

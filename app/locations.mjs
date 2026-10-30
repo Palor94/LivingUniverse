@@ -1,3 +1,4 @@
+import {organized,storageEntries} from './storage-layout.mjs';
 import {promises as fs,readFileSync} from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -12,7 +13,7 @@ export function installLocations({db,root,all,one,run,transaction,fail,setLocati
     if(typeof relative!=='string'||!relative.trim()||path.isAbsolute(relative))throw fail('Choose a relative location folder.');const parts=relative.split(/[\\/]/);
     if(parts.some(p=>!p||p==='.'||p==='..'||p.startsWith('.')||/[<>:"|?*\x00-\x1f]/.test(p)||/[. ]$/.test(p)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(p)))throw fail('Use valid Windows folder names.');
     if(['app','tests','docs','backups','node_modules'].includes(parts[0].toLowerCase()))throw fail('Choose a media folder.');
-    const full=path.resolve(root,...parts),rel=path.relative(root,full);if(!rel||rel.startsWith('..')||path.isAbsolute(rel))throw fail('Location folder must stay inside your resource folder.',403);
+    if(organized(root)&&!(parts[0]==='20_SHARED_MEDIA'&&parts[1]==='Locations'))throw fail('Choose a folder under shared Locations.');const full=path.resolve(root,...parts),rel=path.relative(root,full);if(!rel||rel.startsWith('..')||path.isAbsolute(rel))throw fail('Location folder must stay inside your resource folder.',403);
     let probe=root;const realRoot=await fs.realpath(root);for(const part of parts){probe=path.join(probe,part);try{const st=await fs.lstat(probe);if(st.isSymbolicLink()||!st.isDirectory())throw fail('Location folders must be ordinary directories.',409);const real=await fs.realpath(probe),r=path.relative(realRoot,real);if(r.startsWith('..')||path.isAbsolute(r))throw fail('Location folder points outside your resource directory.',403);}catch(e){if(e.code!=='ENOENT')throw e;break;}}
     return {full,relative:parts.join(path.sep)};
   }
@@ -28,8 +29,8 @@ export function installLocations({db,root,all,one,run,transaction,fail,setLocati
   }
   function set(mid,value){if(value===null||value===''){run('DELETE FROM media_location_links WHERE media_id=?',mid);run('DELETE FROM media_locations WHERE media_id=?',mid);return;}const place=resolve(value);if(details(mid)?.id!==place.id)run('DELETE FROM media_location_links WHERE media_id=?',mid);run('INSERT INTO media_locations VALUES(?,?) ON CONFLICT(media_id) DO UPDATE SET location_id=excluded.location_id',mid,place.id);setLocation(mid,true);if(place.tag_id)run('INSERT OR IGNORE INTO media_tags VALUES(?,?)',mid,place.tag_id);}
   function setMany(mid,values){if(!Array.isArray(values)||values.length>100||values.some(v=>typeof v!=='string'))throw fail('Choose up to 100 existing locations.');const places=[...new Map(values.map(value=>{const p=resolve(value);return[p.id,p];})).values()];const primary=places.find(p=>p.id===details(mid)?.id)||places[0];set(mid,primary?.id??null);run('DELETE FROM media_location_links WHERE media_id=?',mid);for(const p of places){if(p.id!==primary.id)run('INSERT INTO media_location_links VALUES(?,?)',mid,p.id);if(p.tag_id)run('INSERT OR IGNORE INTO media_tags VALUES(?,?)',mid,p.tag_id);}}
-  async function folderOptions(){const folders=[];async function walk(relative,depth){if(depth>3||folders.length>=200)return;try{const dir=await folderPath(relative);await fs.access(dir.full);folders.push(dir.relative);for(const e of await fs.readdir(dir.full,{withFileTypes:true}))if(e.isDirectory()&&!e.isSymbolicLink()&&!e.name.startsWith('.'))await walk(path.join(relative,e.name),depth+1);}catch{}}
-    for(const base of ['Helyszín','Locations','Location references'])await walk(base,0);return folders;
+  async function folderOptions(){const folders=[];async function walk(relative,depth){if(depth>3||folders.length>=200)return;try{const dir=await folderPath(relative);await fs.access(dir.full);folders.push(dir.relative);for(const e of await storageEntries(dir.full))if(e.isDirectory()&&!e.isSymbolicLink()&&!e.name.startsWith('.'))await walk(path.join(relative,e.name),depth+1);}catch{}}
+    for(const base of organized(root)?[path.join('20_SHARED_MEDIA','Locations')]:['Helyszín','Locations','Location references'])await walk(base,0);return folders;
   }
   async function handle({p,body,req,json}){
     if(p==='/api/location-editor'&&req.method==='GET'){json(editor.list());return true;}
@@ -39,7 +40,7 @@ export function installLocations({db,root,all,one,run,transaction,fail,setLocati
     if(p==='/api/locations'&&req.method==='GET'){json({items:all('SELECT l.*,p.english_name,p.category,(SELECT COUNT(*) FROM active_media m WHERE EXISTS(SELECT 1 FROM media_locations ml WHERE ml.media_id=m.id AND ml.location_id=l.id) OR EXISTS(SELECT 1 FROM media_location_links ml WHERE ml.media_id=m.id AND ml.location_id=l.id)) media_count FROM locations l LEFT JOIN location_profiles p ON p.location_id=l.id ORDER BY l.name'),tags:all("SELECT * FROM structured_tags WHERE group_id='group-setting' ORDER BY name"),folders:await folderOptions()});return true;}
     if(p==='/api/locations'&&req.method==='POST'){
       const name=typeof body.name==='string'?body.name.trim().normalize('NFC'):'';if(!name||name.length>100)throw fail('Enter a location name of 1–100 characters.');if(!['tag','folder'].includes(body.kind||'tag'))throw fail('Choose a location tag or folder.');let folder=null;
-      if(body.kind==='folder'){const selected=await folderPath(body.folder||path.join('Helyszín',name));if(one('SELECT 1 FROM sorted_folders WHERE folder=?',selected.relative)||one('SELECT 1 FROM characters WHERE name=?',selected.relative))throw fail('This folder belongs to a character. Choose a location folder.');await fs.mkdir(selected.full,{recursive:true});await folderPath(selected.relative);folder=selected.relative;}
+      if(body.kind==='folder'){const selected=await folderPath(body.folder||path.join(organized(root)?path.join('20_SHARED_MEDIA','Locations'):'Helyszín',name));if(one('SELECT 1 FROM sorted_folders WHERE folder=?',selected.relative)||one('SELECT 1 FROM characters WHERE name=?',selected.relative))throw fail('This folder belongs to a character. Choose a location folder.');await fs.mkdir(selected.full,{recursive:true});await folderPath(selected.relative);folder=selected.relative;}
       json(ensureRecord(name,folder));return true;
     }
     if(p==='/api/locations/assign'&&req.method==='POST'){

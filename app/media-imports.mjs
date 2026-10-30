@@ -1,3 +1,4 @@
+import {organized} from './storage-layout.mjs';
 import {promises as fs,constants,readFileSync} from 'node:fs';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
@@ -106,7 +107,7 @@ export function installMediaImports({db,root,dataDir,one,all,run,transaction,con
       if(imageOnly&&type.kind!=='image')throw problem('INVALID_MEDIA','This operation accepts only decoded JPEG or PNG images.');
       const claimed=String(contentType||'').split(';')[0].trim().toLowerCase();
       if(claimed&&claimed!=='application/octet-stream'&&claimed!==type.contentType)throw problem('TYPE_MISMATCH','The file bytes do not match the declared media type.');
-      await ordinaryDirectory(root);let folder='Imported media',relative=path.join(folder,fingerprint+'.'+type.extension),destination;
+      await ordinaryDirectory(root);let folder=organized(root)?path.join('20_SHARED_MEDIA','Unassigned'):'Imported media',relative=path.join(folder,fingerprint+'.'+type.extension),destination;
       const existingBlob=one('SELECT media_id FROM imported_media_blobs WHERE sha256=?',fingerprint);
       if(existingBlob){const existing=await verifyExisting(existingBlob.media_id,fingerprint);destination=existing.destination;relative=existing.media.relative_path;folder=existing.media.folder;}
       else{const destinationDir=await ordinaryDirectory(path.join(root,folder));destination=path.join(destinationDir,path.basename(relative));try{await fs.copyFile(temp,destination,constants.COPYFILE_EXCL);}catch(error){if(error.code!=='EEXIST')throw error;const info=await fs.lstat(destination);if(info.isSymbolicLink()||!info.isFile())throw problem('UNSAFE_STORAGE','Existing import storage is not a regular file.',409);}}
