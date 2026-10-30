@@ -35,7 +35,8 @@ test('private catalogue: shared media, immutable canon, persistence, restore, an
     assert.equal((await request('/api/media/'+image.id,{character_ids:[attila.id]},'PUT')).status,400);
     const next=await call('/api/characters/'+peter.id+'/canon',{appearance:initial.appearance,references:[],reason:'Remove reference explicitly'});assert.equal(next.parent_id,initial.id);
     await call('/api/relationships',{source_id:peter.id,target_id:attila.id,description:'Friends'});
-    assert.equal((await call('/api/characters/'+peter.id)).history.length,2);const cleaned=(await call('/api/characters/'+peter.id)).history;assert.ok(cleaned.every(r=>!JSON.parse(r.references_json).some(ref=>ref.media_id===image.id)));assert.equal(cleaned.find(r=>r.id===initial.id).reason,'Reference data removed by creator');
+    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM canon WHERE character_id=?').get(peter.id).n,2);assert.equal((await call('/api/characters/'+peter.id)).history.length,1); // UI history lists appearance changes only.
+    const cleaned=(await call('/api/characters/'+peter.id)).history;assert.ok(cleaned.every(r=>!JSON.parse(r.references_json).some(ref=>ref.media_id===image.id)));assert.equal(cleaned.find(r=>r.id===initial.id).reason,'Reference data removed by creator');
     const range=await fetch(base+'/media/'+video.id,{headers:{Range:'bytes=3-7'}});assert.equal(range.status,206);assert.equal((await range.arrayBuffer()).byteLength,5);
     assert.equal((await fetch(base+'/api/state',{headers:{Origin:'https://example.com'}})).status,403);
     const badHost=await new Promise((resolve,reject)=>{const req=http.get(base+'/api/state',{headers:{Host:'evil.example'}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);});assert.equal(badHost,403);

@@ -9,7 +9,7 @@ export function forgetRemovedReferences({all,run,characterId,retainedIds}){
     const refs=JSON.parse(row.references_json),kept=refs.filter(ref=>retained.has(ref.media_id));
     for(const ref of refs)if(!retained.has(ref.media_id))removed.add(ref.media_id);
     if(kept.length!==refs.length){
-      run('UPDATE canon SET references_json=? WHERE id=?',JSON.stringify(kept),row.id);revisions++;
+      run('UPDATE canon SET references_json=?,reason=? WHERE id=?',JSON.stringify(kept),'Reference data removed by creator',row.id);revisions++;
     }
   }
   if(!removed.size)return {revisions,proposals};

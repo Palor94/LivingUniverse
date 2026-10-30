@@ -38,12 +38,14 @@ test('permanent erasure is confirmed, limited to removed items, preserves origin
     const c=await call('/api/characters',{name:'Protected identity'});
     await call('/api/media/'+reference.id,{character_ids:[c.id]},'PUT');
     const approved=await call('/api/characters/'+c.id+'/canon',{appearance:'Approved',references:[{media_id:reference.id,role:'face'}]});
+    assert.equal((await request('/api/media/'+reference.id+'/remove',{mode:'file'})).status,409);
     await call('/api/characters/'+c.id+'/canon',{appearance:'Retired reference',references:[]});
     await call('/api/media/'+reference.id+'/remove',{mode:'file'});
     const protectedItem=(await call('/api/removed')).items.find(m=>m.id===reference.id);
-    assert.equal(protectedItem.protected,1);assert.equal((await erase(protectedItem)).status,409);
+    assert.equal(protectedItem.protected,0); // Explicit retirement scrubs historical reference memberships.
     assert.equal(await fs.readFile(path.join(root,protectedItem.relative_path),'utf8'),'reference.png');
-    const backup=await call('/api/export');assert.ok(backup.canon.some(r=>r.id===approved.id));assert.ok(backup.media.some(m=>m.id===trash.id));
+    assert.equal((await erase(protectedItem)).status,200);
+    const backup=await call('/api/export');assert.ok(backup.canon.some(r=>r.id===approved.id&&r.appearance==='Approved'&&r.references_json==='[]'));assert.ok(backup.media.some(m=>m.id===trash.id));
     assert.ok(backup.application_settings.some(s=>s.key==='erased_media:'+trash.id));
     const deleted=JSON.parse(backup.application_settings.find(s=>s.key==='deleted_character:'+emptyAfterErasure.id).value);
     assert.equal(deleted.erased_media_links[0].media_id,trash.id);
