@@ -54,7 +54,7 @@ Csatlakozó helyreállítás: docs/MCP_RECOVERY.md, docs/MCP_INTEGRATION.md, doc
 
 ## GitHub és archívumok
 
-A main a közös, frissíthető forrás. A korábbi backup/* ágak dátumozott történeti pillanatképek maradnak. A régi gyökérbeli katalógusexportok az aktuális forrásfából kikerülnek, de a korábbi Git-commitokból továbbra is visszakereshetők; nem történt előzménytörlés. Új katalógusexport, privát média vagy kulcs nem kerülhet Gitbe. A helyi, nem publikált commitok megőrzésére a create elfogad egy előre elkészített `--history-bundle` fájlt, amelyet a privát platform/ parcellába másol.
+A main a közös, frissíthető forrás. A korábbi backup/* ágak dátumozott történeti pillanatképek maradnak. A régi gyökérbeli katalógusexportok az aktuális forrásfából kikerülnek, de a korábbi Git-commitokból továbbra is visszakereshetők; nem történt előzménytörlés. Új katalógusexport, privát média vagy kulcs nem kerülhet Gitbe. Git-munkapéldányból futtatva a mentő automatikusan teljes helyi Git-bundle-t is készít és ellenőriz, így a nem publikált commitok és archív ágak is megmaradnak a privát platform/ parcellában. Külső forráskönyvtárnál külön `--history-bundle` fájl is megadható. A nem commitolt forrásváltozásokat a source/ fájlmásolat őrzi.
 
 Új önálló részegységnél a components.json jegyzékbe add meg a forrását, tartós adatait és visszaállítását; egészítsd ki a mentőprogram engedélyezett útvonalait és a próba-visszaállítás tesztjét. A jelenlegi eszköz nem általános teljes lemezmentő: naplókat, gyorsítótárakat, teljes régi mentésgyűjteményeket és tetszőleges új könyvtárakat nem gyűjt automatikusan.
 
