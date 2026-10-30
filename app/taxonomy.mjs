@@ -21,7 +21,7 @@ export function installTaxonomy({db,all,one,run,transaction,fail}){
   function label(value){if(typeof value!=='string'||!value.trim()||value.trim().length>100)throw fail('Use a name of 1–100 characters.');return value.trim().normalize('NFC');}
   function validateTags(ids){if(!Array.isArray(ids)||ids.length>1000||ids.some(id=>typeof id!=='string'||!one('SELECT 1 FROM structured_tags WHERE id=?',id)))throw fail('Choose existing structured tags.');return [...new Set(ids)];}
   function validateMedia(ids){if(!Array.isArray(ids)||!ids.length||ids.length>1000||ids.some(id=>typeof id!=='string'||!one('SELECT 1 FROM active_media WHERE id=?',id)))throw fail('Choose 1–1000 active media records.');return [...new Set(ids)];}
-  const adoptTag=(mid,tid)=>run('DELETE FROM note_tag_links WHERE media_id=? AND tag_id=?',mid,tid);
+  const adoptTag=(mid,tid)=>{run('DELETE FROM note_tag_links WHERE media_id=? AND tag_id=?',mid,tid);run('DELETE FROM media_analysis_tag_links WHERE media_id=? AND tag_id=?',mid,tid);};
   function set(mid,ids){const tags=validateTags(ids);run('DELETE FROM media_tags WHERE media_id=?',mid);for(const tid of tags)run('INSERT INTO media_tags VALUES(?,?)',mid,tid);}
   const noteTags=installNoteTags({db,all,one,run,transaction,fail,validateMedia,validateTags});
   const details=mid=>all('SELECT t.id,COALESCE(NULLIF(l.hu_name,\'\'),t.name) name,t.name original_name,l.en_name english_name,t.group_id,g.name group_name FROM media_tags mt JOIN structured_tags t ON t.id=mt.tag_id JOIN tag_groups g ON g.id=t.group_id LEFT JOIN tag_localizations l ON l.tag_id=t.id WHERE mt.media_id=? ORDER BY g.name,t.name',mid);
@@ -45,7 +45,7 @@ export function installTaxonomy({db,all,one,run,transaction,fail}){
     }
     if(p==='/api/taxonomy/apply'&&req.method==='POST'){
       const ids=validateMedia(body.media_ids),tags=validateTags(body.tag_ids);if(!['add','remove','set'].includes(body.operation))throw fail('Choose add, remove, or replace.');if(body.operation==='set'&&ids.length!==1)throw fail('Replace applies only to one media item. Use additive bulk tags.');
-      let updated=0;transaction(()=>{for(const mid of ids){const before=details(mid).map(t=>t.id).sort().join('|');if(body.operation==='set')set(mid,tags);else for(const tid of tags){if(body.operation==='add'){run('INSERT OR IGNORE INTO media_tags VALUES(?,?)',mid,tid);run('DELETE FROM note_tag_links WHERE media_id=? AND tag_id=?',mid,tid);}else run('DELETE FROM media_tags WHERE media_id=? AND tag_id=?',mid,tid);}if(details(mid).map(t=>t.id).sort().join('|')!==before)updated++;}});json({updated,selected:ids.length});return true;
+      let updated=0;transaction(()=>{for(const mid of ids){const before=details(mid).map(t=>t.id).sort().join('|');if(body.operation==='set')set(mid,tags);else for(const tid of tags){if(body.operation==='add'){run('INSERT OR IGNORE INTO media_tags VALUES(?,?)',mid,tid);adoptTag(mid,tid);}else run('DELETE FROM media_tags WHERE media_id=? AND tag_id=?',mid,tid);}if(details(mid).map(t=>t.id).sort().join('|')!==before)updated++;}});json({updated,selected:ids.length});return true;
     }
     if(p==='/api/taxonomy/legacy'&&req.method==='GET'){
       const map=new Map();for(const row of all('SELECT n.tags FROM media_notes n JOIN active_media m ON m.id=n.media_id'))for(const token of new Map(tokens(row.tags).map(t=>[tagKey(t),t])).values()){const key=tagKey(token),entry=map.get(key)||{text:token,key,count:0};entry.count++;map.set(key,entry);}json({items:[...map.values()].sort((a,b)=>b.count-a.count)});return true;

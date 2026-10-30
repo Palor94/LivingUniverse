@@ -358,3 +358,23 @@ attributed before/after history and existing export/restore apply. Character
 proposals remain a separate human-reviewed workflow and old proposals become
 stale after template changes. No automatic live-template content change occurs
 merely by deploying this capability.
+
+## 2026-10-30: Mock-first media analysis with explicit proposal review
+
+Implement phase-three infrastructure independently of any paid/cloud provider.
+Only the local deterministic mock is enabled; it makes no recognition claim.
+Keep immutable raw results, vocabulary/place matches, review decisions and added
+link ownership separate. Respect explicitly selected goals and existing stable
+HU/EN/alias IDs. Exact places require qualified human selection; unfamiliar
+labels/places stay proposals until separate vocabulary/location editing.
+
+Persist bounded jobs, pause/resume/cancel, source/provider-version cache and
+safe restart behavior. Additive migration 023 backs up populated databases;
+export/restore validates analysis consistency and pauses unfinished work.
+Acceptance is additive, idempotent, preview-bound and reversible without
+removing pre-existing or manually adopted links. Background assignment must
+not alter character sorting roles/completion, notes or canon. Desktop-only
+writes require Origin + dedicated CSRF; no new mobile or MCP write surface.
+See docs/MEDIA_ANALYSIS.md and docs/AI_PROVIDER_COMPARISON.md. Real-provider
+integration, private external uploads and spending need a separate explicit
+choice and reviewed data/cost preview; no deployment is implied.

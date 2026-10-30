@@ -97,3 +97,21 @@ Reference retention update (2026-10-29): explicit reference removal now scrubs h
 2026-10-29 user correction implemented: separate non-playable template character; remove per-character Ghost tab; integrate shared fields, accepted values and download/upload controls into regular desktop/mobile profiles. Template additions appear empty for all characters.
 
 2026-10-30: Shared anatomy/appearance_detail field guidance now covers the supplied A–D checklist; full-generation package version 2 exports the current shared guidance. Existing field values and canon remain unchanged.
+
+## 2026-10-30: Media analysis phase three infrastructure
+
+Implemented on `codex/media-analysis-review`: provider-independent result
+contract, deterministic mock, bounded read-only derivatives, persistent jobs,
+pause/resume/cancel, cache, bilingual stable-tag matching and separate exact
+place proposals. Desktop single/page-selection workflows support dry-run review,
+selective accept/reject and ownership-aware undo. Additive migration 023,
+verified pre-migration backups and compatible export/restore are included.
+Original notes, character links, canon, media bytes and sorting remain protected.
+See docs/MEDIA_ANALYSIS.md for contracts, rollback and limits.
+
+Next: select a specific real-provider benchmark route using
+`docs/AI_PROVIDER_COMPARISON.md`, confirm hardware/model/license or cloud
+cost/data-transfer scope, then implement one adapter and evaluate on fixed
+synthetic/public images. No real recognition, automatic new-place creation,
+private external upload, paid request, merge or production rollout happened
+in this development phase.

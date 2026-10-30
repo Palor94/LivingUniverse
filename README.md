@@ -229,3 +229,12 @@ az update_profile_template trusted módban menti az explicit kért mezőmódosí
 bővítést vagy átrendezést. Verzióellenőrzés, ismétlésvédelem és előzmény védi;
 a meglévő karakterértékek és kánon változatlanok. Részletek:
 [Közös profilsablon](docs/GHOST_PROFILE.md).
+
+### Képelemzés · mock tesztüzem
+
+A desktop médiatár kijelölt képeiből vagy egy mentett képadatlapról indítható
+helyi mock köteg. Szünet/folytatás/megszakítás, cache, HU/EN javaslatok,
+ellenőrzési előnézet, egyesével/tömegesen elfogadás/elvetés és visszavonás.
+Ez folyamatpróba: **nincs valódi képfelismerés vagy külső szolgáltató bekötve**.
+Lásd [használat, migráció és visszaállítás](docs/MEDIA_ANALYSIS.md), valamint
+[a következő adapterfázis szolgáltatói összehasonlítását](docs/AI_PROVIDER_COMPARISON.md).

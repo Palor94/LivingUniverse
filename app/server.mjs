@@ -1,3 +1,7 @@
+import {installMediaAnalysis,backupBeforeMediaAnalysis,analysisTables} from './media-analysis.mjs';
+import {createAnalysisReview} from './analysis-review.mjs';
+import {createAnalysisRestore} from './analysis-restore.mjs';
+import {createAnalysisRoutes} from './analysis-routes.mjs';
 import {forgetRemovedReferences} from './reference-retention.mjs';
 import {installGhostProfiles} from './ghost-profile.mjs';
 import {installLocationCanvas} from './location-canvas.mjs';
@@ -117,6 +121,12 @@ export async function createApp(options={}) {
   let locations;try{locations=await installLocations({db,dataDir,root,all,one,run,transaction,fail,setLocation:catalogue.setLocation,relocate:enhancements.relocate,adoptTag:taxonomy.adoptTag});}catch(e){db.close();throw e;}
   const storyEvents=installStoryEvents({db,transaction});
   const ghostProfiles=installGhostProfiles({one,run,transaction});
+  const analysisMigrationBackup=await backupBeforeMediaAnalysis(db,dataDir);
+  const analysisBusy=()=>folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking();
+  const mediaAnalysis=installMediaAnalysis({db,root,one,all,run,transaction,taxonomy,locations,isBusy:analysisBusy,...(options.mediaAnalysisTestOptions||{})});
+  const analysisReview=createAnalysisReview({analysis:mediaAnalysis,one,all,run,transaction,isBusy:analysisBusy});
+  const analysisRestore=createAnalysisRestore({one,all,run,transaction});
+  const analysisRoutes=createAnalysisRoutes({analysis:mediaAnalysis,review:analysisReview});
   const locationCanvas=installLocationCanvas({dataDir,editor:locations.editor,transaction});
   let mcpWriteConfig=options.mcpWrites;
   try{
@@ -219,6 +229,7 @@ export async function createApp(options={}) {
           const {character_id,...args}=body.arguments;return json(ghostProfiles.propose(character_id,args));
         }catch(e){return json({code:e.code||'GHOST_CHANGE_REJECTED',error:e.status?e.message:'The ghost-profile operation could not be completed.'},e.status||500);}
       }
+      if(await analysisRoutes.handle({p,body,req,url,json}))return;
       if(ghostProfiles.handle({p,body,req,json}))return;
       if(storyEvents.handle({p,body,req,url,json}))return;
       if(await reconciliation.handle({p,body,req,url,json}))return;
@@ -357,14 +368,14 @@ export async function createApp(options={}) {
         character(body.character_id);if(typeof body.folder!=='string')throw fail('Choose a folder');run('INSERT OR IGNORE INTO depictions SELECT id,? FROM media WHERE folder=?',body.character_id,body.folder);return json({ok:true});
       }
       if(p==='/api/export'&&req.method==='GET'){
-        const tables=['characters','media','depictions','media_notes','reviews','canon','relationships','sorted_folders','file_moves',...Object.keys(extraTables)];const snapshot=transaction(()=>Object.fromEntries(tables.map(t=>[t,all('SELECT * FROM '+t)])));
-        res.setHeader('Content-Disposition','attachment; filename="living-universe-backup.json"');return json({schema_version:1,location_schema_version:2,exported_at:now(),...snapshot});
+        const tables=['characters','media','depictions','media_notes','reviews','canon','relationships','sorted_folders','file_moves',...Object.keys(extraTables),...Object.keys(analysisTables)];const snapshot=transaction(()=>Object.fromEntries(tables.map(t=>[t,all('SELECT * FROM '+t)])));
+        res.setHeader('Content-Disposition','attachment; filename="living-universe-backup.json"');return json({schema_version:1,location_schema_version:2,analysis_schema_version:1,exported_at:now(),...snapshot});
       }
       if(p==='/api/restore'&&req.method==='POST'){
-        if(body.schema_version!==1)throw fail('Unsupported backup version');
+        if(body.schema_version!==1)throw fail('Unsupported backup version');if(mediaAnalysis.isBusy())throw fail('Pause analysis jobs before restoring a catalogue.',409);
         if(one('SELECT COUNT(*) n FROM characters').n||one('SELECT COUNT(*) n FROM media').n||one('SELECT COUNT(*) n FROM locations').n)throw fail('Restore requires an empty catalogue. Use a separate data directory to avoid overwriting your work.');
         const tables={characters:['id','name','aliases','biography','personality','appearance','notes','cover_id','created_at','sexuality','speech_style'],media:['id','relative_path','folder','kind','size','modified_at','created_at'],depictions:['media_id','character_id'],media_notes:['media_id','tags','notes'],reviews:['id','media_id','character_id','decision','rating','notes','created_at'],canon:['id','character_id','parent_id','appearance','references_json','reason','created_at'],relationships:['id','source_id','target_id','description']};
-        transaction(()=>{locations.editor.prepareRestore(body);taxonomy.prepareRestore(body);for(const [t,cols] of Object.entries(tables)){if(!Array.isArray(body[t]))throw fail('Incomplete backup');for(const row of body[t]){if(t==='media'&&(path.isAbsolute(row.relative_path)||path.relative(root,path.resolve(root,row.relative_path)).startsWith('..')))throw fail('Invalid media path in backup');run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??(['sexuality','speech_style'].includes(c)?'':null)));}}if(body.sorted_folders!==undefined){if(!Array.isArray(body.sorted_folders))throw fail('Invalid folder assignments in backup');for(const r of body.sorted_folders)run('INSERT INTO sorted_folders VALUES(?,?)',r.folder,r.character_id);}if(body.file_moves!==undefined){if(!Array.isArray(body.file_moves))throw fail('Invalid move history');for(const r of body.file_moves)run('INSERT INTO file_moves VALUES(?,?,?,?,?,?,?)',r.id,r.media_id,r.from_path,r.to_path,r.status,r.sha256,r.created_at);}for(const [t,cols] of Object.entries(extraTables)){if(body[t]===undefined)continue;if(!Array.isArray(body[t]))throw fail('Invalid additional backup records');for(const row of body[t])run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??null));}if(body.tag_localizations===undefined)taxonomy.noteTags.seed();taxonomy.noteTags.validateRestore();locations.editor.validateRestore();storyEvents.validateRestore();mediaImports.uploads.afterRestore();});return json({ok:true});
+        transaction(()=>{analysisRestore.prepare(body);locations.editor.prepareRestore(body);taxonomy.prepareRestore(body);for(const [t,cols] of Object.entries(tables)){if(!Array.isArray(body[t]))throw fail('Incomplete backup');for(const row of body[t]){if(t==='media'&&(path.isAbsolute(row.relative_path)||path.relative(root,path.resolve(root,row.relative_path)).startsWith('..')))throw fail('Invalid media path in backup');run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??(['sexuality','speech_style'].includes(c)?'':null)));}}if(body.sorted_folders!==undefined){if(!Array.isArray(body.sorted_folders))throw fail('Invalid folder assignments in backup');for(const r of body.sorted_folders)run('INSERT INTO sorted_folders VALUES(?,?)',r.folder,r.character_id);}if(body.file_moves!==undefined){if(!Array.isArray(body.file_moves))throw fail('Invalid move history');for(const r of body.file_moves)run('INSERT INTO file_moves VALUES(?,?,?,?,?,?,?)',r.id,r.media_id,r.from_path,r.to_path,r.status,r.sha256,r.created_at);}for(const [t,cols] of Object.entries({...extraTables,...analysisTables})){if(body[t]===undefined)continue;if(!Array.isArray(body[t]))throw fail('Invalid additional backup records');for(const row of body[t])run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??null));}if(body.tag_localizations===undefined)taxonomy.noteTags.seed();taxonomy.noteTags.validateRestore();locations.editor.validateRestore();storyEvents.validateRestore();analysisRestore.afterRestore();mediaImports.uploads.afterRestore();});return json({ok:true});
       }
       const fm=p.match(/^\/media\/([^/]+)$/);
       if(fm&&['GET','HEAD'].includes(req.method)){
@@ -375,7 +386,7 @@ export async function createApp(options={}) {
         const headers={'Content-Type':types[path.extname(full).toLowerCase()]||'application/octet-stream','Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':m.kind==='image'?'private, no-cache':'private, max-age=60','ETag':etag,'X-Content-Type-Options':'nosniff'};if(status===206)headers['Content-Range']=`bytes ${start}-${end}/${s.size}`;
         res.writeHead(status,headers);if(req.method==='HEAD')return res.end();const stream=createReadStream(full,{start,end});stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);return;
       }
-      if(req.method==='GET'&&['/','/style.css','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/client.js','/enhancements.js','/picture-crop.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/note-tags.js','/suggestions.js','/locations.js','/location-editor.js','/location-tree-model.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-canvas-model.js','/location-canvas.css'].includes(p)){
+      if(req.method==='GET'&&['/','/style.css','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/client.js','/enhancements.js','/picture-crop.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/note-tags.js','/suggestions.js','/locations.js','/location-editor.js','/location-tree-model.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-canvas-model.js','/location-canvas.css','/media-analysis.js'].includes(p)){
         const file=path.join(appDir,'public',p==='/'?'index.html':p.slice(1));const data=await fs.readFile(file);res.writeHead(200,{'Content-Type':p.endsWith('.css')?'text/css':p.endsWith('.js')?'text/javascript':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",'X-Content-Type-Options':'nosniff'});return res.end(data);
       }
       throw fail('Not found',404);
@@ -395,7 +406,7 @@ export async function createApp(options={}) {
     mobileServer=createMobileServer({config:mobileConfig,all,one,run,transaction,ghostProfiles,mcpChanges:approveMcp,mediaImports:approveMcp?mediaImports:null,imageGeneration:approveMcp?imageGeneration:null,grokConnections,referencePreview,locationEditor:locations.editor,sorting,scan,scanRunning:()=>scanning,reconciliation,createCharacter:folderSync.createCharacterWithFolder,isBusy:()=>mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking()});
   }catch(e){console.error('Mobile access disabled: '+e.message);}
   const closeServer=s=>new Promise(resolve=>{if(!s?.listening)return resolve();s.close(()=>resolve());s.closeIdleConnections();});
-  return {server,mobileServer,storyMigrationBackup,imageMigrationBackup,mediaUploadMigrationBackup,mobilePort:mobileConfig?.port??4318,db,root,dataDir,folderSync,imageGeneration,close:async()=>{await imageGeneration.settle();await Promise.all([closeServer(server),closeServer(mobileServer)]);db.close();}};
+  return {server,mobileServer,mediaAnalysis,analysisMigrationBackup,storyMigrationBackup,imageMigrationBackup,mediaUploadMigrationBackup,mobilePort:mobileConfig?.port??4318,db,root,dataDir,folderSync,imageGeneration,close:async()=>{await mediaAnalysis.close();await imageGeneration.settle();await Promise.all([closeServer(server),closeServer(mobileServer)]);db.close();}};
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

@@ -1,9 +1,12 @@
 # Harmadik fázis: AI-képelemzés és ellenőrizhető javaslatok
 
-Műszaki terv, 2026-10-30. Nincs implementált modellkapcsolat, modelltelepítés,
-privát képfeltöltés, fizetős kérés, automatikus elemzési futtatás vagy új éles
-migráció. A jelenlegi helyszínfa, kétnyelvű címkeszótár és kézi jóváhagyási
-határok fölé épülő következő fejlesztési fázis terve.
+Műszaki terv, 2026-10-30. A mock infrastruktúra, tartós kötegek, cache,
+kétnyelvű javaslatillesztés, desktop ellenőrzés/visszavonás és a 023-as additív
+migráció elkészült külön fejlesztési ágon, tesztadatbázison. A ténylegesen működő
+rész és a visszaállítás leírása: [MEDIA_ANALYSIS.md](MEDIA_ANALYSIS.md).
+A valódi modellkapcsolat és minőségi értékelés továbbra is tervezett;
+nincs modelltelepítés, privát képfeltöltés, fizetős kérés vagy éles migráció.
+Lásd a [szolgáltatói összehasonlítást](AI_PROVIDER_COMPARISON.md).
 
 ## Cél és határok
 

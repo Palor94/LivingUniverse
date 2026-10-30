@@ -58,3 +58,18 @@
 .profile-overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}.profile-overview-grid>section{padding:16px;border:1px solid #465058;border-radius:10px;min-width:0}.profile-overview-grid h3{margin:0 0 10px;font-size:17px}.profile-overview-grid p{font-size:14px;line-height:1.65;overflow-wrap:anywhere;margin:10px 0}.profile-overview-grid small{display:block;color:#b6ac97;font-size:11px}.profile-overview{margin-bottom:24px}.profile-overview>p{color:#a9acac}
 
 .place-tree-row{display:flex;gap:4px;align-items:center;min-width:0}.place-tree-row>button:first-child{flex:0 0 30px;min-width:30px;padding:4px;text-align:center}.place-tree-row>button:last-child{flex:1;min-width:0}.place-list[role=tree]{max-height:60vh}.place-editor>section:first-child>div:has(+.place-list){display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}@media(min-width:1000px){.place-editor{grid-template-columns:minmax(260px,34%) minmax(0,1fr)}}
+
+.analysis-panel {max-width:100%;overflow-wrap:anywhere}
+.analysis-notice {border-left:3px solid var(--accent,#b395da);padding:12px 16px;background:rgba(165,136,204,.1);line-height:1.6}
+.analysis-id {display:block;font-size:11px;opacity:.65;margin:5px 0;overflow-wrap:anywhere}
+.analysis-item {border-top:1px solid var(--border,#34323d);margin-top:24px;padding-top:16px}
+.analysis-proposals {display:grid;gap:12px;margin:16px 0}
+.analysis-proposal {padding:14px;border:1px solid var(--border,#34323d);border-radius:10px;display:grid;gap:8px}
+.analysis-proposal label {display:block}
+.analysis-proposal select {width:100%;margin-top:6px}
+.analysis-proposal p {margin:0}
+.analysis-panel .actions {flex-wrap:wrap;margin:12px 0}
+.analysis-panel fieldset {margin:16px 0;border:1px solid var(--border,#34323d)}
+.analysis-preview {float:right;max-width:30%;max-height:160px;border-radius:8px;margin:12px 0 12px 20px;object-fit:contain}
+.analysis-proposals {clear:both}
+@media(max-width:640px){.analysis-preview {float:none;max-width:100%;max-height:180px;margin:12px 0}}
