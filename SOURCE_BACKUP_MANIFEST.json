@@ -1,0 +1,174 @@
+{
+  "format": 1,
+  "captured_at_utc": "2026-10-30T07:10:22.222Z",
+  "timezone": "Europe/Budapest",
+  "kind": "source-only",
+  "repository": "Palor94/LivingUniverse",
+  "excludes": [
+    "live databases and catalogue exports",
+    "images and videos",
+    "credentials and local configuration",
+    "runtime caches and logs",
+    "Git history"
+  ],
+  "byte_identical_to_working_sources": true,
+  "component": "MCP server and integration documentation",
+  "matching_full_backup_branch": "backup/living-universe-source-2026-10-30-081022",
+  "files": [
+    {
+      "path": "docs/GROK_INTEGRATION.md",
+      "size_bytes": 20931,
+      "sha256": "f3b85730b855e499c4b7b0e54b63bcff859d2ac8083aa499b39e066cf3eb3483"
+    },
+    {
+      "path": "docs/IMAGE_GENERATION.md",
+      "size_bytes": 19235,
+      "sha256": "94674a270a26cb2832ffb70c4dbb48cdf20abbeea8489004933254e1251a7d8b"
+    },
+    {
+      "path": "docs/MCP_INTEGRATION.md",
+      "size_bytes": 19317,
+      "sha256": "c72f51c4517acbe28c16b9899a11dae131f55f0ba03aed1dcb85559bce607b95"
+    },
+    {
+      "path": "docs/MCP_RECOVERY.md",
+      "size_bytes": 7974,
+      "sha256": "2616653c6778fd5f741473f55f606959822c23a1e0047c6aaf12779dd4ff7af9"
+    },
+    {
+      "path": "docs/MCP_WRITES.md",
+      "size_bytes": 12207,
+      "sha256": "3fb8327614d8942fa8c320423e873e325aed6346d8cd0868fb8bc0649df2734b"
+    },
+    {
+      "path": "docs/MEDIA_UPLOADS.md",
+      "size_bytes": 12236,
+      "sha256": "48a27f3d9230711f86e4333d737537949734a6a5881f00011cfcd3054d13f07b"
+    },
+    {
+      "path": "docs/MOBILE_ACCESS.md",
+      "size_bytes": 11041,
+      "sha256": "ddecc7e37a684b6dd9659786d5441354d8090b4e1493458b14e7fd83ef7d9fac"
+    },
+    {
+      "path": "docs/ORIGINAL_IMAGES.md",
+      "size_bytes": 6012,
+      "sha256": "8e7f2d2dcffda68b8a5abd3cbae51899bab8c8fa0b53389cdbed909301156dc2"
+    },
+    {
+      "path": "mcp/Start Grok Gateway.cmd",
+      "size_bytes": 251,
+      "sha256": "50f397b0e6586c2c068c630c0ba75f105af47aee2356451e5860f65a5d7c3fea"
+    },
+    {
+      "path": "mcp/Start Tunnel.cmd",
+      "size_bytes": 390,
+      "sha256": "758999e991e02f2ca591033b003be3119049dee6062aa8c865f94b290425830d"
+    },
+    {
+      "path": "mcp/catalogue.mjs",
+      "size_bytes": 25560,
+      "sha256": "dbb3399837ad431c3a19a491b515de577d8a7cbb3d5acd8cb1a7cf721e3cfe51"
+    },
+    {
+      "path": "mcp/configure-grok.mjs",
+      "size_bytes": 2554,
+      "sha256": "715365e10dc2a512e3c9bea971c02bfc53e576a5b57882699a3d659161172196"
+    },
+    {
+      "path": "mcp/configure.mjs",
+      "size_bytes": 1698,
+      "sha256": "311def45e661b523adb3001af4f6b487de43c83f2b766dc32cead7a8218398f5"
+    },
+    {
+      "path": "mcp/enable-writes.mjs",
+      "size_bytes": 5247,
+      "sha256": "1893e56379dc9ea547bac70f83a22e622a177f69342bb3b24ae6fdfaa289854c"
+    },
+    {
+      "path": "mcp/generation.mjs",
+      "size_bytes": 2501,
+      "sha256": "ee40834720534f7a67ea50897c29bc325b10bc4a3829043539c48013a22a88b3"
+    },
+    {
+      "path": "mcp/grok-task-runner.mjs",
+      "size_bytes": 1108,
+      "sha256": "6e263c21fdde54f78a1deffd6d68f479c9100f8db0fc6e06a17a43c7d601c9ae"
+    },
+    {
+      "path": "mcp/http-gateway.mjs",
+      "size_bytes": 9847,
+      "sha256": "a8fab17734ad2cb15bd0d6367b22dec9cb67fc1991dd7e1a0f8b5b97599615fe"
+    },
+    {
+      "path": "mcp/images.mjs",
+      "size_bytes": 3043,
+      "sha256": "5c4840f6b1d3ad13efdf230bfd1f25d9d75575bc284679d2fe15719e02f1ff77"
+    },
+    {
+      "path": "mcp/imports.mjs",
+      "size_bytes": 5817,
+      "sha256": "ee9eb5a55f9a236036ba7f11ad63790b5d86b9de9bae676d12f6d1ed307a15e0"
+    },
+    {
+      "path": "mcp/install-grok-startup.ps1",
+      "size_bytes": 2098,
+      "sha256": "12ba449bf5b3112b518b24773cec1e97a655bb35cf416dfcee6c4db848259b0d"
+    },
+    {
+      "path": "mcp/install-startup.ps1",
+      "size_bytes": 2302,
+      "sha256": "32366941175ea6869bcd9286cf17783fa9116186af4e6437b4d7713c50871d04"
+    },
+    {
+      "path": "mcp/oauth.mjs",
+      "size_bytes": 9309,
+      "sha256": "f155744ba8a54e18a2307b4c08a3675b25b7e7c718205a85b2cc21bc64732d9d"
+    },
+    {
+      "path": "mcp/original-images.mjs",
+      "size_bytes": 1747,
+      "sha256": "606b19a27b5344e6fdb0583a70c82886dc17b4f5e9ecfb4c22c637c044acf5e9"
+    },
+    {
+      "path": "mcp/reference-view.mjs",
+      "size_bytes": 5451,
+      "sha256": "b0bd72c17cf0b7a489544da24990587a443a5495e79fa88fd05a7790e9706ee3"
+    },
+    {
+      "path": "mcp/run-tunnel.ps1",
+      "size_bytes": 5931,
+      "sha256": "ad8ad5bd216cd7566c9f624c06bd5148d8321af384198dd95f2716ba43177453"
+    },
+    {
+      "path": "mcp/server.mjs",
+      "size_bytes": 16354,
+      "sha256": "66459a7a597173bb34e988c2f4aeb1dee3b070fa9bc7a78df2aae8804cde69c3"
+    },
+    {
+      "path": "mcp/start-tunnel.mjs",
+      "size_bytes": 2942,
+      "sha256": "1cc715bc38ed8e6961bad2db5d11272a87ee13ea1ecd3316990b79ba7e463865"
+    },
+    {
+      "path": "mcp/supervisor.mjs",
+      "size_bytes": 327,
+      "sha256": "f5d81c4932eb26d644586e9bf0726877aae79a5eff466f11ef23b89bfa230346"
+    },
+    {
+      "path": "mcp/task-runner.mjs",
+      "size_bytes": 923,
+      "sha256": "c78796e5a3bcd510647d311cf9602ddb2d3317200fe35e49b10b3744c57cdd06"
+    },
+    {
+      "path": "mcp/thumbnail.ps1",
+      "size_bytes": 3302,
+      "sha256": "e414c8ac255818c7971719ce63a0098800a19d67f26c7800eea192620b474f72"
+    },
+    {
+      "path": "mcp/writes.mjs",
+      "size_bytes": 9006,
+      "sha256": "aca92304691e497c4652a1ad45fb3a4f950144129cd7d8a031b3e087cf780df2"
+    }
+  ]
+}
