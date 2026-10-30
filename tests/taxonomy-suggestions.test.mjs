@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -17,7 +18,7 @@ async function fixture(fn){
 
 test('structured groups, additive bulk labels, explicit text migration, filtering, and backups preserve legacy data and canon',()=>fixture(async({root,call,request,restart})=>{
   await fs.writeFile(path.join(root,'one.png'),'original');await fs.writeFile(path.join(root,'two.png'),'original two');await call('/api/scan',{});const items=(await call('/api/media')).items,ids=items.map(m=>m.id),c=await call('/api/characters',{name:'Péter'});
-  for(const id of ids)await call('/api/media/'+id,{character_ids:[c.id],tags:'Mosolygó, FULL BODY',notes:'Original note'},'PUT');const canon=await call('/api/characters/'+c.id+'/canon',{appearance:'Original canon',references:[{media_id:ids[0],role:'body'}]});
+  for(const id of ids)await call('/api/media/'+id,{character_ids:[c.id],tags:'Mosolygó, FULL BODY',notes:'Original note'},'PUT');const canon=await approveCanon(call,c.id,{appearance:'Original canon',references:[{media_id:ids[0],role:'body'}]});
   const vocab=await call('/api/taxonomy');assert.equal(vocab.groups.length,9);const expression=vocab.groups.find(g=>g.id==='group-expression');const group=await call('/api/taxonomy/groups',{name:'Saját csoport'}),tag=await call('/api/taxonomy/tags',{group_id:group.id,name:'Rövidnadrág'});
   assert.equal((await request('/api/taxonomy/tags',{group_id:group.id,name:'RÖVIDNADRÁG'})).status,409);
   const smile=await call('/api/taxonomy/tags',{group_id:expression.id,name:'Mosolygó'});assert.equal((await call('/api/taxonomy/apply',{operation:'add',media_ids:ids,tag_ids:[tag.id]})).updated,2);assert.equal((await call('/api/taxonomy/apply',{operation:'add',media_ids:ids,tag_ids:[tag.id]})).updated,0);
@@ -37,7 +38,7 @@ test('reference candidates use approved evidence only; feedback preserves assign
   const names=['face.png','body.png','target.png','unapproved.png'];for(const [i,name] of names.entries())await fs.writeFile(path.join(root,name),'different bytes '+i);await call('/api/scan',{});const ids={};for(const m of (await call('/api/media')).items)ids[m.relative_path]=m.id;
   const peter=await call('/api/characters',{name:'Péter'}),palor=await call('/api/characters',{name:'Palor'}),other=await call('/api/characters',{name:'Unapproved person'});
   for(const name of ['face.png','body.png'])await call('/api/media/'+ids[name],{character_ids:[peter.id],tags:'original'},'PUT');await call('/api/media/'+ids['target.png'],{character_ids:[palor.id],tags:'scene',notes:'Keep target note'},'PUT');await call('/api/media/'+ids['unapproved.png'],{character_ids:[other.id],tags:'same pattern'},'PUT');
-  const canon=await call('/api/characters/'+peter.id+'/canon',{appearance:'Protected',references:[{media_id:ids['face.png'],role:'face'},{media_id:ids['body.png'],role:'body'}]});
+  const canon=await approveCanon(call,peter.id,{appearance:'Protected',references:[{media_id:ids['face.png'],role:'face'},{media_id:ids['body.png'],role:'body'}]});
   assert.equal((await call('/api/suggestions/generate',{media_ids:[ids['target.png']]})).created,0);
   const hashed=await call('/api/duplicates/analyze',{ids:Object.values(ids)});for(const r of hashed.results)await call('/api/duplicates/visual',{id:r.id,...r.visual,hash:r.id===ids['body.png']?'0000000000000003':'0000000000000000',version:visualVersion,width:100,height:100});
   let generated=await call('/api/suggestions/generate',{media_ids:[ids['target.png']]});assert.equal(generated.created,1);assert.equal(generated.reference_characters,1);const s=(await call('/api/suggestions')).items[0];assert.equal(s.character_id,peter.id);assert.equal(s.canon_id,canon.id);assert.equal(s.stale,false);assert.equal(s.evidence.face_identity,null);assert.equal(s.evidence.body_proportions,null);assert.deepEqual(new Set(s.evidence.references.map(r=>r.role)),new Set(['face','body']));assert.equal((await call('/api/media/'+s.media_id)).characters.length,1);
@@ -45,8 +46,8 @@ test('reference candidates use approved evidence only; feedback preserves assign
   await call('/api/suggestions/feedback',{id:s.id,decision:'reopened'});await call('/api/suggestions/feedback',{id:s.id,decision:'accepted',notes:'This is Péter despite the rendering error',face_verdict:'matches',body_verdict:'mismatch'});
   const updated=await call('/api/media/'+s.media_id);assert.deepEqual(new Set(updated.characters.map(c=>c.id)),new Set([peter.id,palor.id]));assert.equal(updated.notes,'Keep target note');assert.equal(updated.tags,'scene');assert.equal(updated.categorization_complete,false);assert.equal((await call('/api/characters/'+peter.id)).canon.id,canon.id);
   const backup=await call('/api/export');await restart();await call('/api/restore',backup);assert.equal((await call('/api/suggestions?state=accepted')).items[0].feedback.length,3);
-  await call('/api/characters/'+peter.id+'/canon',{appearance:'New explicit revision',references:[{media_id:ids['face.png'],role:'face'}]});assert.equal((await call('/api/suggestions?state=accepted')).items[0].stale,true);assert.equal((await request('/api/suggestions/feedback',{id:s.id,decision:'accepted'})).status,409);
-  await fs.writeFile(path.join(root,'target.png'),'Changed outside app');assert.equal((await request('/api/suggestions/feedback',{id:s.id,decision:'reopened'})).status,409);
+  await approveCanon(call,peter.id,{appearance:'New explicit revision',references:[{media_id:ids['face.png'],role:'face'}]});assert.equal((await call('/api/suggestions?state=accepted')).total,0);const cleaned=await call('/api/export');assert.equal(cleaned.sorting_suggestions.some(row=>row.id===s.id),false);assert.equal(cleaned.suggestion_feedback.some(row=>row.suggestion_id===s.id),false);assert.equal((await request('/api/suggestions/feedback',{id:s.id,decision:'accepted'})).status,404);
+  await fs.writeFile(path.join(root,'target.png'),'Changed outside app');assert.equal((await request('/api/suggestions/feedback',{id:s.id,decision:'reopened'})).status,404);
   assert.equal((await call('/api/suggestions/capabilities')).ai,false);assert.equal((await call('/api/suggestions/capabilities')).external_provider,null);
 }));
 

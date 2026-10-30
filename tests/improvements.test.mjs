@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -20,11 +21,11 @@ test('field autosave, cover regions, rename, reference protection, reversible re
   assert.equal((await request('/api/characters/'+c.id+'/profile-field',{field:'id',value:'replacement'})).status,400);
   await call('/api/characters/'+c.id+'/cover-crop',{media_id:m.id,crop:{x:.1,y:.2,w:.3,h:.4}});profile=await call('/api/characters/'+c.id);assert.equal(profile.cover_id,m.id);assert.equal(JSON.parse(profile.cover_crop).x,.1);
   assert.equal((await request('/api/characters/'+c.id+'/cover-crop',{media_id:m.id,crop:{x:.9,y:.2,w:.3,h:.4}})).status,400);
-  await call('/api/characters/'+c.id+'/canon',{references:[{media_id:m.id,role:'face'}],appearance:'User approved'});
+  await approveCanon(call,c.id,{references:[{media_id:m.id,role:'face'}],appearance:'User approved'});
   await call('/api/media/'+m.id+'/rename',{filename:'új név.png'});assert.equal((await call('/api/characters/'+c.id+'/integrity',{})).results[0].status,'unchanged');assert.equal(await fs.readFile(path.join(root,'új név.png'),'utf8'),'picture fixture');
   assert.equal((await request('/api/media/'+m.id+'/rename',{filename:'../escape.png'})).status,400);assert.equal((await request('/api/media/'+m.id+'/rename',{filename:'changed.mp4'})).status,400);
   assert.equal((await request('/api/media/'+m.id+'/remove',{mode:'file'})).status,409);
-  await call('/api/characters/'+c.id+'/canon',{references:[],appearance:'User approved',reason:'Retired reference explicitly'});
+  await approveCanon(call,c.id,{references:[],appearance:'User approved',reason:'Retired reference explicitly'});
   await call('/api/media/'+m.id+'/remove',{mode:'catalogue'});await call('/api/scan',{});assert.equal((await call('/api/media')).total,0);assert.equal(await fs.readFile(path.join(root,'új név.png'),'utf8'),'picture fixture');
   await call('/api/media/'+m.id+'/restore-item',{});assert.equal((await call('/api/media')).total,1);
   await call('/api/media/'+m.id+'/remove',{mode:'file'});assert.equal(await fs.stat(path.join(root,'új név.png')).then(()=>true,()=>false),false);assert.equal((await call('/api/removed')).items[0].physical,1);
@@ -35,7 +36,7 @@ test('field autosave, cover regions, rename, reference protection, reversible re
 test('Palor merge keeps stable identities and canon history, relationships, shared media, and conflicts',()=>fixture(async({root,call,app})=>{
   await fs.mkdir(path.join(root,'Tibor'));await fs.mkdir(path.join(root,'Palor'));await fs.writeFile(path.join(root,'Tibor','scene.png'),'Tibor bytes');await fs.writeFile(path.join(root,'Palor','scene.png'),'Palor bytes');await call('/api/scan',{});
   const p=await call('/api/characters',{name:'Palor'}),t=await call('/api/characters',{name:'Tibor'}),other=await call('/api/characters',{name:'Dezső'});
-  await call('/api/assign-folder',{character_id:t.id,folder:'Tibor'});const m=(await call('/api/media?folder=Tibor')).items[0];const identity=await call('/api/characters/'+t.id+'/canon',{appearance:'Approved Tibor appearance',references:[{media_id:m.id,role:'face'}]});
+  await call('/api/assign-folder',{character_id:t.id,folder:'Tibor'});const m=(await call('/api/media?folder=Tibor')).items[0];const identity=await approveCanon(call,t.id,{appearance:'Approved Tibor appearance',references:[{media_id:m.id,role:'face'}]});
   await call('/api/relationships',{source_id:other.id,target_id:t.id,description:'Knows Tibor'});await call('/api/characters/'+t.id+'/profile-field',{field:'biography',value:'Existing biography'});
   const merge=await call('/api/palor-merge',{});assert.equal(merge.target.id,p.id);assert.equal(merge.errors.length,0);assert.equal(merge.moved,1);assert.equal((await call('/api/state')).characters.length,2);assert.equal((await call('/api/protagonist')).character.id,p.id);
   assert.equal((await call('/api/characters/'+t.id)).canon.id,identity.id);assert.equal((await call('/api/characters/'+p.id)).canon,null);assert.equal((await call('/api/characters/'+p.id)).biography,'Existing biography');assert.equal((await call('/api/characters/'+other.id)).relationships.find(r=>r.target_id===p.id).description,'Knows Tibor');

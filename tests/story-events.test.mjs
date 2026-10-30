@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs,readFileSync} from 'node:fs';
@@ -26,7 +27,7 @@ async function fixture(t){
 test('shared events persist across dossiers, approval/edit history and export/restore without modifying existing records',async t=>{
   const f=await fixture(t),{app,call,req,a,b,create,decide}=f;
   await call('/api/relationships',{source_id:a.id,target_id:b.id,description:'Keep this relationship'});
-  const identity=await call('/api/characters/'+a.id+'/canon',{appearance:'Preserve approved appearance',references:[]});
+  const identity=await approveCanon(call,a.id,{appearance:'Preserve approved appearance',references:[]});
   const place=await call('/api/locations',{name:'Old town'});
   const before=await call('/api/export');let e=await create({location_ids:[place.id],chronology:{kind:'approximate',start:'2020-03-01',label:'Around spring 2020'}});
   assert.equal(e.status,'draft');assert.equal(e.sources[0].excerpt,'  Untrusted source text\n  ');assert.equal(e.participants.length,2);assert.equal((await call('/api/characters/'+a.id+'/timeline')).items[0].id,e.id);assert.equal((await call('/api/characters/'+b.id+'/timeline')).items[0].id,e.id);

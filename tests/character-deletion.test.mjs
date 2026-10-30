@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -30,7 +31,7 @@ test('empty characters can be deleted; assigned media and canonical history are 
     await call('/api/media/'+media.id+'/remove',{mode:'catalogue'});
     assert.equal((await request('/api/characters/'+other.id,undefined,'DELETE')).status,409);
     const canonCharacter=await call('/api/characters',{name:'Canonical identity'});
-    const canon=await call('/api/characters/'+canonCharacter.id+'/canon',{appearance:'Approved description',references:[]});
+    const canon=await approveCanon(call,canonCharacter.id,{appearance:'Approved description',references:[]});
     assert.equal((await request('/api/characters/'+canonCharacter.id,undefined,'DELETE')).status,409);
     assert.equal((await call('/api/characters/'+canonCharacter.id)).canon.id,canon.id);
     assert.equal(await fs.readFile(path.join(root,'keep.png'),'utf8'),'unchanged original');

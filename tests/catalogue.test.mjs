@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -23,19 +24,19 @@ test('private catalogue: shared media, immutable canon, persistence, restore, an
     const items=(await call('/api/media')).items;const image=items.find(m=>m.kind==='image');const video=items.find(m=>m.kind==='video');
     await call('/api/media/'+image.id,{character_ids:[peter.id,attila.id],tags:'body, shirtless',notes:'Preserve build'},'PUT');
     assert.equal((await call('/api/media/'+image.id)).characters.length,2);
-    const initial=await call('/api/characters/'+peter.id+'/canon',{appearance:'User-approved physique',references:[{media_id:image.id,role:'body'}],reason:'Initial approval'});
+    const initial=await approveCanon(call,peter.id,{appearance:'User-approved physique',references:[{media_id:image.id,role:'body'}],reason:'Initial approval'});
     assert.equal(JSON.parse(initial.references_json)[0].sha256.length,64);
     await fs.writeFile(mediaFile,'changed reference bytes');
     assert.equal((await call('/api/characters/'+peter.id+'/integrity',{})).results[0].status,'changed');
-    assert.equal((await request('/api/characters/'+peter.id+'/canon',{appearance:'New draft',references:[{media_id:image.id,role:'body'}]})).status,400);
+    assert.equal((await approveCanon(request,peter.id,{appearance:'New draft',references:[{media_id:image.id,role:'body'}]})).status,400);
     await fs.writeFile(mediaFile,bytes);
     await call('/api/media/'+image.id+'/review',{character_id:peter.id,decision:'rejected',rating:2,notes:'Eyes are incorrect'});
     await call('/api/characters/'+peter.id,{...peter,name:'Pákozdi Péter',appearance:'Draft with different clothing'},'PUT');
     const profile=await call('/api/characters/'+peter.id);assert.equal(profile.canon.id,initial.id);assert.equal(profile.canon.appearance,'User-approved physique');assert.equal((await call('/api/media?character='+peter.id)).total,1);
     assert.equal((await request('/api/media/'+image.id,{character_ids:[attila.id]},'PUT')).status,400);
-    const next=await call('/api/characters/'+peter.id+'/canon',{appearance:initial.appearance,references:[],reason:'Remove reference explicitly'});assert.equal(next.parent_id,initial.id);
+    const next=await approveCanon(call,peter.id,{appearance:initial.appearance,references:[],reason:'Remove reference explicitly'});assert.equal(next.id,initial.id);assert.equal(next.parent_id,initial.parent_id);
     await call('/api/relationships',{source_id:peter.id,target_id:attila.id,description:'Friends'});
-    assert.equal((await call('/api/characters/'+peter.id)).history.length,2);const cleaned=(await call('/api/characters/'+peter.id)).history;assert.ok(cleaned.every(r=>!JSON.parse(r.references_json).some(ref=>ref.media_id===image.id)));assert.equal(cleaned.find(r=>r.id===initial.id).reason,'Reference data removed by creator');
+    assert.equal((await call('/api/characters/'+peter.id)).history.length,1);const cleaned=(await call('/api/characters/'+peter.id)).history;assert.ok(cleaned.every(r=>!JSON.parse(r.references_json).some(ref=>ref.media_id===image.id)));assert.equal(cleaned.find(r=>r.id===initial.id).reason,'Reference data removed by creator');
     const range=await fetch(base+'/media/'+video.id,{headers:{Range:'bytes=3-7'}});assert.equal(range.status,206);assert.equal((await range.arrayBuffer()).byteLength,5);
     assert.equal((await fetch(base+'/api/state',{headers:{Origin:'https://example.com'}})).status,403);
     const badHost=await new Promise((resolve,reject)=>{const req=http.get(base+'/api/state',{headers:{Host:'evil.example'}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);});assert.equal(badHost,403);
@@ -82,7 +83,7 @@ test('physical moves preserve shared identities and bytes, refuse overwrites, an
   try{
     await call('/api/scan',{});const m=(await call('/api/media')).items[0];const a=await call('/api/characters',{name:'Attila'});const d=await call('/api/characters',{name:'Dezső'});
     await call('/api/media/'+m.id,{character_ids:[a.id,d.id],notes:'Shared scene',tags:'body'},'PUT');
-    const canon=await call('/api/characters/'+a.id+'/canon',{appearance:'Approved body',references:[{media_id:m.id,role:'body'}]});
+    const canon=await approveCanon(call,a.id,{appearance:'Approved body',references:[{media_id:m.id,role:'body'}]});
     const preview=await call('/api/media/'+m.id+'/move/preview',{folder:'Attila'});assert.equal(preview.to,path.join('Attila','shared.png'));assert.deepEqual(await fs.readFile(path.join(root,'shared.png')),original);assert.equal(await fs.stat(path.join(root,'Attila')).then(()=>true,()=>false),false);
     assert.equal((await request('/api/media/'+m.id+'/move',{folder:'Attila',from_path:'stale.png'})).status,409);
     assert.equal((await request('/api/media/'+m.id+'/move/preview',{folder:'../outside'})).status,400);

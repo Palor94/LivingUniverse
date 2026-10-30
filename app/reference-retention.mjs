@@ -3,13 +3,13 @@ import {digest} from './character-edit.mjs';
 // Explicit user-selected retention exception to immutable reference membership.
 // Keep revision IDs/appearance so completed generation manifests stay meaningful.
 // Never alter original media provenance or rewrite completed generation receipts.
-export function forgetRemovedReferences({all,run,characterId,retainedIds}){
-  const retained=new Set(retainedIds),removed=new Set();let revisions=0,proposals=0;
+export function forgetRemovedReferences({all,run,characterId,retainedIds,previousReferences=[]}){
+  const retained=new Set(retainedIds),removed=new Set(previousReferences.filter(ref=>!retained.has(ref.media_id)).map(ref=>ref.media_id));let revisions=0,proposals=0;
   for(const row of all('SELECT id,references_json FROM canon WHERE character_id=?',characterId)){
     const refs=JSON.parse(row.references_json),kept=refs.filter(ref=>retained.has(ref.media_id));
     for(const ref of refs)if(!retained.has(ref.media_id))removed.add(ref.media_id);
     if(kept.length!==refs.length){
-      run('UPDATE canon SET references_json=? WHERE id=?',JSON.stringify(kept),row.id);revisions++;
+      run('UPDATE canon SET references_json=?,reason=? WHERE id=?',JSON.stringify(kept),'Reference data removed by creator',row.id);revisions++;
     }
   }
   if(!removed.size)return {revisions,proposals};

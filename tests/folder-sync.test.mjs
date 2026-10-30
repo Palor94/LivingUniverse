@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -14,7 +15,7 @@ async function fixture(fn){const temp=await fs.mkdtemp(path.join(os.tmpdir(),'li
 
 test('name autosave renames the owned folder and nested originals without changing identity, sorting, or canon',()=>fixture(async({root,call,assign,restart})=>{
   await fs.mkdir(path.join(root,'Old title','nested'),{recursive:true});await fs.writeFile(path.join(root,'Old title','nested','face.png'),'face bytes');await fs.writeFile(path.join(root,'Old title','notes.txt'),'uncatalogued companion');await call('/api/scan',{});const c=await call('/api/characters',{name:'Old title'});await assign('Old title',c.id);const m=(await call('/api/media')).items[0];
-  await call('/api/media/'+m.id,{character_ids:[c.id],tags:'face',notes:'Preserve',categorization_complete:true},'PUT');const canon=await call('/api/characters/'+c.id+'/canon',{appearance:'Identity unchanged',references:[{media_id:m.id,role:'face'}]});
+  await call('/api/media/'+m.id,{character_ids:[c.id],tags:'face',notes:'Preserve',categorization_complete:true},'PUT');const canon=await approveCanon(call,c.id,{appearance:'Identity unchanged',references:[{media_id:m.id,role:'face'}]});
   const renamed=await call('/api/characters/'+c.id+'/profile-field',{field:'name',value:'Zsolti'});assert.equal(renamed.folder_sync.completed.length,1);assert.equal(await fs.readFile(path.join(root,'Zsolti','nested','face.png'),'utf8'),'face bytes');assert.equal(await fs.readFile(path.join(root,'Zsolti','notes.txt'),'utf8'),'uncatalogued companion');await assert.rejects(fs.stat(path.join(root,'Old title')));
   const after=await call('/api/media/'+m.id);assert.equal(after.relative_path,path.join('Zsolti','nested','face.png'));assert.equal(after.notes,'Preserve');assert.equal(after.categorization_complete,true);assert.equal((await call('/api/characters/'+c.id)).canon.id,canon.id);assert.equal((await call('/api/characters/'+c.id+'/integrity',{})).results[0].status,'unchanged');assert.equal((await call('/api/scan',{})).added,0);
   await call('/api/characters/'+c.id+'/profile-field',{field:'aliases',value:'Other name'});assert.ok(await fs.stat(path.join(root,'Zsolti')));assert.equal((await call('/api/folder-names')).plans.length,0);

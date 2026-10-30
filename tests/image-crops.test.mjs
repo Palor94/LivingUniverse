@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -24,7 +25,7 @@ test('replacing and restoring a crop retains identity, assignments, sorting, not
  const request=(route,body,method)=>fetch(base+route,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});async function call(...args){const r=await request(...args),d=await r.json();assert.ok(r.ok,JSON.stringify(d));return d;}
  await start();try{
   await call('/api/scan',{});const items=(await call('/api/media')).items,m=items.find(m=>m.relative_path==='test.png'),ref=items.find(x=>x.id!==m.id),cid=(await call('/api/characters',{name:'Árvíztűrő'})).id;
-  await call('/api/media/'+m.id,{character_ids:[cid],tags:'keep tag',notes:'Preserve notes',categorization_complete:true},'PUT');await call('/api/media/'+ref.id,{character_ids:[cid]},'PUT');await call('/api/characters/'+cid+'/canon',{appearance:'Unchanged identity',references:[{media_id:ref.id,role:'face'}]});const before=await call('/api/export');
+  await call('/api/media/'+m.id,{character_ids:[cid],tags:'keep tag',notes:'Preserve notes',categorization_complete:true},'PUT');await call('/api/media/'+ref.id,{character_ids:[cid]},'PUT');await approveCanon(call,cid,{appearance:'Unchanged identity',references:[{media_id:ref.id,role:'face'}]});const before=await call('/api/export');
   const info=await call('/api/media/'+m.id+'/image-crop'),payload={edit_id:randomUUID(),source_sha256:info.source_sha256,crop:{x:.25,y:.25,w:.5,h:.5},image_data:'data:image/png;base64,'+cropped.toString('base64')};
   assert.equal((await request('/api/media/not-an-id/image-crop')).status,400);assert.equal((await request('/api/media/'+m.id+'/image-crop',{...payload,image_data:'data:image/svg+xml;base64,PHN2Zy8+'})).status,400);
   assert.equal((await request('/api/media/'+m.id+'/image-crop',{...payload,crop:{x:.9,y:0,w:.5,h:.5}})).status,400);assert.equal((await request('/api/media/'+m.id+'/image-crop',{...payload,source_sha256:'0'.repeat(64)})).status,409);assert.equal((await request('/api/media/'+ref.id+'/image-crop',payload)).status,409);
@@ -34,7 +35,7 @@ test('replacing and restoring a crop retains identity, assignments, sorting, not
   await app.close();await start();const current=await call('/api/media/'+m.id+'/image-crop');assert.equal(current.latest_edit.id,payload.edit_id);assert.equal(current.source_sha256,digest(cropped));
   await fs.writeFile(path.join(dataDir,'image-originals',payload.edit_id+'.original'),'tampered');assert.equal((await request('/api/media/'+m.id+'/image-crop/restore',{edit_id:payload.edit_id,source_sha256:current.source_sha256})).status,409);assert.deepEqual(await fs.readFile(path.join(root,'test.png')),cropped);await fs.writeFile(path.join(dataDir,'image-originals',payload.edit_id+'.original'),original);
   await call('/api/media/'+m.id+'/image-crop/restore',{edit_id:payload.edit_id,source_sha256:current.source_sha256});assert.deepEqual(await fs.readFile(path.join(root,'test.png')),original);assert.equal((await call('/api/media/'+m.id+'/image-crop')).latest_edit,null);
-  await call('/api/characters/'+cid+'/canon',{appearance:'Unchanged identity',references:[]});assert.equal((await request('/api/media/'+ref.id+'/image-crop',payload)).status,409);
+  await approveCanon(call,cid,{appearance:'Unchanged identity',references:[]});assert.equal((await request('/api/media/'+ref.id+'/image-crop',payload)).status,409);
   const originalPath=path.join(root,'test.png');await fs.unlink(originalPath);assert.equal((await request('/api/media/'+m.id+'/image-crop')).status,404);await fs.writeFile(originalPath,original);
   const outside=path.join(temp,'outside');await fs.mkdir(outside);await fs.writeFile(path.join(outside,'secret.png'),original);await fs.symlink(outside,path.join(root,'escape'),process.platform==='win32'?'junction':'dir');const escaped=randomUUID();app.db.prepare('INSERT INTO media VALUES(?,?,?,?,?,?,?)').run(escaped,path.join('escape','secret.png'),'escape','image',original.length,new Date().toISOString(),new Date().toISOString());assert.equal((await request('/api/media/'+escaped+'/image-crop')).status,403);
  }finally{await app.close();assert.equal(path.dirname(path.resolve(temp)),path.resolve(os.tmpdir()));await fs.rm(temp,{recursive:true,force:true});}

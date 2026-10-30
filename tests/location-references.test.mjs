@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -16,7 +17,7 @@ test('location references leave the sorting queue without people or completion a
     assert.equal((await call('/api/state')).stats.inbox,2);
     await call('/api/media/'+place.id,{character_ids:[],tags:'meeting place',notes:'Possible meetup only',location_reference:true},'PUT');const location=await call('/api/media/'+place.id);assert.equal(location.location_reference,true);assert.equal(location.sorting_status,'location');assert.equal(location.categorization_complete,false);assert.equal(location.characters.length,0);
     assert.equal((await call('/api/state')).stats.inbox,1);assert.deepEqual((await call('/api/media?inbox=1&ids_only=1')).ids,[scene.id]);assert.equal((await call('/api/media?role=location')).total,1);assert.equal((await call('/api/media?role=character')).total,1);
-    const c=await call('/api/characters',{name:'Palor'});await call('/api/media/'+scene.id,{character_ids:[c.id],notes:'Keep scene',tags:'body'},'PUT');const canon=await call('/api/characters/'+c.id+'/canon',{appearance:'Preserved',references:[{media_id:scene.id,role:'body'}]});
+    const c=await call('/api/characters',{name:'Palor'});await call('/api/media/'+scene.id,{character_ids:[c.id],notes:'Keep scene',tags:'body'},'PUT');const canon=await approveCanon(call,c.id,{appearance:'Preserved',references:[{media_id:scene.id,role:'body'}]});
     assert.equal((await request('/api/media/bulk',{operation:'location',media_ids:[scene.id,'missing']})).status,409);assert.equal((await call('/api/media/'+scene.id)).location_reference,false);
     await call('/api/media/bulk',{operation:'location',media_ids:[scene.id]});assert.equal((await call('/api/state')).stats.inbox,0);assert.equal((await call('/api/media/'+scene.id)).characters[0].id,c.id);assert.equal((await call('/api/media/'+scene.id)).notes,'Keep scene');assert.equal((await call('/api/characters/'+c.id)).canon.id,canon.id);
     const backup=await call('/api/export');await app.close();await start(path.join(temp,'restored'));await call('/api/restore',backup);assert.equal((await call('/api/media?role=location')).total,2);assert.equal((await call('/api/state')).stats.inbox,0);
@@ -32,7 +33,7 @@ test('specific locations add structured labels and move originals only after an 
   await start(path.join(temp,'data'));
   try{
     await fs.writeFile(path.join(root,'meeting.png'),'unchanged meeting');await fs.writeFile(path.join(root,'other.png'),'unchanged other');await call('/api/scan',{});const m=(await call('/api/media?search=meeting.png')).items[0],other=(await call('/api/media?search=other.png')).items[0];const c=await call('/api/characters',{name:'Palor'});
-    await call('/api/media/'+m.id,{character_ids:[c.id],tags:'original words',notes:'Keep note'},'PUT');const canon=await call('/api/characters/'+c.id+'/canon',{appearance:'Unchanged',references:[{media_id:m.id,role:'face'}]});
+    await call('/api/media/'+m.id,{character_ids:[c.id],tags:'original words',notes:'Keep note'},'PUT');const canon=await approveCanon(call,c.id,{appearance:'Unchanged',references:[{media_id:m.id,role:'face'}]});
     const tagPlace=await call('/api/locations',{name:'M7 truckstop',kind:'tag'});assert.equal(tagPlace.folder,null);const place=await call('/api/locations',{name:'M7 truckstop',kind:'folder'});assert.equal(place.id,tagPlace.id);assert.equal(place.folder,path.join('Helyszín','M7 truckstop'));assert.ok(await fs.stat(path.join(root,place.folder)));assert.equal(await fs.readFile(path.join(root,'meeting.png'),'utf8'),'unchanged meeting');
     await call('/api/media/'+m.id,{character_ids:[c.id],tags:'original words',notes:'Keep note',structured_tag_ids:[],location_reference:true,location_id:place.id,categorization_complete:true},'PUT');const saved=await call('/api/media/'+m.id);assert.equal(saved.location.id,place.id);assert.equal(saved.location_reference,true);assert.ok(saved.structured_tags.some(t=>t.id===place.tag_id));assert.equal((await call('/api/media?location_id='+place.id)).total,1);assert.equal((await call('/api/state')).stats.inbox,1);
     assert.equal((await request('/api/media/'+m.id,{character_ids:[c.id],location_reference:true,location_id:'invalid',notes:'must roll back'},'PUT')).status,400);assert.equal((await call('/api/media/'+m.id)).notes,'Keep note');

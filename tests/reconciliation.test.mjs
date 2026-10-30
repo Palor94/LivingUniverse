@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -15,7 +16,7 @@ async function fixture(fn){const temp=await fs.mkdtemp(path.join(os.tmpdir(),'li
 test('folder preview is side-effect free, mandatory, stale-safe, and supports combined confirmations',()=>fixture(async({root,call,request,put})=>{
   for(const folder of ['One','Two']){await fs.mkdir(path.join(root,folder));await fs.writeFile(path.join(root,folder,'image.png'),folder+' fixture');}await call('/api/scan',{});
   const c=await call('/api/characters',{name:'Existing'});const m=(await call('/api/media?folder=One')).items[0];await put('/api/media/'+m.id,{character_ids:[c.id],notes:'Keep this',tags:'body',categorization_complete:true});
-  const canon=await call('/api/characters/'+c.id+'/canon',{appearance:'Approved',references:[{media_id:m.id,role:'body'}]});
+  const canon=await approveCanon(call,c.id,{appearance:'Approved',references:[{media_id:m.id,role:'body'}]});
   const preview=await call('/api/folders/preview',{folders:[{folder:'One',name:'New person'}]});assert.equal(preview.plans[0].total,1);assert.equal(preview.plans[0].assigned,1);assert.equal(preview.plans[0].complete,1);assert.equal(preview.plans[0].samples[0].id,m.id);assert.equal((await call('/api/state')).characters.length,1);
   assert.equal((await request('/api/assign-folder',{folder:'One',character_id:c.id})).status,409);assert.equal((await request('/api/sort-folders',{folders:['One']})).status,409);
   await call('/api/media/bulk',{operation:'reopen',media_ids:[m.id]});assert.equal((await request('/api/folders/confirm',{token:preview.token})).status,409);assert.equal((await call('/api/state')).characters.length,1);
@@ -25,7 +26,7 @@ test('folder preview is side-effect free, mandatory, stale-safe, and supports co
 
 test('metadata scans reconcile explicit external renames while preserving canonical identity and backups',()=>fixture(async({root,call,request,put,restart})=>{
   const bytes='canonical fixture';await fs.writeFile(path.join(root,'old.png'),bytes);await fs.writeFile(path.join(root,'other.png'),'other bytes');const initial=await call('/api/scan',{});assert.equal(initial.new,2);assert.equal((await call('/api/scan',{})).unchanged,2);
-  const original=(await call('/api/media?search=old.png')).items[0];const c=await call('/api/characters',{name:'Pákozdi'});await put('/api/media/'+original.id,{character_ids:[c.id],notes:'Preserved note',tags:'reference',categorization_complete:true});const canon=await call('/api/characters/'+c.id+'/canon',{appearance:'Approved reference',references:[{media_id:original.id,role:'face'}]});
+  const original=(await call('/api/media?search=old.png')).items[0];const c=await call('/api/characters',{name:'Pákozdi'});await put('/api/media/'+original.id,{character_ids:[c.id],notes:'Preserved note',tags:'reference',categorization_complete:true});const canon=await approveCanon(call,c.id,{appearance:'Approved reference',references:[{media_id:original.id,role:'face'}]});
   await fs.writeFile(path.join(root,'other.png'),'modified and longer');const modified=await call('/api/scan',{});assert.equal(modified.modified,1);assert.equal((await call('/api/scan-files?state=modified')).total,1);
   await fs.rename(path.join(root,'old.png'),path.join(root,'renamed.png'));const scan=await call('/api/scan',{});assert.equal(scan.potentially_moved,1);assert.equal(scan.missing,1);assert.equal(scan.added,0);assert.equal((await call('/api/media')).total,2);const suggestions=await call('/api/reconciliation');assert.equal(suggestions.items[0].candidates[0].id,original.id);
   const backup=await call('/api/export');await restart();await call('/api/restore',backup);assert.equal((await call('/api/scan-report')).pending,1);assert.equal((await call('/api/scan-files?state=missing')).items[0].media_id,original.id);

@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs,readFileSync} from 'node:fs';
@@ -20,7 +21,7 @@ test('multiple named locations preserve primary movement, characters, canon and 
   async function call(...args){const r=await request(...args);assert(r.status<300,JSON.stringify(r));return r.data;}
   try{
     await fs.writeFile(path.join(root,'image.png'),'reference bytes');await call('/api/scan',{});const mid=(await call('/api/media')).items[0].id,c=await call('/api/characters',{name:'Palor'}),p=await call('/api/characters',{name:'Pákozdi'}),a=await call('/api/locations',{name:'M7 truckstop'}),b=await call('/api/locations',{name:'Balaton'});
-    const fields={character_ids:[c.id,p.id],tags:'original tags',notes:'Preserved notes',structured_tag_ids:[],categorization_complete:true,location_reference:true};await call('/api/media/'+mid,{...fields,location_id:a.id},'PUT');const canon=await call('/api/characters/'+c.id+'/canon',{appearance:'Approved',references:[{media_id:mid,role:'body'}]});
+    const fields={character_ids:[c.id,p.id],tags:'original tags',notes:'Preserved notes',structured_tag_ids:[],categorization_complete:true,location_reference:true};await call('/api/media/'+mid,{...fields,location_id:a.id},'PUT');const canon=await approveCanon(call,c.id,{appearance:'Approved',references:[{media_id:mid,role:'body'}]});
     const multiple=await call('/api/media/'+mid,{...fields,location_ids:[b.id,a.id]},'PUT');assert.equal(multiple.locations.length,2);assert.equal(multiple.location.id,a.id);assert.equal(multiple.characters.length,2);assert.equal(multiple.notes,fields.notes);assert(multiple.structured_tags.some(t=>t.id===b.tag_id));assert.equal((await call('/api/media?location_id='+b.id)).total,1);
     const invalid=await request('/api/media/'+mid,{...fields,notes:'Must not save partly',location_ids:[a.id,'not-a-location']},'PUT');assert.equal(invalid.status,400);assert.equal((await call('/api/media/'+mid)).notes,fields.notes);assert.equal((await call('/api/media/'+mid)).locations.length,2);
     await call('/api/media/'+mid,{...fields,location_id:a.id},'PUT');assert.equal((await call('/api/media/'+mid)).locations.length,2);

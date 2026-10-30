@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs,readFileSync} from 'node:fs';
@@ -12,7 +13,7 @@ test('private location editor synchronizes names/tags, preserves IDs/canon/files
   async function call(...args){const r=await request(...args);assert(r.status<300,JSON.stringify(r));return r.data;}
   try{
     await fs.writeFile(path.join(root,'picture.png'),'canonical picture');await call(desktop,'/api/scan',{});const mid=(await call(desktop,'/api/media')).items[0].id,c=await call(desktop,'/api/characters',{name:'Palor'}),beach=await call(desktop,'/api/locations',{name:'Beach',kind:'folder',folder:'Locations/Beach'}),town=await call(desktop,'/api/locations',{name:'Fenyves'});
-    await fs.writeFile(path.join(root,'Locations','Beach','keep.txt'),'untouched');await call(desktop,'/api/media/'+mid,{character_ids:[c.id],tags:'Beach',notes:'Keep note',location_reference:true,location_id:beach.id,categorization_complete:true},'PUT');const canon=await call(desktop,'/api/characters/'+c.id+'/canon',{appearance:'Approved',references:[{media_id:mid,role:'body'}]});
+    await fs.writeFile(path.join(root,'Locations','Beach','keep.txt'),'untouched');await call(desktop,'/api/media/'+mid,{character_ids:[c.id],tags:'Beach',notes:'Keep note',location_reference:true,location_id:beach.id,categorization_complete:true},'PUT');const canon=await approveCanon((...args)=>call(desktop,...args),c.id,{appearance:'Approved',references:[{media_id:mid,role:'body'}]});
     const route='/api/location-editor/'+beach.id,original=await call(desktop,route);assert.equal((await request(mobile,'/api/location-editor')).status,403);assert.equal((await request(mobile,route,{},'PUT',auth)).status,403);
     const session=await call(mobile,'/api/session',undefined,'GET',auth),write={...auth,Origin:origin,'X-LU-CSRF':session.csrf};
     const fields={name:'Strand',english_name:'Beach',category:'strand',description:'Homokos part.\nÁrvíztűrő tükörfúrógép.',parent_id:town.id},saved=await call(mobile,route,{expected_version:original.version,fields},'PUT',write);

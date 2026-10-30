@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -34,7 +35,7 @@ test('selected file removal reuses recoverable trash, protects canon and leaves 
     app=await createApp({root,dataDir:path.join(temp,'data'),mobile:{enabled:false},mcpWrites:null});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+app.server.address().port;
     const api=async(route,body,method)=>{const r=await fetch(base+route,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined}),value=await r.json();if(!r.ok)throw Error(value.error);return value;};
     await api('/api/scan',{});const items=(await api('/api/media')).items,find=name=>items.find(m=>m.relative_path===name),spare=find('spare.png'),reference=find('reference.png'),character=await api('/api/characters',{name:'Dezső'});
-    for(const m of [spare,reference])await api('/api/media/'+m.id,{character_ids:[character.id],tags:'retain',notes:'Keep this note'},'PUT');await api('/api/characters/'+character.id+'/canon',{appearance:'Keep canon',references:[{media_id:reference.id,role:'face'}]});const before=await api('/api/export');
+    for(const m of [spare,reference])await api('/api/media/'+m.id,{character_ids:[character.id],tags:'retain',notes:'Keep this note'},'PUT');await approveCanon(api,character.id,{appearance:'Keep canon',references:[{media_id:reference.id,role:'face'}]});const before=await api('/api/export');
     const result=await removeSelectedMedia({ids:[spare.id,reference.id],mode:'file',api});assert.deepEqual(result.removed,[spare.id]);assert.equal(result.failed[0].id,reference.id);assert.match(result.failed[0].message,/approved identity reference/);
     const removed=await api('/api/removed');assert.equal(removed.items.length,1);assert.equal(removed.items[0].id,spare.id);assert.equal(removed.items[0].physical,1);assert.equal(await fs.readFile(path.join(root,'unselected.png'),'utf8'),'fixture unselected.png');assert.equal(await fs.readFile(path.join(root,'reference.png'),'utf8'),'fixture reference.png');
     const after=await api('/api/export');for(const table of ['depictions','media_notes','reviews','canon'])assert.deepEqual(after[table],before[table],table);assert.equal(after.media.length,before.media.length);

@@ -10,3 +10,7 @@ This change consolidates the existing working source and backup/recovery tooling
 - Cloud synchronization, an independent off-site media copy, replacement-machine credential recovery, Grok client reauthorization and a full machine restart were not verified. Credentials are bound to the current Windows account/profile; see RECOVERY.md.
 
 Detailed private snapshot IDs, paths, database counts and media observations are in the OneDrive backup MANIFEST.json and media/manifest.json. They are not source-control artifacts.
+
+## Application repair follow-up — 2026-10-30
+
+The application failures above were reproduced and repaired in the subsequent debugging work. The current full Windows suite passes 158/158 tests, including the six organized-storage and three new canon-approval regressions. See [application regression evidence](TEST_VALIDATION.md) for product fixes, obsolete expectations and transport limits. The earlier numbers remain historical consolidation evidence.

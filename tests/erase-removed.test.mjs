@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -37,12 +38,15 @@ test('permanent erasure is confirmed, limited to removed items, preserves origin
     await call('/api/scan',{});assert.equal((await call('/api/media')).items.some(m=>m.id===catalogue.id),false);
     const c=await call('/api/characters',{name:'Protected identity'});
     await call('/api/media/'+reference.id,{character_ids:[c.id]},'PUT');
-    const approved=await call('/api/characters/'+c.id+'/canon',{appearance:'Approved',references:[{media_id:reference.id,role:'face'}]});
-    await call('/api/characters/'+c.id+'/canon',{appearance:'Retired reference',references:[]});
+    const approved=await approveCanon(call,c.id,{appearance:'Approved',references:[{media_id:reference.id,role:'face'}]});
+    assert.equal((await request('/api/media/'+reference.id+'/remove',{mode:'file'})).status,409);
+    await approveCanon(call,c.id,{appearance:'Retired reference',references:[]});
     await call('/api/media/'+reference.id+'/remove',{mode:'file'});
     const protectedItem=(await call('/api/removed')).items.find(m=>m.id===reference.id);
-    assert.equal(protectedItem.protected,1);assert.equal((await erase(protectedItem)).status,409);
+    assert.equal(protectedItem.protected,0);
     assert.equal(await fs.readFile(path.join(root,protectedItem.relative_path),'utf8'),'reference.png');
+    assert.equal((await erase(protectedItem)).status,200);assert.equal(await fs.stat(path.join(root,protectedItem.relative_path)).then(()=>true,()=>false),false);
+    assert.deepEqual(JSON.parse((await call('/api/characters/'+c.id)).history.find(row=>row.id===approved.id).references_json),[]);
     const backup=await call('/api/export');assert.ok(backup.canon.some(r=>r.id===approved.id));assert.ok(backup.media.some(m=>m.id===trash.id));
     assert.ok(backup.application_settings.some(s=>s.key==='erased_media:'+trash.id));
     const deleted=JSON.parse(backup.application_settings.find(s=>s.key==='deleted_character:'+emptyAfterErasure.id).value);

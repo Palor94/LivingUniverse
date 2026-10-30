@@ -14,6 +14,7 @@ export const extraTables={
   media_uploads:['id','import_id','slot_key','request_hash','filename','content_type','size','sha256','received_bytes','status','error_code','created_at','expires_at'],
   media_upload_chunks:['upload_id','offset','size','sha256'],
   media_image_edits:['id','media_id','status','original_sha256','cropped_sha256','crop_json','original_size','original_mtime','created_at','restored_at'],
+  mcp_reference_changes:['id','request_key','request_hash','change_hash','character_id','payload_json','status','created_at','expires_at','approved_by','approved_at','applied_at','result_json'],
   mcp_changes:['id','request_key','request_hash','change_hash','operation','payload_json','status','created_at','expires_at','approved_by','approved_at','applied_at','result_json'],
   character_ui:['character_id','cover_crop','merged_into'],
   character_cover_frames:['character_id','media_id','time_seconds','data_url','source_crop_json','source_size','source_mtime','captured_at'],

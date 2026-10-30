@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -34,7 +35,7 @@ test('optional hashing caches work, skips online originals, preserves identity, 
     const ids={};for(const name of Object.keys(files))ids[name]=(await call('/api/media?search='+name)).items[0].id;
     const c=await call('/api/characters',{name:'Pákozdi'});await call('/api/media/'+ids['one.png'],{character_ids:[c.id],tags:'body, reference',notes:'Keep notes',categorization_complete:true},'PUT');
     await call('/api/media/'+ids['one.png']+'/review',{character_id:c.id,decision:'approved',rating:5,notes:'Keep review'});
-    const canon=await call('/api/characters/'+c.id+'/canon',{appearance:'Unchanged identity',references:[{media_id:ids['one.png'],role:'body'}]});const before=await call('/api/media/'+ids['one.png']);
+    const canon=await approveCanon(call,c.id,{appearance:'Unchanged identity',references:[{media_id:ids['one.png'],role:'body'}]});const before=await call('/api/media/'+ids['one.png']);
     assert.equal((await call('/api/duplicates/plan')).ids.length,5);const result=await call('/api/duplicates/analyze',{ids:list});assert.equal(result.results.filter(r=>r.status==='hashed').length,3);assert.equal(result.results.filter(r=>r.status==='skipped').length,2);
     let groups=await call('/api/duplicates/groups');assert.equal(groups.total,1);assert.equal(groups.items[0].items.length,2);assert.equal(groups.items[0].items.find(m=>m.id===ids['one.png']).canonical,true);
     assert.equal(groups.items[0].items.find(m=>m.id===ids['one.png']).categorization_complete,true);

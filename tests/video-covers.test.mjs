@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -23,7 +24,7 @@ test('video frame covers preserve source IDs, canon and sorting, survive backups
   await start(path.join(temp,'data'));
   try{
     await fs.writeFile(path.join(root,'clip.mp4'),'video bytes fixture');await fs.writeFile(path.join(root,'reference.jpg'),decodeCoverJpeg(jpeg).bytes);await call('/api/scan',{});const items=(await call('/api/media')).items,video=items.find(m=>m.kind==='video'),image=items.find(m=>m.kind==='image');const c=await call('/api/characters',{name:'Kristóf'}),other=await call('/api/characters',{name:'Palor'});
-    for(const m of items)await call('/api/media/'+m.id,{character_ids:[c.id],notes:'Keep source notes',tags:'original'},'PUT');const canon=await call('/api/characters/'+c.id+'/canon',{appearance:'Preserved',references:[{media_id:image.id,role:'face'}]});const before=await call('/api/export');
+    for(const m of items)await call('/api/media/'+m.id,{character_ids:[c.id],notes:'Keep source notes',tags:'original'},'PUT');const canon=await approveCanon(call,c.id,{appearance:'Preserved',references:[{media_id:image.id,role:'face'}]});const before=await call('/api/export');
     const payload={media_id:video.id,time_seconds:5.05,image_data:jpeg,crop:{x:.1,y:.2,w:.3,h:.4},source_size:video.size,source_mtime:video.modified_at};
     assert.equal((await request('/api/characters/'+other.id+'/video-cover',payload)).status,400);assert.equal((await request('/api/characters/'+c.id+'/video-cover',{...payload,source_size:0})).status,409);assert.equal((await request('/api/characters/'+c.id+'/video-cover',{...payload,time_seconds:-1})).status,400);assert.equal((await request('/api/characters/'+c.id+'/video-cover',{...payload,crop:{x:.9,y:0,w:.5,h:1}})).status,400);
     await call('/api/characters/'+c.id+'/video-cover',payload);const profile=await call('/api/characters/'+c.id);assert.equal(profile.cover_id,video.id);assert.equal(profile.cover_frame.time_seconds,5.05);assert.equal(profile.canon.id,canon.id);assert.equal(JSON.parse(profile.cover_crop).w,1);assert.ok((await call('/api/state')).characters.find(x=>x.id===c.id).cover_frame);

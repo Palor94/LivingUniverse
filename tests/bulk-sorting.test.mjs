@@ -1,3 +1,4 @@
+import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
@@ -17,7 +18,7 @@ test('bulk sorting is additive and atomic; explicit completion, queue snapshots,
   try{
     await call('/api/scan',{});const first=await call('/api/media?kind=image');assert.equal(first.items.length,48);const ids=first.items.map(m=>m.id);const a=await call('/api/characters',{name:'Pákozdi'}),b=await call('/api/characters',{name:'Palor'});
     await call('/api/media/'+ids[0],{character_ids:[b.id],tags:'Shirtless, teljes alak',notes:'Preserve this note'},'PUT');
-    const canon=await call('/api/characters/'+b.id+'/canon',{appearance:'Approved identity',references:[{media_id:ids[0],role:'body'}]});await call('/api/media/'+ids[0]+'/review',{character_id:b.id,decision:'approved',rating:4,notes:'Saved fidelity review'});
+    const canon=await approveCanon(call,b.id,{appearance:'Approved identity',references:[{media_id:ids[0],role:'body'}]});await call('/api/media/'+ids[0]+'/review',{character_id:b.id,decision:'approved',rating:4,notes:'Saved fidelity review'});
     const snapshot=await call('/api/media/'+ids[0]);const result=await bulk('assign',ids.slice(0,35),{character_ids:[a.id,b.id,a.id]});assert.equal(result.updated,35);assert.equal(result.associations,69);assert.equal((await bulk('assign',ids.slice(0,35),{character_ids:[a.id,b.id]})).updated,0);
     assert.equal((await call('/api/media/'+ids[0])).sorting_status,'multiple');assert.equal((await call('/api/media?inbox=1&kind=image')).total,51);
     await bulk('tags_add',ids.slice(0,35),{tags:'shirtless, smiling, mosolygó'});let updated=await call('/api/media/'+ids[0]);assert.equal(updated.tags,'Shirtless, teljes alak, smiling, mosolygó');assert.equal(updated.notes,snapshot.notes);assert.deepEqual(updated.reviews,snapshot.reviews);assert.deepEqual(updated.canonicalFor,snapshot.canonicalFor);assert.equal((await call('/api/characters/'+b.id)).canon.id,canon.id);

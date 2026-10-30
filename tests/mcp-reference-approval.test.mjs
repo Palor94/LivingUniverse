@@ -43,18 +43,18 @@ test('private reference approval saves canon immediately, retries safely, and en
     const legacy=await propose(canon.id,'body');
     app.db.prepare("UPDATE mcp_reference_changes SET status='approved',approved_by=?,approved_at=? WHERE id=?").run(config.login,now,legacy.change_id);
     const recovered=await decide(legacy);assert.equal(recovered.status,200);assert.equal(recovered.body.status,'applied');
-    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM canon').get().n,2);
+    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM canon').get().n,1);assert.equal(recovered.body.result.revision_id,canon.id);assert.equal(JSON.parse(app.db.prepare('SELECT references_json FROM canon WHERE id=?').get(canon.id).references_json)[0].role,'body');
     const nextRevision=recovered.body.result.revision_id;
     const rejected=await propose(nextRevision,'general');
     assert.equal((await decide(rejected,'reject')).body.status,'rejected');
     assert.equal((await decide(rejected,'reject')).body.status,'rejected');
     assert.equal((await decide(rejected)).status,409);
-    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM canon').get().n,2);
+    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM canon').get().n,1);
 
     const stale=await propose(nextRevision,'detail');await fs.appendFile(path.join(root,filename),'changed bytes');
     assert.equal((await decide(stale)).status,409);
     assert.equal((await call('get_pending_reference_change',{change_id:stale.change_id})).status,'conflict');
-    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM canon').get().n,2);
+    assert.equal(app.db.prepare('SELECT COUNT(*) n FROM canon').get().n,1);
   }finally{
     await app?.close();assert.equal(path.dirname(path.resolve(temp)),path.resolve(os.tmpdir()));await fs.rm(temp,{recursive:true,force:true});
   }
