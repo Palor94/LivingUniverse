@@ -14,7 +14,7 @@ export function createMobileSorting({root,all,one,run,transaction,catalogue,taxo
   function editable(m){const note=one('SELECT tags,notes FROM media_notes WHERE media_id=?',m.id);return {character_ids:characterIds(m.id),tags:note?.tags||'',notes:note?.notes||'',structured_tag_ids:taxonomy.details(m.id).map(t=>t.id).sort(),location_reference:catalogue.details(m.id).location_reference,location_id:locations.details(m.id)?.id??null,categorization_complete:catalogue.details(m.id).categorization_complete};}
   function version(m,f){return createHash('sha256').update(JSON.stringify([m.id,m.relative_path,m.size,m.modified_at,f])).digest('hex');}
   function details(m){const fields=editable(m);return {id:m.id,filename:path.win32.basename(m.relative_path),folder:m.folder,fields,version:version(m,fields),image_url:'/api/sorting/images/'+m.id+'/preview'};}
-  function vocabulary(){return {groups:all('SELECT id,name FROM tag_groups ORDER BY name'),tags:all('SELECT id,group_id,name FROM structured_tags ORDER BY name'),locations:all('SELECT id,name,tag_id FROM locations ORDER BY name')};}
+  function vocabulary(){return {groups:all('SELECT id,name FROM tag_groups ORDER BY name'),tags:all("SELECT t.id,t.group_id,COALESCE(NULLIF(l.hu_name,''),t.name) name,l.en_name english_name FROM structured_tags t LEFT JOIN tag_localizations l ON l.tag_id=t.id ORDER BY name"),locations:all('SELECT id,name,tag_id FROM locations ORDER BY name')};}
   function list(url){
     const scope=url.searchParams.get('scope')||'needs';if(!['needs','all'].includes(scope))throw fail('Choose needs sorting or all images.');
     const q=url.searchParams.get('q')||'';if(q.length>200)throw fail('Search is too long.');
@@ -37,6 +37,9 @@ export function createMobileSorting({root,all,one,run,transaction,catalogue,taxo
     if(!Array.isArray(f.character_ids)||f.character_ids.length>1000||f.character_ids.some(id=>typeof id!=='string'||!uuid.test(id)||!one('SELECT 1 FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE c.id=? AND u.merged_into IS NULL',id)))throw fail('Choose existing characters.');
     if(typeof f.tags!=='string'||f.tags.length>2000||typeof f.notes!=='string'||f.notes.length>30000||typeof f.location_reference!=='boolean'||typeof f.categorization_complete!=='boolean'||!(f.location_id===null||typeof f.location_id==='string'&&one('SELECT 1 FROM locations WHERE id=?',f.location_id))||f.location_id&&!f.location_reference)throw fail('Invalid sorting values. Text was not truncated.');
     const desired={...f,character_ids:sorted(f.character_ids),structured_tag_ids:sorted(taxonomy.validateTags(f.structured_tag_ids))};
+    const extracted=taxonomy.noteTags.match(desired.notes).filter(t=>t.status==='matched').map(t=>t.tag_id);
+    const requestedTags=[...desired.structured_tag_ids];
+    desired.structured_tag_ids=sorted([...desired.structured_tag_ids,...extracted]);
     const place=f.location_id&&one('SELECT tag_id FROM locations WHERE id=?',f.location_id);if(place?.tag_id)desired.structured_tag_ids=sorted([...desired.structured_tag_ids,place.tag_id]);
     return transaction(()=>{
       const m=active(id),current=editable(m);
@@ -49,7 +52,7 @@ export function createMobileSorting({root,all,one,run,transaction,catalogue,taxo
       for(const cid of desired.character_ids)run('INSERT OR IGNORE INTO depictions VALUES(?,?)',id,cid);
       run('UPDATE characters SET cover_id=NULL WHERE cover_id=? AND id NOT IN (SELECT character_id FROM depictions WHERE media_id=?)',id,id);
       run('INSERT INTO media_notes VALUES(?,?,?) ON CONFLICT(media_id) DO UPDATE SET tags=excluded.tags,notes=excluded.notes',id,desired.tags,desired.notes);
-      taxonomy.set(id,desired.structured_tag_ids);catalogue.setLocation(id,desired.location_reference);locations.set(id,desired.location_id);catalogue.setComplete(id,desired.categorization_complete);
+      taxonomy.set(id,requestedTags);taxonomy.noteTags.extract(id);catalogue.setLocation(id,desired.location_reference);locations.set(id,desired.location_id);catalogue.setComplete(id,desired.categorization_complete);
       return details(m);
     });
   }

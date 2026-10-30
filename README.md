@@ -1,5 +1,16 @@
 # Living Universe
 
+### Jegyzetekből kinyert, kétnyelvű címkék
+
+A Media Notes mezőben a `#mosolygó` és `#full_body` jellegű hashtagek mentéskor
+meglévő strukturált címkékhez kapcsolódnak. Magyar megjelenített nevek, angol
+megfelelők és szerkeszthető aliasok támogatottak; ismeretlen vagy többértelmű
+címkéből javaslat lesz. Pontos világhelyszínt külön kell kiválasztani.
+A szótárkezelőből száraz próba, meglévő jegyzetek ellenőrzött feldolgozása és
+műveletenkénti visszavonás érhető el. Használat, migráció és korlátok:
+[Media Notes címkék](docs/MEDIA_NOTE_TAGS.md). Ez fejlesztői forrásváltozás;
+az élő katalógus frissítése és az éles telepítés külön lépés.
+
 ## Mentés és helyreállítás
 
 A közös alkalmazás- és ChatGPT/Grok-csatlakozóforrás a GitHub `Palor94/LivingUniverse` repository `main` ágán található. A mentési egységek, az egykattintásos friss mentés és az elkülönített helyreállítás belépőpontja: **[RECOVERY.md](RECOVERY.md)**. A privát adatbázis, helyszíntervek, helyi fájl-visszaállítási állományok és titkosított beállítások külön, dátumozott OneDrive-mentést kapnak; az eredeti médiatár a meglévő OneDrive-gyökérben marad.

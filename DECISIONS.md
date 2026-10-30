@@ -1,5 +1,32 @@
 # Decisions
 
+## 2026-10-30: Bilingual Media Notes hashtags
+
+Extract explicit Media Notes hashtags on desktop/mobile saves using deterministic
+NFC/case/separator normalization, curated or explicit Hungarian/English names and
+aliases, and existing stable tag IDs. New vocabulary uses UUIDs. Preserve original
+notes, legacy tag text, existing labels, sorting choices, profiles and canon.
+Do not infer translations, identities or places. Unknown/ambiguous tokens remain
+proposals; tags linked to exact locations are excluded from automatic matching.
+Keep descriptive environment tags separate from exact place assignments.
+
+Use additive migration 021 with a verified local pre-migration SQLite backup,
+atomic writes, portable export/restore, digest-bound dry-run backfills and per-run
+rollback that respects later manual adoption. No startup backfill, paid AI,
+private-media upload, live migration or production rollout is part of this work.
+See docs/MEDIA_NOTE_TAGS.md. All 161 automated tests pass on disposable fixtures.
+
+Validation also corrected omitted optional canon expectations and reference-only
+revision reuse to follow AGENTS.md: explicit approvals append revisions; removed
+memberships use the documented retention exception and minimal explanations.
+Appearance-only UI history remains distinct from full persisted revision history.
+
+The next hierarchical-location phase is design only. Duplicate local names need
+parent-scoped uniqueness and qualified selection; the existing inline global
+constraint will require a separately reviewed table rebuild. No Locations
+migration or canvas-to-catalogue promotion is implemented. See
+docs/LOCATION_TREE_DESIGN.md.
+
 ## 2026-10-29: Original-image delivery to connected assistants
 
 The user requested actual image bytes instead of thumbnails. Shared read tools now return unchanged original bytes with format, dimensions and hash; canon-bound reads still verify the immutable fingerprint. Preserve the 20 MiB/40 MP source limits. The documented 10 MiB Secure MCP Tunnel envelope requires 6 MiB inline plus hash-bound read chunks for larger images. Private Tailscale image downloads serve originals; no public file endpoint, new credentials, canon/profile changes or paid calls. Reuse image content in the versioned widget without duplicating base64 in metadata. Do not imply native generator handoff from MCP transport success. See docs/ORIGINAL_IMAGES.md.

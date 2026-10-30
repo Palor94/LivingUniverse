@@ -1,5 +1,20 @@
 # Development plan
 
+## 2026-10-30: Media Notes hashtags and bilingual vocabulary
+
+Implemented and tested on a separate development branch: automatic deterministic
+hashtag matching on desktop/mobile note saves, Hungarian display names, explicit
+English equivalents and aliases, stable IDs, duplicate prevention, unknown and
+ambiguous proposals, and exact-location exclusion. Added dry-run review, migration
+021, verified pre-migration backup, guarded export/restore and selective rollback.
+All 161 tests pass, including 12 new feature tests. No live database or originals
+were used; no production deployment or paid/provider call occurred.
+
+Operation, limitations and changed components: docs/MEDIA_NOTE_TAGS.md.
+Next-phase design: docs/LOCATION_TREE_DESIGN.md. Recommended next increment is a
+read-only location inventory/preflight and qualified breadcrumb reader. Location
+schema migration and canvas promotion remain unimplemented.
+
 ## Media-library phases requested by the user
 
 Phase 1 implemented: page-scoped checkbox/Ctrl/Shift selection, additive bulk character assignment, additive tags with explicit tag removal, explicit categorization completion, status filtering, and a fixed filtered sequence with save-and-next/previous. No physical file operations or canonical changes occur in these bulk actions. Completion is persisted in one additive table and included in exports. See README for use and migration rollback.
