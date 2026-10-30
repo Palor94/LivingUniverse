@@ -1,0 +1,34 @@
+export function installLocationEditor({host,api,onSaved=()=>{}}){
+  const el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
+  const button=(text,fn)=>{const b=el('button',text);b.type='button';b.onclick=fn;return b;};
+  const key=s=>String(s||'').normalize('NFD').replace(/\p{M}/gu,'').toLocaleLowerCase('hu');
+  const prefix='lu-place-draft-v1:';let items=[],current=null,epoch=0,busy=false;
+  const shell=el('div');shell.className='place-editor';const side=el('section'),main=el('section'),notice=el('p');notice.setAttribute('role','status');main.className='place-main';
+  const search=el('input');search.type='search';search.placeholder='Helyszín keresése…';search.setAttribute('aria-label','Helyszín keresése');
+  const list=el('div');list.className='place-list';side.append(search,list);shell.append(side,main);host.append(el('p','Magyar helyszínnevek használhatók. Az átnevezés a kapcsolódó címkét is frissíti, a képek hozzárendelése megmarad.'),notice,shell);
+  const create=el('details');create.className='place-new';const summary=el('summary','Új helyszín'),label=el('label','Új helyszín neve'),name=el('input'),status=el('p');name.maxLength=100;label.append(name);create.append(summary,label,button('Helyszín létrehozása',async()=>{if(busy)return;busy=true;status.textContent='Létrehozás…';try{const place=await api('/api/location-editor',{name:name.value},'PUT');name.value='';create.open=false;await refresh();busy=false;await choose(place.id);await onSaved();}catch(e){status.textContent=e.message;}finally{busy=false;}}),status);side.append(create);
+  function draft(id){try{return JSON.parse(localStorage.getItem(prefix+id)||'null');}catch{return null;}}
+  function remember(id,data){try{if(data)localStorage.setItem(prefix+id,JSON.stringify(data));else localStorage.removeItem(prefix+id);return true;}catch{notice.textContent='A böngésző nem tudja megőrizni a piszkozatot. Ments csatlakozás közben.';return false;}}
+  function renderList(){list.replaceChildren();const q=key(search.value);for(const p of items.filter(p=>key(p.name+' '+p.english_name+' '+p.category).includes(q)).sort((a,b)=>a.name.localeCompare(b.name,'hu'))){const b=button(p.name+(p.tag_only?' · címke':''),()=>choose(p.id));b.setAttribute('aria-current',String(current?.id===p.id));list.append(b);}if(!list.children.length)list.append(el('p','Nincs találat.'));}
+  search.oninput=renderList;
+  async function refresh(){const data=await api('/api/location-editor');items=data.items;renderList();if(data.truncated)notice.textContent='Az első 2000 helyszín látható.';}
+  async function choose(id){if(busy)return;const request=++epoch;notice.textContent='Helyszín betöltése…';try{const p=await api('/api/location-editor/'+encodeURIComponent(id));if(request!==epoch)return;current=p;draw(p);renderList();notice.textContent='A változtatásokat a Mentés gombbal véglegesítheted.';}catch(e){notice.textContent=e.message;}}
+  function draw(p,override=null){
+    main.replaceChildren(el('h2',p.name));const saved=override||draft(p.id),baseline=saved?.expected_version||p.version,values=saved?.fields||p;let expected=baseline;
+    const form=el('form'),fields={},feedback=el('p');form.className='place-form';feedback.setAttribute('role','status');
+    for(const[field,title,max]of[['name','Helyszín neve',100],['category','Típus (például strand, pihenő, település)',100],['english_name','Angol keresési név (nem kötelező)',200],['description','Leírás',30000]]){const label=el('label',title),input=el(field==='description'?'textarea':'input');input.maxLength=max;input.value=values[field]||'';fields[field]=input;label.append(input);form.append(label);}
+    const parentLabel=el('label','Nagyobb helyszín, amelyhez tartozik'),parent=el('select'),empty=el('option','Nincs megadva');empty.value='';parent.append(empty);for(const item of items.filter(i=>!i.tag_only&&i.id!==p.id)){const o=el('option',item.name);o.value=item.id;parent.append(o);}parent.value=values.parent_id||'';fields.parent_id=parent;parentLabel.append(parent);form.append(parentLabel);
+    if(p.folder)form.append(el('small','Kapcsolt mappa: '+p.folder+' · az átnevezés nem módosítja ezt a mappát.'));
+    const read=()=>Object.fromEntries(Object.entries(fields).map(([k,input])=>[k,k==='parent_id'?(input.value||null):input.value]));
+    const persist=()=>{const ok=remember(p.id,{expected_version:expected,fields:read()});feedback.textContent=ok?'Piszkozat megőrizve ezen az eszközön · még nincs elmentve.':'Piszkozat tárolása nem sikerült.';};form.oninput=persist;form.onchange=persist;
+    const save=el('button','Mentés');save.type='submit';save.className='primary';const conflict=el('section');conflict.className='place-conflict';form.append(feedback,save,conflict);main.append(form);
+    feedback.textContent=saved?'Korábbi piszkozat visszatöltve.':'Nincs mentetlen módosítás.';
+    if(saved&&expected!==p.version)feedback.textContent='A piszkozat elkészülte óta változott a helyszín. Mentéskor összehasonlítjuk.';
+    form.onsubmit=async e=>{e.preventDefault();if(busy)return;busy=true;save.disabled=true;for(const input of Object.values(fields))input.disabled=true;const submitted=read();remember(p.id,{expected_version:expected,fields:submitted});feedback.textContent='Mentés…';
+      try{const result=await api('/api/location-editor/'+encodeURIComponent(p.id),{expected_version:expected,fields:submitted},'PUT');remember(p.id,null);current=result;await refresh();draw(result);notice.textContent='Elmentve: '+result.name+'. A képek hozzárendelése megmaradt.';await onSaved();}
+      catch(err){feedback.textContent=err.message;feedback.className='error';if(err.status===409){try{const latest=await api('/api/location-editor/'+encodeURIComponent(p.id)),text=el('dl');for(const[k,title]of[['name','Mentett név'],['english_name','Angol név'],['category','Típus'],['description','Leírás'],['parent_id','Kapcsolódó helyszín']])text.append(el('dt',title),el('dd',k==='parent_id'?(items.find(i=>i.id===latest[k])?.name||'Nincs megadva'):(latest[k]||'Nincs megadva')));conflict.replaceChildren(el('h3','Legfrissebb mentett változat'),text,button('A mentett változat betöltése',()=>{remember(p.id,null);current=latest;draw(latest);}),button('Piszkozatom megtartása összehasonlítás után',()=>{expected=latest.version;remember(p.id,{expected_version:expected,fields:submitted});conflict.replaceChildren();feedback.textContent='A piszkozat megmaradt. A felülíráshoz nyomd meg újra a Mentés gombot.';}));}catch{feedback.textContent+=' A legfrissebb adat nem tölthető be. A piszkozat megmaradt.';}}}
+      finally{busy=false;if(save.isConnected){save.disabled=false;for(const input of Object.values(fields))input.disabled=false;}}
+    };
+  }
+  return {open:async()=>{try{await refresh();if(!current)main.replaceChildren(el('p','Válassz helyszínt vagy címkét a szerkesztéshez.'));}catch(e){notice.textContent=e.message;}}};
+}

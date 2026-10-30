@@ -1,0 +1,1098 @@
+{
+  "format": 1,
+  "captured_at_utc": "2026-10-30T07:10:22.222Z",
+  "timezone": "Europe/Budapest",
+  "kind": "source-only",
+  "repository": "Palor94/LivingUniverse",
+  "excludes": [
+    "live databases and catalogue exports",
+    "images and videos",
+    "credentials and local configuration",
+    "runtime caches and logs",
+    "Git history"
+  ],
+  "byte_identical_to_working_sources": true,
+  "component": "complete application and MCP",
+  "files": [
+    {
+      "path": ".gitignore",
+      "size_bytes": 1068,
+      "sha256": "22dc13227e5d0200ceb6074092a2383efd4e49fb1a7f6f157418302bafbc6e76"
+    },
+    {
+      "path": "AGENTS.md",
+      "size_bytes": 3018,
+      "sha256": "a108d70b89cc739c371900d5647d1b98959d32873ed6299d6fcbade402f56afd"
+    },
+    {
+      "path": "Connect Sogni.cmd",
+      "size_bytes": 404,
+      "sha256": "329301a2aa4bcb5c3ccced462d7ba2c86eb7b7df88f654dc3d4b9d046c8a5806"
+    },
+    {
+      "path": "DECISIONS.md",
+      "size_bytes": 39132,
+      "sha256": "516cdf23127dd9c886c987e71820096dbeaa283e070d6dc8b3934d225a59f027"
+    },
+    {
+      "path": "DEVELOPMENT_PLAN.md",
+      "size_bytes": 7416,
+      "sha256": "274f80e8e39c12d19133b40adf8a9d5b5146d4525d3210bbc4ecd575f66e8e29"
+    },
+    {
+      "path": "Enable Mobile Access.cmd",
+      "size_bytes": 371,
+      "sha256": "760d87e8ce0086c43274ecb0cd053a20334cd6f56a8192a41691b9defd93afa2"
+    },
+    {
+      "path": "PROJECT_VISION.md",
+      "size_bytes": 2342,
+      "sha256": "0f2d82862b818ae5768561c0300285162c47f940b745b44249e297a6ace5e324"
+    },
+    {
+      "path": "README.md",
+      "size_bytes": 32047,
+      "sha256": "c74b6116334f6e5f68aa5470cf629cc0f922c5a3bdf7d0c8fde8c67fd41fa175"
+    },
+    {
+      "path": "Start Living Universe.cmd",
+      "size_bytes": 942,
+      "sha256": "904faf2607aecabd639922c706d64710610b2d29a81b2e8dd060315aa77d9f11"
+    },
+    {
+      "path": "app/bootstrap.mjs",
+      "size_bytes": 3448,
+      "sha256": "4afcf9e7fdf60550f35494bc9335cbe3eb94b711656ce00eaec953a4e35d06c3"
+    },
+    {
+      "path": "app/catalogue-actions.mjs",
+      "size_bytes": 4779,
+      "sha256": "517659d57f79edfe4d2f0c236eea818d82c53a91ede1d8f9f986e08f9a9a5b94"
+    },
+    {
+      "path": "app/character-edit.mjs",
+      "size_bytes": 950,
+      "sha256": "e9109834abd06e08a4219e11b685d7bf3b3fd15647c4b7b1d5214ef52bf8ccaa"
+    },
+    {
+      "path": "app/clean-reference-history.mjs",
+      "size_bytes": 3227,
+      "sha256": "3600bed2699f9303dbb88a7fb9b3550447ff4789557a5f25b8053e284a068bbc"
+    },
+    {
+      "path": "app/desktop-generation.mjs",
+      "size_bytes": 4315,
+      "sha256": "6153b171b5bb853d0e7b510f13282502526b523bb5ae43e0707a4a3a5450aaee"
+    },
+    {
+      "path": "app/duplicates.mjs",
+      "size_bytes": 9040,
+      "sha256": "65801dae59b8755e0c91b8b1fd6a67cf78129e448ee412a82cf65a83631480df"
+    },
+    {
+      "path": "app/enhancements.mjs",
+      "size_bytes": 19652,
+      "sha256": "397cfe8f90bfacf7c1ade16462294d583857874a7acf692c686999812224d9da"
+    },
+    {
+      "path": "app/folder-sync.mjs",
+      "size_bytes": 16607,
+      "sha256": "e1ef40ec86a372991b9ad07e5af688e3c5e3b3bf481ce5e84dfa50611b10ae7a"
+    },
+    {
+      "path": "app/ghost-profile.mjs",
+      "size_bytes": 11553,
+      "sha256": "446e0d31cabbf3e9be85a545c2c1d5bb535be69b4a47be26b4831205622f3886"
+    },
+    {
+      "path": "app/grok-connections.mjs",
+      "size_bytes": 1493,
+      "sha256": "c62f32aed4e46224e37f0fa275df70e43ebf7525bd3a64142d2fe8cfa73a80fd"
+    },
+    {
+      "path": "app/image-crops.mjs",
+      "size_bytes": 11441,
+      "sha256": "602d0cd17e4b44457abb3ae05e82b499972a1d9e3026a61c2d9b8ac98aefaaa9"
+    },
+    {
+      "path": "app/image-generation.mjs",
+      "size_bytes": 20377,
+      "sha256": "7387f0fbc3de4354b4d632db4266b0ef5bff2b370e89b2363dbba53764a88956"
+    },
+    {
+      "path": "app/image-providers.mjs",
+      "size_bytes": 6101,
+      "sha256": "27a9985e875624948b4c439b64aabeed4c282cd0f84ccb9d35ca749143aed84f"
+    },
+    {
+      "path": "app/legacy-sorting.mjs",
+      "size_bytes": 1398,
+      "sha256": "d202f1b83dda6c7a4b7b3fd4902beda92293ce0a41507cf7a9b6ab61fef41299"
+    },
+    {
+      "path": "app/location-canvas.mjs",
+      "size_bytes": 7750,
+      "sha256": "b6ddbae2a7a491158cd113ca97fe21d00e696f61904e98cc363c618e29b3ad6e"
+    },
+    {
+      "path": "app/location-editor.mjs",
+      "size_bytes": 5341,
+      "sha256": "3dcd1dfcd140d3979a5a3c79087c8430167720314f7e795fb5965addf88cb59a"
+    },
+    {
+      "path": "app/locations.mjs",
+      "size_bytes": 10485,
+      "sha256": "74da151f441e8269f87ef26021bc6b1678909f91aad8304e94306040c385f59a"
+    },
+    {
+      "path": "app/mcp-changes.mjs",
+      "size_bytes": 23155,
+      "sha256": "d2143e7f1c4be567fb131afc64997791f88a8a0ba8b319bfe386e9b3466e28fe"
+    },
+    {
+      "path": "app/media-imports.mjs",
+      "size_bytes": 22899,
+      "sha256": "ea88bcb0a069e5f05665cbc5d989dc12025537235375e6a2f61e909755117687"
+    },
+    {
+      "path": "app/media-uploads.mjs",
+      "size_bytes": 10786,
+      "sha256": "8bb19762b697b7c434b34dec57effc136cc8f11a17b183ef07563b968223b016"
+    },
+    {
+      "path": "app/migrations/002-media-categorization.down.sql",
+      "size_bytes": 206,
+      "sha256": "0460dd4a25dc529db659552c5e1dd7510ab0c827b8cb3291ba48a34d0a59757e"
+    },
+    {
+      "path": "app/migrations/002-media-categorization.up.sql",
+      "size_bytes": 264,
+      "sha256": "0ac9bfe8c0e583c4709a44df72547be589b984af0f0a107dcf96494857b2281b"
+    },
+    {
+      "path": "app/migrations/003-scan-reconciliation.down.sql",
+      "size_bytes": 213,
+      "sha256": "bbea1a5fb59c69be1bd3de3706105a925203bc523221b2720625780eebe3867a"
+    },
+    {
+      "path": "app/migrations/003-scan-reconciliation.up.sql",
+      "size_bytes": 423,
+      "sha256": "86103e38f0a409fe72fdebbf2e03a43524414837cad29285d120db66df5cf420"
+    },
+    {
+      "path": "app/migrations/004-duplicate-cache.down.sql",
+      "size_bytes": 41,
+      "sha256": "37ab8fe11df9092df2a14b2420da7360ea5a9d03b3c47ade78319a4be71bdc88"
+    },
+    {
+      "path": "app/migrations/004-duplicate-cache.up.sql",
+      "size_bytes": 257,
+      "sha256": "680ed6d055676ddfc969fa287295a018b527654a7b558f6781303488d0d64575"
+    },
+    {
+      "path": "app/migrations/005-structured-tags.down.sql",
+      "size_bytes": 146,
+      "sha256": "f70bb2a0b5d6a65233bbf93061749fcb4d902247bada9c5608e7fdc387add898"
+    },
+    {
+      "path": "app/migrations/005-structured-tags.up.sql",
+      "size_bytes": 779,
+      "sha256": "5f2eaa7c14e7606a7fbf5202fd46cfc9386fb5899602f1786066731e669b2f8b"
+    },
+    {
+      "path": "app/migrations/006-sorting-suggestions.down.sql",
+      "size_bytes": 84,
+      "sha256": "9feb652909871eba25b7e4b189d4ceb18f0f409d4529912e31bfd9d96cb1fc45"
+    },
+    {
+      "path": "app/migrations/006-sorting-suggestions.up.sql",
+      "size_bytes": 909,
+      "sha256": "7cbfc6a86caed622e7d57f6f980f1c2b76934bf9545545e44e17135e88f5f556"
+    },
+    {
+      "path": "app/migrations/007-location-references.down.sql",
+      "size_bytes": 34,
+      "sha256": "18cd1d999ef069621afd6caaafba5fbe5301b75910b94bf035aef52d6606188b"
+    },
+    {
+      "path": "app/migrations/007-location-references.up.sql",
+      "size_bytes": 166,
+      "sha256": "fdf08ac5957ae1f11900e9664ca80e0af39f4ecb5f4c1a3993cee381e9d45c76"
+    },
+    {
+      "path": "app/migrations/008-folder-name-sync.down.sql",
+      "size_bytes": 37,
+      "sha256": "b738dc3692a23938811a585bfb6616a38480c3fe6a938ad7b19efc60abc7937e"
+    },
+    {
+      "path": "app/migrations/008-folder-name-sync.up.sql",
+      "size_bytes": 291,
+      "sha256": "c292ee27896e7d73f13fa5fa05436bb5c24fcbb2944ddbc80b53145fbaa2236e"
+    },
+    {
+      "path": "app/migrations/009-video-cover-frames.down.sql",
+      "size_bytes": 400,
+      "sha256": "9e8122425c6d22f8b32003d42c74746a4513fb4989f28e1f6ca2ea8fc7f323fb"
+    },
+    {
+      "path": "app/migrations/009-video-cover-frames.up.sql",
+      "size_bytes": 364,
+      "sha256": "a3dc03c429fa0d92d66bf059cf283bb4a161d8aad1ed4c4cb8715f1c3315331f"
+    },
+    {
+      "path": "app/migrations/010-specific-locations.down.sql",
+      "size_bytes": 70,
+      "sha256": "4ff6b5e3301dab3b7d7215406cac91b0d6040984ce40d9cadb0f6d81b433bdf5"
+    },
+    {
+      "path": "app/migrations/010-specific-locations.up.sql",
+      "size_bytes": 351,
+      "sha256": "f81e2bace61f4be89be1254530fdff6f86ca204c71c56aed60f84191b059f094"
+    },
+    {
+      "path": "app/migrations/011-character-expression.down.sql",
+      "size_bytes": 173,
+      "sha256": "1654a8ae1a73327fd5d0e4f4b54f69df1289e3174c0db3e5bb9877e36f1eeda5"
+    },
+    {
+      "path": "app/migrations/011-character-expression.up.sql",
+      "size_bytes": 143,
+      "sha256": "7e5b9a27acdf34884fa9ea606d00baccc75d31f278a106287f365efeed041a42"
+    },
+    {
+      "path": "app/migrations/012-mcp-changes.down.sql",
+      "size_bytes": 117,
+      "sha256": "21484b48c622df07ab508a90c5dde06b271378664bc947e56c9b7d1c4fa82fc2"
+    },
+    {
+      "path": "app/migrations/012-mcp-changes.up.sql",
+      "size_bytes": 541,
+      "sha256": "514164d8cd4df0e6eda723bf3c090f4b6ed51d0e9661198088d9b46259e57d0f"
+    },
+    {
+      "path": "app/migrations/013-image-crops.down.sql",
+      "size_bytes": 196,
+      "sha256": "60b1e34db3c36aa069f0d787d4919175dd07d74e261f78081b5e8fc7826e1495"
+    },
+    {
+      "path": "app/migrations/013-image-crops.up.sql",
+      "size_bytes": 338,
+      "sha256": "9bf37a1fb4f9b4433cf963d835bca7ca8708449ef70109290bf03b5b27c299e1"
+    },
+    {
+      "path": "app/migrations/014-media-imports.down.sql",
+      "size_bytes": 253,
+      "sha256": "51e277afd79861a54daa56af80ce33e7589f9d4284d48d521909b802b68f9b09"
+    },
+    {
+      "path": "app/migrations/014-media-imports.up.sql",
+      "size_bytes": 975,
+      "sha256": "0fead0f9a96085b15f8a96dda925324340b83719eeddc2336d8da117b9523e1c"
+    },
+    {
+      "path": "app/migrations/015-multiple-locations.down.sql",
+      "size_bytes": 121,
+      "sha256": "ecb6ee37c71d4336a443154f9f72cf0a7b5cefc0e71b50271649efbaf54b27fb"
+    },
+    {
+      "path": "app/migrations/015-multiple-locations.up.sql",
+      "size_bytes": 362,
+      "sha256": "bc06d2f26b488059f99486eeabcdbed1d17bf5aacb6a5345f31cff6910345045"
+    },
+    {
+      "path": "app/migrations/016-location-profiles.down.sql",
+      "size_bytes": 122,
+      "sha256": "48170455dcd6c5bf72fba643ca22492f282ab599202a50dba61e97d9a2e97133"
+    },
+    {
+      "path": "app/migrations/016-location-profiles.up.sql",
+      "size_bytes": 351,
+      "sha256": "c4035655f4b94adcaf9839209268bc2bfd9c7cb84d005e2da2660f802295cfb2"
+    },
+    {
+      "path": "app/migrations/017-story-events.down.sql",
+      "size_bytes": 375,
+      "sha256": "6d498af23f329f2ca2835caa70dfcc2cc514dfa23ee3a215da8b8b54be99819b"
+    },
+    {
+      "path": "app/migrations/017-story-events.up.sql",
+      "size_bytes": 1582,
+      "sha256": "d9556271265d4e8bac74c754cc176e2889e82dbd54043730ee60e4c6491e334c"
+    },
+    {
+      "path": "app/migrations/018-image-generation.down.sql",
+      "size_bytes": 288,
+      "sha256": "64dbc21fcb39fa868e26dd77fc52a7d1462be7d52a067e9feb7f595e5782dbae"
+    },
+    {
+      "path": "app/migrations/018-image-generation.up.sql",
+      "size_bytes": 805,
+      "sha256": "790956b47f2d4f2e6b75c48125ef0585ce0766ec2ac6caeed35f3d1749e5ebdc"
+    },
+    {
+      "path": "app/migrations/019-media-uploads.down.sql",
+      "size_bytes": 322,
+      "sha256": "dc95e7cfd3d7a49d6012df7f0222a43b6b83a066c2a07e8b8fe1f4129096cc1a"
+    },
+    {
+      "path": "app/migrations/019-media-uploads.up.sql",
+      "size_bytes": 1048,
+      "sha256": "0f3ebc4a79a70ceda469633d800d5794eeada6546b7d31b468dea149fcd1c81f"
+    },
+    {
+      "path": "app/migrations/020-mcp-reference-changes.down.sql",
+      "size_bytes": 45,
+      "sha256": "f22d9011497357e88c4136a7b133e9dd8922e370a096fb8d8cabf5e27eff75ce"
+    },
+    {
+      "path": "app/migrations/020-mcp-reference-changes.up.sql",
+      "size_bytes": 498,
+      "sha256": "a1834fe69bd31bd7867cedd41314fc43a2e169539d1ea0b0aad6ecb0dfb52c4d"
+    },
+    {
+      "path": "app/missing-cleanup.mjs",
+      "size_bytes": 4657,
+      "sha256": "a0bc52782416908cede55e869dd50c76b17386c2f43bc09a7d7786e67bc29556"
+    },
+    {
+      "path": "app/mobile-sorting.mjs",
+      "size_bytes": 10642,
+      "sha256": "7bd9454e0412f184e5b77b5936b110e62ead678c8b5f34f23c4dcf0286ed75d4"
+    },
+    {
+      "path": "app/mobile.mjs",
+      "size_bytes": 20188,
+      "sha256": "b1d9b877adf300bcae900f5ee031d3fdbe6d895c1a333a8fb1b2ffa7d9da56ad"
+    },
+    {
+      "path": "app/public/character-generation.js",
+      "size_bytes": 13021,
+      "sha256": "83cb6c8984c3473737abadec20a567999180ab9f0eefc82268ac9df9d760c677"
+    },
+    {
+      "path": "app/public/client.js",
+      "size_bytes": 49062,
+      "sha256": "15fe60609510435856517eaa43796bdb949f882beec7d1bc0d2cd469f6ee2803"
+    },
+    {
+      "path": "app/public/crop-selection.js",
+      "size_bytes": 3998,
+      "sha256": "a15692c9d107eabfbe48b394c5c6d4b43fb769d56eddb856efc809e4b1c65de9"
+    },
+    {
+      "path": "app/public/duplicates.js",
+      "size_bytes": 13345,
+      "sha256": "76c33c45c3b3f4bf77b80bd1bd8c9d5d82deb176b1d9ca4eae11fd27472827c4"
+    },
+    {
+      "path": "app/public/enhancements.js",
+      "size_bytes": 28658,
+      "sha256": "b9214b6d621ae5a44ec788c36bc119452121b2b63043b9a50b558f6f18d2ba9c"
+    },
+    {
+      "path": "app/public/ghost-import.js",
+      "size_bytes": 681,
+      "sha256": "c699ed3fc109aacbe77a29b0dadc8c43f148401b50aea70e9ed8d89b2a14fe84"
+    },
+    {
+      "path": "app/public/ghost-profile.js",
+      "size_bytes": 33890,
+      "sha256": "955ceeea4c3d44ff62ad67c2852dd72615645d7a786de1186cd02cdf20dd678e"
+    },
+    {
+      "path": "app/public/ghost-review.css",
+      "size_bytes": 3951,
+      "sha256": "56ecc316ce8b156273bacd99db04b8ceb843c0da676e76c31f4cbb51a4e1859f"
+    },
+    {
+      "path": "app/public/ghost-review.html",
+      "size_bytes": 463,
+      "sha256": "f8dd504a4d31700529f7f8cad1bb157f40505760c490ba20693a14cbe0b64721"
+    },
+    {
+      "path": "app/public/ghost-review.js",
+      "size_bytes": 1205,
+      "sha256": "ea701615b1410a9eaf5edd39df9d28636503f79616eb2d13c3913529fc32c636"
+    },
+    {
+      "path": "app/public/grok-connect.html",
+      "size_bytes": 766,
+      "sha256": "37c6da104d55c2ea3dd2ccc0ecf2c859c3a800e3e40190f3ac466952cade34b1"
+    },
+    {
+      "path": "app/public/grok-connect.js",
+      "size_bytes": 1345,
+      "sha256": "268cdb7d7d93f74115c8f325a4f6f9b3a9232334c4b4d5cb94178fc932b8c939"
+    },
+    {
+      "path": "app/public/image-generation.css",
+      "size_bytes": 958,
+      "sha256": "c77ec27c3aa846b7481ce58134d9fb5810fd0672853215b7436a82e00bab3115"
+    },
+    {
+      "path": "app/public/image-generation.html",
+      "size_bytes": 1812,
+      "sha256": "1662b5b837c5ba97ed93e7cd8bf02180460acdb9fc66799f96b9d57e179fa815"
+    },
+    {
+      "path": "app/public/image-generation.js",
+      "size_bytes": 4019,
+      "sha256": "6ef70371ca0ab3de00d570ead6e7dbd8cc7ec57b3311465843f8c799ecb9488c"
+    },
+    {
+      "path": "app/public/image-hash.js",
+      "size_bytes": 459,
+      "sha256": "09b6eb31b6246fc2c295c20713078f61ae28937d47971b31339c6abeace40dca"
+    },
+    {
+      "path": "app/public/index.html",
+      "size_bytes": 1728,
+      "sha256": "2b95afdad413ada032118088fb146c6b0aa5ed6092915527ac1bee6aaac2c748"
+    },
+    {
+      "path": "app/public/location-canvas-model.js",
+      "size_bytes": 9029,
+      "sha256": "f5295efa5eb99e8aafc9b48e03d0dfe406f85a762c9d241c76779832c74fed0d"
+    },
+    {
+      "path": "app/public/location-canvas.css",
+      "size_bytes": 8536,
+      "sha256": "5e011e1c85f7b75cfa599fa64c85bb73365bbfa9c55db25d4ea4625152dc2599"
+    },
+    {
+      "path": "app/public/location-canvas.js",
+      "size_bytes": 35939,
+      "sha256": "8475b59b514441145ef554d643dcdbfba67e0f5fd3e0d9ed5cc9bb7cdcfe40ef"
+    },
+    {
+      "path": "app/public/location-editor.js",
+      "size_bytes": 7045,
+      "sha256": "f1ac316878b621ce7000121798036b37abd5e080d3af79b693426fbd2dc76b07"
+    },
+    {
+      "path": "app/public/locations.js",
+      "size_bytes": 7375,
+      "sha256": "fd3f04e066e0d8dec2dd71fb850400f1ed489a3056ae2f4319c1cbdaf52f5567"
+    },
+    {
+      "path": "app/public/mcp-change.html",
+      "size_bytes": 789,
+      "sha256": "4036d4fb3662d06201917d148694b9e5db5caa1ee404e851ae5cbd6a0c7e8aa2"
+    },
+    {
+      "path": "app/public/mcp-change.js",
+      "size_bytes": 2679,
+      "sha256": "9de42e7d571930dcaf242d9027618dcd48ea36539e4f68595e3acf56096b1f3e"
+    },
+    {
+      "path": "app/public/mcp-reference.html",
+      "size_bytes": 854,
+      "sha256": "7f27e040623fab0d84ac07fe9bbb4a9bc332350de22dbff1ce2a4dacddeff9ba"
+    },
+    {
+      "path": "app/public/mcp-reference.js",
+      "size_bytes": 3497,
+      "sha256": "942cf50dcedcc514f138ee28b89bef6acbc3f16b2515429bd3ac2fd576c49e25"
+    },
+    {
+      "path": "app/public/media-form.js",
+      "size_bytes": 2980,
+      "sha256": "64a4c25a95615af09bf1df9c9458431b8d426bf8922697957cdc754d8491b481"
+    },
+    {
+      "path": "app/public/media-import.html",
+      "size_bytes": 1130,
+      "sha256": "0b3f6c4415d9b85f9f1da8353488183808afe5775d752c28c0c51e8e798c83a2"
+    },
+    {
+      "path": "app/public/media-import.js",
+      "size_bytes": 3944,
+      "sha256": "d6e2e485307bb02e67a136b9d085cf3f3b72795f40e90322a9dc9a1a4d7638b7"
+    },
+    {
+      "path": "app/public/mobile-create.js",
+      "size_bytes": 3056,
+      "sha256": "726b22333300516dfcc30bf9a5f13ef4c97a77d8ffa5174a47d2946e95d61141"
+    },
+    {
+      "path": "app/public/mobile-sorting.js",
+      "size_bytes": 19631,
+      "sha256": "dbedffb76d1f1df9be366f63a240edc971498841ce92400807dc742d895212bc"
+    },
+    {
+      "path": "app/public/mobile.css",
+      "size_bytes": 11993,
+      "sha256": "55d0a5ec6fac820a191cd2fdeea8b03ed026a9791de8d2d2b88e82bac9800404"
+    },
+    {
+      "path": "app/public/mobile.html",
+      "size_bytes": 1141,
+      "sha256": "a045ef48993aa3215dab47b0534726e060dcbeb976813742ba7cf12e0a40f883"
+    },
+    {
+      "path": "app/public/mobile.js",
+      "size_bytes": 11652,
+      "sha256": "a288b096880fee33f0597b472bb23af44b9ff51241878b494d8089e5edaac3c8"
+    },
+    {
+      "path": "app/public/picture-crop.js",
+      "size_bytes": 5473,
+      "sha256": "982b8dcba15a271a0d7f5b44b1da8ece3014220e76e5718bcaf5885991f7752b"
+    },
+    {
+      "path": "app/public/profile-appearance-guide.js",
+      "size_bytes": 4538,
+      "sha256": "a34f671f26f94a4990fc7461fb8cacf45b992253367a459f08c862164d2ac4d8"
+    },
+    {
+      "path": "app/public/reconciliation.js",
+      "size_bytes": 11494,
+      "sha256": "77d337b24e18db12390000b6003a1e05c2a894e5e7b20c7fa199742f4f41695c"
+    },
+    {
+      "path": "app/public/sorting-pickers.js",
+      "size_bytes": 7409,
+      "sha256": "70dca566a6b2bc660c86ffc5004002cd917b6cab9dad040f6bc82f072a10eebe"
+    },
+    {
+      "path": "app/public/sorting.js",
+      "size_bytes": 15780,
+      "sha256": "25820bd89b11a0cc044928f780cc98f8e55606c52f2d6edaf3ac5a53a2ca079d"
+    },
+    {
+      "path": "app/public/story-events.js",
+      "size_bytes": 19480,
+      "sha256": "45adbf541feb3ef82d88b3668ef8453667cef8051d81bb2e2dc8d6faf7e23c40"
+    },
+    {
+      "path": "app/public/style.css",
+      "size_bytes": 32724,
+      "sha256": "9142638174c1cc27eee446c788d91cd7e40ca660dcdd534a34caf1e558bff5d2"
+    },
+    {
+      "path": "app/public/suggestions.js",
+      "size_bytes": 9690,
+      "sha256": "a5faf1bd40b9b1973005801867ff16992e8e37807f613ab8ee31c2cdbcc99751"
+    },
+    {
+      "path": "app/public/taxonomy.js",
+      "size_bytes": 9986,
+      "sha256": "191274f37bd44ce11b4ca0f6d829f55ff7faad7fa2230e1def8c7c2b3ae8b608"
+    },
+    {
+      "path": "app/reconciliation.mjs",
+      "size_bytes": 18593,
+      "sha256": "2f120b0cb6fbcaa6c9b27b7ca908f22a6c217c1ee868943a3468fe497854e7bd"
+    },
+    {
+      "path": "app/reference-retention.mjs",
+      "size_bytes": 4783,
+      "sha256": "9879edb13dedbb484e1460f97d66d69de2fe002ec8e1f633b37f68f50fb922c0"
+    },
+    {
+      "path": "app/safe-download.mjs",
+      "size_bytes": 5151,
+      "sha256": "f61d895d94303669a25d0160d29e4b23626c13950779cf6961fb3e204c0f953f"
+    },
+    {
+      "path": "app/server.mjs",
+      "size_bytes": 52504,
+      "sha256": "bda5a634b0ebf85fb84267141122332faf56ab94a0cf40e110746642b6eea166"
+    },
+    {
+      "path": "app/setup-mobile.mjs",
+      "size_bytes": 1879,
+      "sha256": "71cedbb8618de036dfe3a790f82cc69396c37483b0513a4cb74c775bf9e9d93c"
+    },
+    {
+      "path": "app/setup-sogni.mjs",
+      "size_bytes": 931,
+      "sha256": "d2feddd7481f92e6fa75d1c7d8326c72c55e470664e446375ef6334e936f6f16"
+    },
+    {
+      "path": "app/sogni-credentials.mjs",
+      "size_bytes": 1357,
+      "sha256": "52500b38632120713a7eefba9a03e9807c33c152c0c5797395f3ea9bda5d26ad"
+    },
+    {
+      "path": "app/sogni-key.ps1",
+      "size_bytes": 6214,
+      "sha256": "8b90fbf4cdef0685811523a79f19026aa49990b1e33e2836f43ca7158b15a141"
+    },
+    {
+      "path": "app/sogni-provider.mjs",
+      "size_bytes": 6301,
+      "sha256": "53d4b68e7a5a50a9073029cc8cd9c847ad6f792e2442f2affce58dabd359f494"
+    },
+    {
+      "path": "app/start-existing.mjs",
+      "size_bytes": 1254,
+      "sha256": "19eb437d2fcccfe695f6a0d5e8639125ca6bc527c831e6b8b69f1d996ca55729"
+    },
+    {
+      "path": "app/story-events.mjs",
+      "size_bytes": 21437,
+      "sha256": "1f8c67e4917b00ea8715ef21bc41120033bb3de3b1d78ffc6ac0a20f8da877ca"
+    },
+    {
+      "path": "app/suggestions.mjs",
+      "size_bytes": 7927,
+      "sha256": "418d12524fabbe183ab303456274d3f7c35350377d17b02134fcc72f9d9e0b84"
+    },
+    {
+      "path": "app/taxonomy.mjs",
+      "size_bytes": 6815,
+      "sha256": "379413f121f30a909fd72598df0da28964d8e75f833f8921b5b39c0c868cc914"
+    },
+    {
+      "path": "app/video-covers.mjs",
+      "size_bytes": 4115,
+      "sha256": "7368046ac5d87720337508f6468688e304b67bbbd2472f9ddff6ea4d47f6b095"
+    },
+    {
+      "path": "docs/ASSISTED_SORTING.md",
+      "size_bytes": 5655,
+      "sha256": "41d45de3eeda3e53378276588adcb4360b29114f2271d796ae0056f6660269c2"
+    },
+    {
+      "path": "docs/GHOST_PROFILE.md",
+      "size_bytes": 14859,
+      "sha256": "c3dcc1612b786951bcbb193b1da6a1d531460857057cf621bc278b83024c7fee"
+    },
+    {
+      "path": "docs/GROK_INTEGRATION.md",
+      "size_bytes": 20931,
+      "sha256": "f3b85730b855e499c4b7b0e54b63bcff859d2ac8083aa499b39e066cf3eb3483"
+    },
+    {
+      "path": "docs/IMAGE_GENERATION.md",
+      "size_bytes": 19235,
+      "sha256": "94674a270a26cb2832ffb70c4dbb48cdf20abbeea8489004933254e1251a7d8b"
+    },
+    {
+      "path": "docs/LOCATION_CANVAS.md",
+      "size_bytes": 5727,
+      "sha256": "4cf028b3e8802b7d298518962e5e21bae18cd2bd77f1bbcd7ed791647ee001c9"
+    },
+    {
+      "path": "docs/LOCATION_EDITOR.md",
+      "size_bytes": 2056,
+      "sha256": "b492033bbdc65e547350cb36fe8ee47a760c25efe82e6f05df5b62d3e9b1fb05"
+    },
+    {
+      "path": "docs/MCP_INTEGRATION.md",
+      "size_bytes": 19317,
+      "sha256": "c72f51c4517acbe28c16b9899a11dae131f55f0ba03aed1dcb85559bce607b95"
+    },
+    {
+      "path": "docs/MCP_RECOVERY.md",
+      "size_bytes": 7974,
+      "sha256": "2616653c6778fd5f741473f55f606959822c23a1e0047c6aaf12779dd4ff7af9"
+    },
+    {
+      "path": "docs/MCP_WRITES.md",
+      "size_bytes": 12207,
+      "sha256": "3fb8327614d8942fa8c320423e873e325aed6346d8cd0868fb8bc0649df2734b"
+    },
+    {
+      "path": "docs/MEDIA_UPLOADS.md",
+      "size_bytes": 12236,
+      "sha256": "48a27f3d9230711f86e4333d737537949734a6a5881f00011cfcd3054d13f07b"
+    },
+    {
+      "path": "docs/MOBILE_ACCESS.md",
+      "size_bytes": 11041,
+      "sha256": "ddecc7e37a684b6dd9659786d5441354d8090b4e1493458b14e7fd83ef7d9fac"
+    },
+    {
+      "path": "docs/ORIGINAL_IMAGES.md",
+      "size_bytes": 6012,
+      "sha256": "8e7f2d2dcffda68b8a5abd3cbae51899bab8c8fa0b53389cdbed909301156dc2"
+    },
+    {
+      "path": "docs/STORY_EVENTS.md",
+      "size_bytes": 9854,
+      "sha256": "665d4fbe0029e36b3be66f8675de0c826ebbbd96869f1aa5f1e39bbccca963b4"
+    },
+    {
+      "path": "docs/VISUAL_IDENTITY.md",
+      "size_bytes": 10988,
+      "sha256": "f98a4a9898e9ea19e38bbf366c14b09c0b4e3c58c2f6bb99c69abd0935b18e42"
+    },
+    {
+      "path": "mcp/Start Grok Gateway.cmd",
+      "size_bytes": 251,
+      "sha256": "50f397b0e6586c2c068c630c0ba75f105af47aee2356451e5860f65a5d7c3fea"
+    },
+    {
+      "path": "mcp/Start Tunnel.cmd",
+      "size_bytes": 390,
+      "sha256": "758999e991e02f2ca591033b003be3119049dee6062aa8c865f94b290425830d"
+    },
+    {
+      "path": "mcp/catalogue.mjs",
+      "size_bytes": 25560,
+      "sha256": "dbb3399837ad431c3a19a491b515de577d8a7cbb3d5acd8cb1a7cf721e3cfe51"
+    },
+    {
+      "path": "mcp/configure-grok.mjs",
+      "size_bytes": 2554,
+      "sha256": "715365e10dc2a512e3c9bea971c02bfc53e576a5b57882699a3d659161172196"
+    },
+    {
+      "path": "mcp/configure.mjs",
+      "size_bytes": 1698,
+      "sha256": "311def45e661b523adb3001af4f6b487de43c83f2b766dc32cead7a8218398f5"
+    },
+    {
+      "path": "mcp/enable-writes.mjs",
+      "size_bytes": 5247,
+      "sha256": "1893e56379dc9ea547bac70f83a22e622a177f69342bb3b24ae6fdfaa289854c"
+    },
+    {
+      "path": "mcp/generation.mjs",
+      "size_bytes": 2501,
+      "sha256": "ee40834720534f7a67ea50897c29bc325b10bc4a3829043539c48013a22a88b3"
+    },
+    {
+      "path": "mcp/grok-task-runner.mjs",
+      "size_bytes": 1108,
+      "sha256": "6e263c21fdde54f78a1deffd6d68f479c9100f8db0fc6e06a17a43c7d601c9ae"
+    },
+    {
+      "path": "mcp/http-gateway.mjs",
+      "size_bytes": 9847,
+      "sha256": "a8fab17734ad2cb15bd0d6367b22dec9cb67fc1991dd7e1a0f8b5b97599615fe"
+    },
+    {
+      "path": "mcp/images.mjs",
+      "size_bytes": 3043,
+      "sha256": "5c4840f6b1d3ad13efdf230bfd1f25d9d75575bc284679d2fe15719e02f1ff77"
+    },
+    {
+      "path": "mcp/imports.mjs",
+      "size_bytes": 5817,
+      "sha256": "ee9eb5a55f9a236036ba7f11ad63790b5d86b9de9bae676d12f6d1ed307a15e0"
+    },
+    {
+      "path": "mcp/install-grok-startup.ps1",
+      "size_bytes": 2098,
+      "sha256": "12ba449bf5b3112b518b24773cec1e97a655bb35cf416dfcee6c4db848259b0d"
+    },
+    {
+      "path": "mcp/install-startup.ps1",
+      "size_bytes": 2302,
+      "sha256": "32366941175ea6869bcd9286cf17783fa9116186af4e6437b4d7713c50871d04"
+    },
+    {
+      "path": "mcp/oauth.mjs",
+      "size_bytes": 9309,
+      "sha256": "f155744ba8a54e18a2307b4c08a3675b25b7e7c718205a85b2cc21bc64732d9d"
+    },
+    {
+      "path": "mcp/original-images.mjs",
+      "size_bytes": 1747,
+      "sha256": "606b19a27b5344e6fdb0583a70c82886dc17b4f5e9ecfb4c22c637c044acf5e9"
+    },
+    {
+      "path": "mcp/reference-view.mjs",
+      "size_bytes": 5451,
+      "sha256": "b0bd72c17cf0b7a489544da24990587a443a5495e79fa88fd05a7790e9706ee3"
+    },
+    {
+      "path": "mcp/run-tunnel.ps1",
+      "size_bytes": 5931,
+      "sha256": "ad8ad5bd216cd7566c9f624c06bd5148d8321af384198dd95f2716ba43177453"
+    },
+    {
+      "path": "mcp/server.mjs",
+      "size_bytes": 16354,
+      "sha256": "66459a7a597173bb34e988c2f4aeb1dee3b070fa9bc7a78df2aae8804cde69c3"
+    },
+    {
+      "path": "mcp/start-tunnel.mjs",
+      "size_bytes": 2942,
+      "sha256": "1cc715bc38ed8e6961bad2db5d11272a87ee13ea1ecd3316990b79ba7e463865"
+    },
+    {
+      "path": "mcp/supervisor.mjs",
+      "size_bytes": 327,
+      "sha256": "f5d81c4932eb26d644586e9bf0726877aae79a5eff466f11ef23b89bfa230346"
+    },
+    {
+      "path": "mcp/task-runner.mjs",
+      "size_bytes": 923,
+      "sha256": "c78796e5a3bcd510647d311cf9602ddb2d3317200fe35e49b10b3744c57cdd06"
+    },
+    {
+      "path": "mcp/thumbnail.ps1",
+      "size_bytes": 3302,
+      "sha256": "e414c8ac255818c7971719ce63a0098800a19d67f26c7800eea192620b474f72"
+    },
+    {
+      "path": "mcp/writes.mjs",
+      "size_bytes": 9006,
+      "sha256": "aca92304691e497c4652a1ad45fb3a4f950144129cd7d8a031b3e087cf780df2"
+    },
+    {
+      "path": "package.json",
+      "size_bytes": 211,
+      "sha256": "8d126f46677652ef31819b320db5572d56760c960830c27b4fb3345a42bb40ff"
+    },
+    {
+      "path": "tests/bootstrap.test.mjs",
+      "size_bytes": 4527,
+      "sha256": "a8fbf074b1cf494d345bdc899315b8ea453d89d4c90108b118816c2508086f1d"
+    },
+    {
+      "path": "tests/bulk-removal.test.mjs",
+      "size_bytes": 6246,
+      "sha256": "5bc866a3b2e1885f05f3820319f0ca51d436c91786a8011882a27ca31f6eaef6"
+    },
+    {
+      "path": "tests/bulk-sorting.test.mjs",
+      "size_bytes": 5521,
+      "sha256": "088d1676ee6f3629d41aed1dd8b3c493d7b198991dafe7533e53f23229bb36a2"
+    },
+    {
+      "path": "tests/catalogue.test.mjs",
+      "size_bytes": 12988,
+      "sha256": "969479bb3267a7972960ffdfe753fbb72ad8ab6632ddab1ea6720801754187cd"
+    },
+    {
+      "path": "tests/character-deletion.test.mjs",
+      "size_bytes": 3106,
+      "sha256": "230d0c6c2ef22cfa93548ac17a81d08798eb019c91805f47efcd97a92fcec4ae"
+    },
+    {
+      "path": "tests/character-expression.test.mjs",
+      "size_bytes": 3790,
+      "sha256": "05a95c479022f173c4fdb023fda05740f002864aae079632ea9a2378986ffea7"
+    },
+    {
+      "path": "tests/character-generation-ui.test.mjs",
+      "size_bytes": 5278,
+      "sha256": "058f8e4cea5eed8fa87fc0229f096687a9ad2643a4168ed57576e2d45e3a3323"
+    },
+    {
+      "path": "tests/client-assets.test.mjs",
+      "size_bytes": 1578,
+      "sha256": "81f2deeb10aa2712a8b419c836e517efe1c01c44044f529d7e9586eef68368f7"
+    },
+    {
+      "path": "tests/cover-editor.test.mjs",
+      "size_bytes": 2129,
+      "sha256": "c8168b0a9ee3e8de9e79ba41e598ccfdc5e50a36162cc951c10ce650834044df"
+    },
+    {
+      "path": "tests/desktop-generation-preview.mjs",
+      "size_bytes": 2544,
+      "sha256": "342f2389855e976c64a1d88839c64773115202ffb317dcfbd4822b30e8d6a881"
+    },
+    {
+      "path": "tests/duplicate-review-ui.test.mjs",
+      "size_bytes": 4626,
+      "sha256": "738373579693211acb1f40369403c7cbe4154dd3dbc5bfa082a56dd73d4edd8c"
+    },
+    {
+      "path": "tests/duplicates.test.mjs",
+      "size_bytes": 8406,
+      "sha256": "103de89750151c48f0ce5b82fd15e03b2d5eaceeff1c124f848230af89ff110c"
+    },
+    {
+      "path": "tests/erase-removed.test.mjs",
+      "size_bytes": 4503,
+      "sha256": "9700604c2fbc0f10aab2fab905fac2c6d2a598cdf97840ffd34cdd59db50f8cc"
+    },
+    {
+      "path": "tests/folder-preview-client.mjs",
+      "size_bytes": 374,
+      "sha256": "f0ac44ad51c4b1d4525094c4a72a2a9b12085e2075d0a98028fd9dfdc771dbf5"
+    },
+    {
+      "path": "tests/folder-sync.test.mjs",
+      "size_bytes": 7715,
+      "sha256": "77acd92a548a6f9a9c753a7b573f5e7cc9ae6cd1a2bab6f89fb45d119872fb38"
+    },
+    {
+      "path": "tests/ghost-profile.test.mjs",
+      "size_bytes": 13061,
+      "sha256": "e11b41e7edfeb5056fe0066705d2aba470bb48cdc193ad379d9fd9ceca8285e1"
+    },
+    {
+      "path": "tests/grok-gateway.test.mjs",
+      "size_bytes": 13983,
+      "sha256": "cd0547f7d650a9dd22f43ca3c01bdffb7878e089bdc07a1d24951f58d0a917f6"
+    },
+    {
+      "path": "tests/image-crops.test.mjs",
+      "size_bytes": 7687,
+      "sha256": "397483fd3206b1a98d297930ef494d753bd61f2f2c2e865baffd8dd50658e05f"
+    },
+    {
+      "path": "tests/image-generation-preview.mjs",
+      "size_bytes": 4338,
+      "sha256": "62a44cbafd314d77151b5b1a2d20577ae03ee25be7956e29580b4b5fa50d6918"
+    },
+    {
+      "path": "tests/image-generation.test.mjs",
+      "size_bytes": 23112,
+      "sha256": "c2d7ada618bb4d2b5591afca3029c153d4ca876dbfb801ad551aa9db9c29fc16"
+    },
+    {
+      "path": "tests/improvements.test.mjs",
+      "size_bytes": 7130,
+      "sha256": "95bd8ca71ad8586e1000e31f15bfb1fea0128f8749e39755393fbc8b57e38f0e"
+    },
+    {
+      "path": "tests/location-canvas.test.mjs",
+      "size_bytes": 7807,
+      "sha256": "d9876204cf4964f726360bba15a55da71747f5e9ef8bfee348ee7c0f7d69fa3b"
+    },
+    {
+      "path": "tests/location-editor.test.mjs",
+      "size_bytes": 6487,
+      "sha256": "4b45f2e7f1082e8054a71ac94376e97338077d511a722c5565e29cdc7e257eda"
+    },
+    {
+      "path": "tests/location-references.test.mjs",
+      "size_bytes": 8489,
+      "sha256": "b17429ff79b251d3cee50342a05e95aa40276902ca4977c6b6ff1522783960c5"
+    },
+    {
+      "path": "tests/mcp-adapter.test.mjs",
+      "size_bytes": 10389,
+      "sha256": "256c709b1f91a980361c828febc210ff0525b88d4399a65c6e50012e132d0e71"
+    },
+    {
+      "path": "tests/mcp-launcher.test.mjs",
+      "size_bytes": 6070,
+      "sha256": "a79cfe0bc5af67a6001612b5e6aa645246af13186dc9c5bd354cd6b78b44294c"
+    },
+    {
+      "path": "tests/mcp-reconnect.test.mjs",
+      "size_bytes": 1814,
+      "sha256": "f5141d81bf22e430a076af49fe1ae90e0d722231c1047746c171b45407bfd215"
+    },
+    {
+      "path": "tests/mcp-reference-approval.test.mjs",
+      "size_bytes": 5311,
+      "sha256": "f779e1fd73b5b40afa0c44a2df3551f96aa4a25eba757d9bafe8c63312e82d20"
+    },
+    {
+      "path": "tests/mcp-reference-view.test.mjs",
+      "size_bytes": 5780,
+      "sha256": "9d237aa63deb94ea3975f1463f124338cde23f16a34a4744af1a7ba0b3889aa6"
+    },
+    {
+      "path": "tests/mcp-writes.test.mjs",
+      "size_bytes": 18393,
+      "sha256": "448e06916c41aeaebd2dd29131fbd3c1ac3c7669589b982f3aac0d7c19094683"
+    },
+    {
+      "path": "tests/media-imports.test.mjs",
+      "size_bytes": 11738,
+      "sha256": "83313d6084f51f6e82f9bfc6db1d41de243082a68a21ab5795746aa0d3377335"
+    },
+    {
+      "path": "tests/media-search.test.mjs",
+      "size_bytes": 3590,
+      "sha256": "008b39d96deb7c2503705f003428b46a822f18dddd4cb21d58a8e2f9fc38498b"
+    },
+    {
+      "path": "tests/media-uploads.test.mjs",
+      "size_bytes": 20000,
+      "sha256": "a28e94279e188576bf74ade0af023bfc0be56959e0ed3f3901ffd6a8bb21ce7b"
+    },
+    {
+      "path": "tests/missing-cleanup.test.mjs",
+      "size_bytes": 8255,
+      "sha256": "6f64a70a9721abca74553b0f713c31ffbbda8078d37f55317ce2577583419c72"
+    },
+    {
+      "path": "tests/mobile-create.test.mjs",
+      "size_bytes": 9708,
+      "sha256": "9d891735eb440fc2a656c7eb06233c7850a0862c937c224cf1d02867d926bb8d"
+    },
+    {
+      "path": "tests/mobile-preview.mjs",
+      "size_bytes": 5229,
+      "sha256": "82e2543a202a9468b867a047cb16bfe5ccc1dd051711bfe48b79df641b117cc0"
+    },
+    {
+      "path": "tests/mobile-sorting.test.mjs",
+      "size_bytes": 12530,
+      "sha256": "5d7dd6337e613265c36d48e79df70902cfd6092c69f2ae99ffee24954d83353b"
+    },
+    {
+      "path": "tests/mobile.test.mjs",
+      "size_bytes": 6849,
+      "sha256": "eb5d6e193c358f05208e7e08ee25e5d99dfa051e6f095ecd4f6db2e3bbc03e27"
+    },
+    {
+      "path": "tests/original-images.test.mjs",
+      "size_bytes": 15265,
+      "sha256": "00bf6f0da53a2575405185e411f9aad0c594bf9807b276fa7ac441b01ab8cdc3"
+    },
+    {
+      "path": "tests/reconciliation.test.mjs",
+      "size_bytes": 8015,
+      "sha256": "bca04c02649a1eaeeb3bcc20408b31694ebac13386e3661e9d66245acd446b1d"
+    },
+    {
+      "path": "tests/reference-retention.test.mjs",
+      "size_bytes": 4764,
+      "sha256": "fc00dcf06671fe48b039669b87923934c0157d72f31079017d82d87e80a85147"
+    },
+    {
+      "path": "tests/relink-batch.test.mjs",
+      "size_bytes": 7975,
+      "sha256": "309272032facf865dcf2e917b8ba1658dd23530ea1a272cbcf698b1270f0c516"
+    },
+    {
+      "path": "tests/safe-download.test.mjs",
+      "size_bytes": 2952,
+      "sha256": "595f8afe81fb182dbe5909f5c56c5347b44df7264e7da1cf3979b378fd5aab4b"
+    },
+    {
+      "path": "tests/selection-ui.test.mjs",
+      "size_bytes": 1391,
+      "sha256": "f448e8971e6623fde16293ad0c3fc9c9b33308b7910173c8814b5c5a7acefae1"
+    },
+    {
+      "path": "tests/sogni-provider.test.mjs",
+      "size_bytes": 9308,
+      "sha256": "5e114514eee714890ef680813fe44eb4c4c6e4720003be2228b9981ed739145a"
+    },
+    {
+      "path": "tests/sorting-flow.test.mjs",
+      "size_bytes": 5682,
+      "sha256": "0a0384a80c2d6cbd577525c682cdebf2fe82bd165be65dce74a89f853c9e78db"
+    },
+    {
+      "path": "tests/sorting-pickers.test.mjs",
+      "size_bytes": 5356,
+      "sha256": "ad4347153a69c9228e2775b56cb012e9e554bce61a87ae76edb715e3116be842"
+    },
+    {
+      "path": "tests/story-events-ui.test.mjs",
+      "size_bytes": 2313,
+      "sha256": "bec07874258881c27c1d2d9e2c6c1a9213aa8a2425ab5e7e2279caef2336e27c"
+    },
+    {
+      "path": "tests/story-events.test.mjs",
+      "size_bytes": 13004,
+      "sha256": "83d8cff1bfcf073300075d93e5c2d1f61fd106fa0addaa518383569fb7e2ba80"
+    },
+    {
+      "path": "tests/taxonomy-suggestions.test.mjs",
+      "size_bytes": 10995,
+      "sha256": "6f1ea037a3e7dfc19c631661b652ea84e56ee3400cd017245bcd970b2bf51d3a"
+    },
+    {
+      "path": "tests/video-covers.test.mjs",
+      "size_bytes": 6242,
+      "sha256": "a180b2173f0c768881c81778550431d111be63a27d41465d74b73167daee2258"
+    }
+  ]
+}
