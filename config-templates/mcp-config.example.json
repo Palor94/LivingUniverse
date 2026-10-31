@@ -1,0 +1,6 @@
+{
+  "database": "/srv/living-universe/data/universe.sqlite",
+  "mediaRoot": "/srv/living-universe/media",
+  "allowAdminNotes": false,
+  "writeConfig": "/srv/living-universe/data/mcp-writes.json"
+}

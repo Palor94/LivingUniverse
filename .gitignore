@@ -75,3 +75,44 @@ generation-results/
 
 !/docs/ORIGINAL_IMAGES.md
 !/docs/MCP_INTEGRATION.md
+
+!/.agents/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/rename-character/
+
+# Audited reconstruction templates and schema-only documentation.
+!/.env.example
+!/config-templates/
+/config-templates/*
+!/config-templates/*.example.json
+!/config-templates/README.md
+!/docs/schema/
+/docs/schema/*
+!/docs/schema/current-schema.sql
+
+# Never commit runtime credentials, user databases, media or private archives.
+analysis-providers.json
+character-policy.json
+grok-gateway.json
+*.pem
+*.pfx
+*.p12
+*.key
+*.enc
+*.zip
+*.7z
+*.tar
+*.gz
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.heic
+*.mp4
+*.mov
+*.m4v
+*.avi
+*.mkv

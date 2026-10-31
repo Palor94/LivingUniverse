@@ -10,7 +10,7 @@ test('online WAL backup restores catalogue, sidecars and local originals without
   const base=await fs.mkdtemp(path.join(os.tmpdir(),'lu-backup-test-'));let db;t.after(async()=>{db?.close();await fs.rm(base,{recursive:true,force:true});});
   const root=path.join(base,'code'),media=path.join(base,'media'),live=path.join(base,'live');
   for(const dir of [path.join(root,'app'),media,live,path.join(live,'image-originals')])await fs.mkdir(dir,{recursive:true});
-  await fs.writeFile(path.join(root,'app','example.mjs'),'export const a=1;');await fs.writeFile(path.join(root,'.env'),'SECRET=never-copy');
+  await fs.writeFile(path.join(root,'app','example.mjs'),'export const a=1;');await fs.writeFile(path.join(root,'.env'),'SECRET=never-copy');await fs.writeFile(path.join(root,'.env.example'),'OPENAI_API_KEY=\n');await fs.mkdir(path.join(root,'config-templates'));await fs.writeFile(path.join(root,'config-templates','fixture.example.json'),'{"enabled":false}');await fs.mkdir(path.join(root,'.agents','skills','fixture'),{recursive:true});await fs.writeFile(path.join(root,'.agents','skills','fixture','SKILL.md'),'Fixture source guidance');
   await fs.writeFile(path.join(media,'one.png'),'fixture-original');await fs.writeFile(path.join(live,'image-originals','before.png'),'recover-before-crop');
   await fs.writeFile(path.join(live,'location-canvas.json'),'{"schema":1,"head":"fixture"}');
   const database=path.join(live,'universe.sqlite');db=new DatabaseSync(database);
@@ -18,7 +18,7 @@ test('online WAL backup restores catalogue, sidecars and local originals without
   const result=await createBackup({root,mediaRoot:media,database,destination:path.join(base,'backups'),stageParent:path.join(base,'stage'),privateRuntime:false});
   assert.equal(result.database.counts.characters,1);assert.equal(result.media_summary.metadata_visible,1);assert.equal(result.local_asset_files,1);
   assert.equal(await fs.readFile(path.join(media,'one.png'),'utf8'),'fixture-original');
-  assert.ok(!(await sourceFiles(root)).some(f=>f.includes('.env')));
+  const capturedSources=await sourceFiles(root);assert.ok(!capturedSources.includes('.env'));assert.ok(capturedSources.includes('.env.example'));assert.ok(capturedSources.includes('config-templates/fixture.example.json'));assert.ok(capturedSources.includes('.agents/skills/fixture/SKILL.md'));
   const restored=path.join(base,'new-recovery');await restoreSnapshot(result.snapshot,restored);
   assert.equal(await fs.readFile(path.join(restored,'data','image-originals','before.png'),'utf8'),'recover-before-crop');
   assert.equal(JSON.parse(await fs.readFile(path.join(restored,'data','location-canvas.json'),'utf8')).head,'fixture');

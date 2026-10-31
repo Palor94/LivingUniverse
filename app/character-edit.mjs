@@ -8,5 +8,5 @@ const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof v
 export const digest=value=>createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 export const databaseIdentity=file=>digest(process.platform==='win32'?path.resolve(file).toLowerCase():path.resolve(file));
 export function profileVersion(record){
-  return digest(Object.fromEntries(['id','name',...Object.keys(editableProfileFields),'notes','cover_id','created_at'].map(key=>[key,record[key]??null])));
+  return digest(Object.fromEntries(['id','name','race',...Object.keys(editableProfileFields),'notes','cover_id','created_at'].map(key=>[key,record[key]??null])));
 }

@@ -1,8 +1,14 @@
+import {installCompleteCharacterRename} from './complete-character-rename.mjs';
+import {createRenameRoutes} from './character-rename-routes.mjs';
+import {migrateCharacterRace,raceValue,suggestMaleName,nameCandidates} from './character-creation.mjs';
+import {installCharacterPolicy} from './character-policy.mjs';
 import {resourceRoot,characterFolder,characterParent} from './storage-layout.mjs';
 import {forgetRemovedReferences} from './reference-retention.mjs';
 import {installGhostProfiles} from './ghost-profile.mjs';
 import {installLocationCanvas} from './location-canvas.mjs';
+import {installPermanentMediaDelete} from './permanent-media-delete.mjs';
 import http from 'node:http';
+import {digest as referenceDigest} from './character-edit.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { promises as fs, createReadStream, constants, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -22,6 +28,8 @@ import {createMobileServer} from './mobile.mjs';
 import {createMobileSorting} from './mobile-sorting.mjs';
 import {installMcpChanges} from './mcp-changes.mjs';
 import {databaseIdentity} from './character-edit.mjs';
+import {installCharacterReferenceCrops,backupBeforeCharacterCrops} from './character-reference-crops.mjs';
+import {referenceCrop,selectedCrop,referenceKey,referenceSnapshot,previousReference} from './reference-crop.mjs';
 import {installImageCrops} from './image-crops.mjs';
 import {installMediaImports} from './media-imports.mjs';
 import {backupBeforeMediaUploads} from './media-uploads.mjs';
@@ -46,8 +54,8 @@ export async function createApp(options={}) {
   const dataDir = options.dataDir || process.env.LIVING_UNIVERSE_DATA || path.join(process.env.LOCALAPPDATA || path.join(os.homedir(),'.local','share'),'LivingUniverse');
   await fs.mkdir(dataDir,{recursive:true});
   const db = new DatabaseSync(path.join(dataDir,'universe.sqlite'));
-  let storyMigrationBackup;
-  try{storyMigrationBackup=await backupBeforeStoryMigration(db,dataDir);}catch(e){db.close();throw e;}
+  let storyMigrationBackup,characterCropMigrationBackup;
+  try{characterCropMigrationBackup=await backupBeforeCharacterCrops(db,dataDir);storyMigrationBackup=await backupBeforeStoryMigration(db,dataDir);}catch(e){db.close();throw e;}
   db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;
     CREATE TABLE IF NOT EXISTS characters(id TEXT PRIMARY KEY,name TEXT NOT NULL,aliases TEXT NOT NULL DEFAULT '',biography TEXT NOT NULL DEFAULT '',personality TEXT NOT NULL DEFAULT '',appearance TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',cover_id TEXT,created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY,relative_path TEXT NOT NULL UNIQUE,folder TEXT NOT NULL,kind TEXT NOT NULL,size INTEGER,modified_at TEXT,created_at TEXT NOT NULL);
@@ -63,6 +71,7 @@ export async function createApp(options={}) {
   const profileMigration=readFileSync(new URL('./migrations/011-character-expression.up.sql',import.meta.url),'utf8');
   db.exec('BEGIN IMMEDIATE');
   try{for(const sql of profileMigration.split(';').filter(s=>s.trim())){const field=sql.match(/ADD COLUMN (sexuality|speech_style)/)?.[1];if(field&&!profileColumns.has(field))db.exec(sql);}db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}
+  try{await migrateCharacterRace(db,dataDir);}catch(error){db.close();throw error;}
   const all = (q,...args) => db.prepare(q).all(...args);
   const one = (q,...args) => db.prepare(q).get(...args);
   const run = (q,...args) => db.prepare(q).run(...args);
@@ -71,6 +80,7 @@ export async function createApp(options={}) {
   function asset(mid) {const m=one('SELECT * FROM media WHERE id=?',mid);if(!m)throw fail('Media not found',404);return m;}
   function canon(cid) {return one('SELECT * FROM canon WHERE character_id=? ORDER BY rowid DESC LIMIT 1',cid);}
   function characterDeletionBlock(cid){
+    if(one("SELECT 1 FROM application_settings WHERE key LIKE 'rename:v1:plan:%' AND json_extract(value,'$.status')='applied' AND json_extract(value,'$.payload.character_id')=? LIMIT 1",cid))return 'This character has rename audit history that must be preserved.';
     if(one('SELECT 1 FROM application_settings WHERE key=?','ghost:character:'+cid))return 'This character has structured profile history that must be preserved.';
     if(one('SELECT 1 FROM media_imports WHERE character_id=? LIMIT 1',cid)||one('SELECT 1 FROM media_import_targets WHERE character_id=? LIMIT 1',cid))return 'This character has media import history that must be preserved.';
     if(one('SELECT 1 FROM story_event_participants WHERE character_id=? LIMIT 1',cid)||one("SELECT 1 FROM story_event_revisions r,json_each(r.payload_json,'$.participants') p WHERE json_extract(p.value,'$.character_id')=? LIMIT 1",cid))return 'This character has recorded story history and must be preserved.';
@@ -79,7 +89,7 @@ export async function createApp(options={}) {
     return null;
   }
   function mediaDetails(m) {
-    return {...m,location:locations.details(m.id),locations:locations.allDetails(m.id),structured_tags:taxonomy.details(m.id),scan:reconciliation.details(m.id),...catalogue.details(m.id), ...one('SELECT tags,notes FROM media_notes WHERE media_id=?',m.id),characters:all('SELECT c.id,c.name FROM characters c JOIN depictions d ON c.id=d.character_id LEFT JOIN character_ui u ON u.character_id=c.id WHERE d.media_id=? AND u.merged_into IS NULL',m.id),reviews:all('SELECT * FROM reviews WHERE media_id=? ORDER BY rowid',m.id),moves:all('SELECT * FROM file_moves WHERE media_id=? ORDER BY rowid DESC',m.id),canonicalFor:all('SELECT character_id FROM canon c WHERE c.rowid=(SELECT MAX(c2.rowid) FROM canon c2 WHERE c2.character_id=c.character_id) AND EXISTS(SELECT 1 FROM json_each(c.references_json) WHERE json_extract(value,\'$.media_id\')=?)',m.id).map(c=>c.character_id)};
+    return {...m,character_crops:characterCrops.drafts(m.id),location:locations.details(m.id),locations:locations.allDetails(m.id),structured_tags:taxonomy.details(m.id),scan:reconciliation.details(m.id),...catalogue.details(m.id), ...one('SELECT tags,notes FROM media_notes WHERE media_id=?',m.id),characters:all('SELECT c.id,c.name FROM characters c JOIN depictions d ON c.id=d.character_id LEFT JOIN character_ui u ON u.character_id=c.id WHERE d.media_id=? AND u.merged_into IS NULL',m.id),reviews:all('SELECT * FROM reviews WHERE media_id=? ORDER BY rowid',m.id),moves:all('SELECT * FROM file_moves WHERE media_id=? ORDER BY rowid DESC',m.id),canonicalFor:all('SELECT character_id FROM canon c WHERE c.rowid=(SELECT MAX(c2.rowid) FROM canon c2 WHERE c2.character_id=c.character_id) AND EXISTS(SELECT 1 FROM json_each(c.references_json) WHERE json_extract(value,\'$.media_id\')=?)',m.id).map(c=>c.character_id)};
   }
   let scanning=false;
   let lastScan=null;
@@ -113,10 +123,12 @@ export async function createApp(options={}) {
   const suggestions=installSuggestions({db,all,one,run,transaction,fail,safeFile});
   const folderSync=installFolderSync({db,root,dataDir,all,one,run,transaction,fail,fingerprint,moving,isScanning:()=>scanning});
   const videoCovers=installVideoCovers({db,all,one,run,transaction,fail,safeFile});
+  const characterCrops=installCharacterReferenceCrops({db,one,all,run,transaction,asset,safeFile,fingerprint,isBusy:()=>scanning||moving.size>0||folderSync.isBusy()||imageGeneration.isBusy(),fail,saveCanon,beforeApprovalCommit:options.cropApprovalTestOptions?.beforeCommit});
   const imageCrops=installImageCrops({db,root,dataDir,one,all,run,transaction,asset,safeFile,fingerprint,moving,isScanning:()=>scanning,fail});
   const locations=installLocations({db,root,all,one,run,transaction,fail,setLocation:catalogue.setLocation,relocate:enhancements.relocate});
   const storyEvents=installStoryEvents({db,transaction});
-  const ghostProfiles=installGhostProfiles({one,run,transaction});
+  const characterPolicy=installCharacterPolicy({db,dataDir,config:options.characterPolicy,one});
+  const ghostProfiles=installGhostProfiles({one,run,transaction,characterPolicy});
   const locationCanvas=installLocationCanvas({dataDir,editor:locations.editor,transaction});
   let mcpWriteConfig=options.mcpWrites;
   try{
@@ -124,6 +136,7 @@ export async function createApp(options={}) {
     if(mcpWriteConfig?.enabled===true){const origin=new URL(mcpWriteConfig.origin);if(!['review','trusted'].includes(mcpWriteConfig.approval_mode??'review')||!/^[a-f0-9]{64}$/.test(mcpWriteConfig.token)||mcpWriteConfig.database_id!==databaseIdentity(path.join(dataDir,'universe.sqlite'))||origin.protocol!=='https:'||!origin.hostname.endsWith('.ts.net')||origin.origin!==mcpWriteConfig.origin||typeof mcpWriteConfig.login!=='string'||!mcpWriteConfig.login)throw Error();}
   }catch{mcpWriteConfig=null;console.error('MCP changes disabled: invalid local configuration. Desktop and read-only access remain available.');}
   let previewMedia=null;
+  const canonBeforeCommit=options.canonTestOptions?.beforeCommit;
   async function saveCanon(options){
     const {characterId,appearance='',references,reason='',expectedRevisionId,expectedReferences,expectedFingerprints,afterSave}=options;
     character(characterId);
@@ -131,22 +144,27 @@ export async function createApp(options={}) {
     // are required. A missing comparison must never silently disable this guard.
     if(!Object.hasOwn(options,'expectedRevisionId')||!(expectedRevisionId===null||typeof expectedRevisionId==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedRevisionId)))throw fail('Provide expected_revision_id from the current character, or null for its first approval.');
     if(!Array.isArray(expectedReferences)||expectedReferences.some(ref=>!ref||typeof ref.media_id!=='string'||!['face','body','detail','general'].includes(ref.role)||!(ref.sha256===undefined||typeof ref.sha256==='string'&&/^[0-9a-f]{64}$/.test(ref.sha256))))throw fail('Provide expected_references from the current character, or [] for its first approval.');
-    const expectedSnapshot=expectedReferences.map(({media_id,role,sha256})=>({media_id,role,sha256}));
+    const expectedSnapshot=expectedReferences.map(referenceSnapshot);
     if(!Array.isArray(references))throw fail('Invalid reference selection');
-    for(const r of references){if(!r||!one('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?',r.media_id,characterId))throw fail('References must be assigned to this character.');if(!['face','body','detail','general'].includes(r.role))throw fail('Choose a reference role.');}
+    for(const r of references){if(!r||!one('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?',r.media_id,characterId)&&!options.assignMedia?.includes(r.media_id))throw fail('References must be assigned to this character.');if(!['face','body','detail','general'].includes(r.role))throw fail('Choose a reference role.');}
+    const keys=new Set();for(const ref of references){const key=referenceKey(ref);if(keys.has(key))throw fail('Each approved reference must have a distinct identifier.');keys.add(key);if(ref.reference_id&&!/^[a-f0-9-]{36}$/i.test(ref.reference_id))throw fail('Invalid reference identifier.');}
     const prior=canon(characterId);if((prior?.id??null)!==expectedRevisionId)throw fail('The approved identity changed. Retrieve the character and prepare the proposal again.',409);const previous=prior?JSON.parse(prior.references_json):[],snapshots=[];
-    for(const r of references){const m=asset(r.media_id);if(m.kind!=='image'||!one('SELECT 1 FROM active_media WHERE id=?',r.media_id))throw fail('References must be active images.');const sha256=await fingerprint(await safeFile(m)),expected=previous.find(x=>x.media_id===r.media_id)?.sha256;if(expected&&expected!==sha256)throw fail('An approved reference file has changed. Restore the original, or explicitly remove the reference before approving its replacement.');if(expectedFingerprints&&Object.hasOwn(expectedFingerprints,r.media_id)&&expectedFingerprints[r.media_id]!==sha256)throw fail('A selected image changed after human approval. Prepare a new reference proposal.',409);snapshots.push({media_id:r.media_id,role:r.role,sha256});}
-    return transaction(()=>{const latest=canon(characterId);if((latest?.id??null)!==(prior?.id??null))throw fail('The approved identity changed while saving. Prepare the proposal again.',409);const liveRefs=latest?JSON.parse(latest.references_json):[];if(JSON.stringify(liveRefs)!==JSON.stringify(expectedSnapshot))throw fail('The approved references changed while saving. Retrieve the character and try again.',409);let saved;if(latest&&(latest.appearance??'')===str(appearance,30000)){run('UPDATE canon SET references_json=?,reason=? WHERE id=?',JSON.stringify(snapshots),previous.some(ref=>!snapshots.some(next=>next.media_id===ref.media_id))?'Reference data removed by creator':latest.reason,latest.id);saved=canon(characterId);}else{const revision=id();run('INSERT INTO canon VALUES(?,?,?,?,?,?,?)',revision,characterId,latest?.id||null,str(appearance,30000),JSON.stringify(snapshots),str(reason,1000)||'Explicit approval by Tibor',now());saved=canon(characterId);}if(typeof afterSave==='function')afterSave(saved);forgetRemovedReferences({all,run,characterId,retainedIds:snapshots.map(ref=>ref.media_id),previousReferences:previous});return saved;});
+    for(const r of references){const m=asset(r.media_id);if(m.kind!=='image'||!one('SELECT 1 FROM active_media WHERE id=?',r.media_id))throw fail('References must be active images.');const sha256=await fingerprint(await safeFile(m)),expected=previous.find(x=>x.media_id===r.media_id)?.sha256;if(expected&&expected!==sha256)throw fail('An approved reference file has changed. Restore the original, or explicitly remove the reference before approving its replacement.');if(expectedFingerprints&&Object.hasOwn(expectedFingerprints,r.media_id)&&expectedFingerprints[r.media_id]!==sha256)throw fail('A selected image changed after human approval. Prepare a new reference proposal.',409);const crop=selectedCrop(r,previous);const old=previousReference(r,previous),metadata=old?.reference_id?referenceSnapshot(old):options.newReference?.reference_id===r.reference_id?options.newReference:r.reference_id?{reference_id:r.reference_id}:{};if(r.reference_id&&!old&&options.newReference?.reference_id!==r.reference_id)throw fail('New crop approvals require the authenticated administrator endpoint.',403);const snapshot={...metadata,media_id:r.media_id,role:r.role,sha256,...(crop?{crop}:{})};if(!crop)delete snapshot.crop;await characterCrops.validateSelection(snapshot);snapshots.push(snapshot);}
+    if(canonBeforeCommit)await canonBeforeCommit();
+    return transaction(()=>{if(moving.size)throw fail('Várd meg a folyamatban lévő fájlművelet végét a referencia jóváhagyásával.',409);for(const mid of options.assignMedia||[])run('INSERT OR IGNORE INTO depictions VALUES(?,?)',mid,characterId);for(const ref of snapshots)if(!one('SELECT 1 FROM active_media m JOIN depictions d ON d.media_id=m.id WHERE m.id=? AND d.character_id=?',ref.media_id,characterId))throw fail('A kiválasztott referencia közben törlődött vagy a hozzárendelése megváltozott.',409);const latest=canon(characterId);if((latest?.id??null)!==(prior?.id??null))throw fail('The approved identity changed while saving. Prepare the proposal again.',409);const liveRefs=latest?JSON.parse(latest.references_json):[];if(referenceDigest(liveRefs)!==referenceDigest(expectedSnapshot))throw fail('The approved references changed while saving. Retrieve the character and try again.',409);let saved;if(!options.forceRevision&&latest&&(latest.appearance??'')===str(appearance,30000)){run('UPDATE canon SET references_json=?,reason=? WHERE id=?',JSON.stringify(snapshots),previous.some(ref=>!snapshots.some(next=>next.media_id===ref.media_id))?'Reference data removed by creator':latest.reason,latest.id);saved=canon(characterId);}else{const revision=id();run('INSERT INTO canon VALUES(?,?,?,?,?,?,?)',revision,characterId,latest?.id||null,str(appearance,30000),JSON.stringify(snapshots),str(reason,1000)||'Explicit approval by Tibor',now());saved=canon(characterId);}if(typeof afterSave==='function')afterSave(saved);if(!options.preserveReferenceHistory)forgetRemovedReferences({all,run,characterId,retainedIds:snapshots.map(ref=>ref.media_id),previousReferences:previous});return saved;});
   }
-  const mcpChanges=installMcpChanges({db,one,all,run,transaction,fail,config:mcpWriteConfig,isBusy:()=>folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),asset,safeFile,fingerprint,saveCanon,previewMedia:mediaId=>previewMedia?.(mediaId)});
+  const mcpChanges=installMcpChanges({db,one,all,run,transaction,fail,characterPolicy,config:mcpWriteConfig,isBusy:()=>folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),asset,safeFile,fingerprint,saveCanon,previewMedia:(mediaId,ref)=>ref?characterCrops.preview(mediaId,ref):previewMedia?.(mediaId)});
   const mediaUploadMigrationBackup=await backupBeforeMediaUploads(db,dataDir);
   const mediaImports=installMediaImports({db,root,dataDir,one,all,run,transaction,config:mcpWriteConfig,isBusy:()=>folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),...(options.importTestOptions||{})});
   await mediaImports.uploads.cleanup();
   let imageConfig=options.imageGeneration;
   if(imageConfig===undefined){try{imageConfig=JSON.parse(await fs.readFile(path.join(dataDir,'image-generation.json'),'utf8'));}catch{imageConfig={};}}
   const imageMigrationBackup=await backupBeforeImageGeneration(db,dataDir);
-  const imageGeneration=installImageGeneration({db,root,dataDir,one,all,run,transaction,mediaImports,writeConfig:mcpWriteConfig,config:imageConfig,env:await imageCredentialEnvironment(dataDir),isBusy:()=>mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),...(options.generationTestOptions||{})});
+  const imageGeneration=installImageGeneration({db,root,dataDir,one,all,run,transaction,mediaImports,characterPolicy,writeConfig:mcpWriteConfig,config:imageConfig,env:await imageCredentialEnvironment(dataDir),isBusy:()=>mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),...(options.generationTestOptions||{})});
+  const permanentDelete=installPermanentMediaDelete({db,root,dataDir,one,all,run,transaction,moving,isBusy:()=>scanning||folderSync.isBusy()||reconciliation.isRelinking()||mediaImports.isBusy()||imageGeneration.isBusy(),...(options.permanentDeleteTestOptions||{})});
   const desktopGeneration=installDesktopGeneration({imageGeneration,one,all});
+  const characterRename=installCompleteCharacterRename({db,all,one,run,transaction,root,dataDir,characterPolicy,isBusy:()=>folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking()||mediaImports.isBusy()||imageGeneration.isBusy()});
+  const renameRoutes=createRenameRoutes({rename:characterRename,authenticate:h=>mcpChanges.authenticate(h),privateOrigin:mcpWriteConfig?.origin,approvalMode:mcpWriteConfig?.approval_mode??'review'});
   const server=http.createServer(async(req,res)=>{
     const json=(value,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
     try{
@@ -168,11 +186,14 @@ export async function createApp(options={}) {
         if(!String(req.headers['content-type']).startsWith('application/json'))throw fail('Expected JSON',415);
         let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>(p==='/api/restore'?50e6:/^\/api\/media\/[^/]+\/image-crop$/.test(p)?34*1024*1024:2e6))throw fail('Request is too large',413);}try{body=JSON.parse(raw||'{}');}catch{throw fail('Invalid JSON');}
       }
+      if(characterRename.isBusy()&&['POST','PUT','PATCH','DELETE'].includes(req.method))throw fail('A teljes átnevezés folyamatban van. Várd meg a végét.',409);
       if((folderSync.isBusy()||reconciliation.isRelinking())&&['POST','PUT','PATCH','DELETE'].includes(req.method))throw fail('Folder synchronization or file reconciliation is running. Please wait before editing or scanning.',409);
-      const scopedRead=(p==='/api/mcp-ghost'&&body.operation==='capabilities')||(p==='/api/mcp-changes'&&['status','get'].includes(body.operation))||(p==='/api/mcp-imports'&&['capabilities','get','upload_get','list'].includes(body.operation));
+      const scopedRead=(p==='/api/mcp-rename'&&['capabilities','get'].includes(body.operation))||(p==='/api/mcp-ghost'&&body.operation==='capabilities')||(p==='/api/mcp-changes'&&['status','get'].includes(body.operation))||(p==='/api/mcp-imports'&&['capabilities','get','upload_get','list'].includes(body.operation));
       const desktopGenerationRoute=/^\/api\/characters\/[a-f0-9-]{36}\/generation(?:\/|$)/i.test(p);
       if(mediaImports.isBusy()&&['POST','PUT','PATCH','DELETE'].includes(req.method)&&p!=='/api/mcp-imports'&&p!=='/api/mcp-generation'&&!desktopGenerationRoute&&!scopedRead)throw fail('A verified media import is running. Retry shortly.',409);
       if(imageGeneration.isBusy()&&['POST','PUT','PATCH','DELETE'].includes(req.method)&&p!=='/api/mcp-generation'&&!desktopGenerationRoute&&!scopedRead)throw fail('An approved image generation is running. Retry shortly.',409);
+      if(permanentDelete.isBusy()&&['POST','PUT','PATCH','DELETE'].includes(req.method))throw fail('A végleges törlés folyamatban van. Várd meg a végét.',409);
+      if(await permanentDelete.handle({p,body,req,json}))return;
       if(await locationCanvas.handle({p,body,req,json}))return;
       if(await desktopGeneration.handle({p,body,req,json}))return;
       if(p==='/api/mcp-generation'){
@@ -209,8 +230,10 @@ export async function createApp(options={}) {
           throw fail('This import operation is unavailable.',400);
         }catch(e){return json({code:e.code||'IMPORT_UNAVAILABLE',error:e.status?e.message:'The import could not be processed.'},e.status||500);}
       }
+      if(await renameRoutes.handle({p,body,req,json,url}))return;
       if(await folderSync.handle({p,body,req,json}))return;
       if(await videoCovers.handle({p,body,req,res,json}))return;
+      if(await characterCrops.handle({p,url,body,req,json,res}))return;
       if(await imageCrops.handle({p,body,req,json}))return;
       if(await locations.handle({p,body,req,json}))return;
       if(p==='/api/mcp-ghost'){
@@ -237,8 +260,9 @@ export async function createApp(options={}) {
       if(p==='/api/storage'&&req.method==='GET')return json({data_directory:path.resolve(dataDir),database:path.resolve(dataDir,'universe.sqlite'),resource_root:root,characters:one('SELECT COUNT(*) n FROM characters').n,media:one('SELECT COUNT(*) n FROM media').n});
       if(p==='/api/state'&&req.method==='GET')return json({characters:all(`SELECT c.*,u.cover_crop,(SELECT COUNT(*) FROM depictions d JOIN active_media m ON m.id=d.media_id WHERE d.character_id=c.id) media_count FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL ORDER BY name COLLATE NOCASE`).map(c=>({...c,cover_frame:videoCovers.details(c.id,c.cover_id)})),protagonist:enhancements.protagonist(),folder_owners:all('SELECT * FROM sorted_folders'),folders:all('SELECT folder,COUNT(*) count FROM active_media GROUP BY folder ORDER BY folder'),stats:{media:one('SELECT COUNT(*) n FROM active_media').n,images:one("SELECT COUNT(*) n FROM active_media WHERE kind='image'").n,videos:one("SELECT COUNT(*) n FROM active_media WHERE kind='video'").n,inbox:one('SELECT COUNT(*) n FROM active_media m WHERE NOT EXISTS(SELECT 1 FROM media_categorization s WHERE s.media_id=m.id AND s.complete=1) AND NOT '+catalogue.locationSQL).n},scanning,lastScan});
       if(p==='/api/scan'&&req.method==='POST')return json(await scan());
+      if(p==='/api/character-name-suggestion'&&req.method==='POST')return json(suggestMaleName(all('SELECT name FROM characters').map(c=>c.name),body.exclude??[],nameCandidates(body.race)));
       if(p==='/api/characters'&&req.method==='POST'){
-        const name=str(body.name,200).trim();if(!name)throw fail('Please enter a name or working title.');const cid=id();run('INSERT INTO characters(id,name,created_at) VALUES(?,?,?)',cid,name,now());return json(character(cid),201);
+        const name=str(body.name,200).trim();if(!name)throw fail('Please enter a name or working title.');const cid=id(),biography=body.gender?'Nem: '+str(body.gender,100)+'.':'';run('INSERT INTO characters(id,name,biography,created_at,race) VALUES(?,?,?,?,?)',cid,name,biography,now(),raceValue(body.race));return json(character(cid),201);
       }
       const cm=p.match(/^\/api\/characters\/([^/]+)$/);
       if(cm){const cid=cm[1];const c=character(cid);
@@ -257,15 +281,15 @@ export async function createApp(options={}) {
           });return json({ok:true});
         }
         if(req.method==='PUT'){
-          const name=str(body.name,200).trim();if(!name)throw fail('A character needs a name or title.');
-          const checkExpected=()=>{if(body.expected){const current=character(cid);for(const key of ['aliases','biography','personality','sexuality','speech_style','appearance','notes'])if(Object.hasOwn(body.expected,key)&&current[key]!==body.expected[key]&&current[key]!==str(body[key],key==='aliases'?1000:30000))throw fail('Profile text changed on another device. Keep your draft and compare with the latest saved version.',409);}};checkExpected();
+          const name=str(body.name,200).trim();if(!name)throw fail('A character needs a name or title.');const race=Object.hasOwn(body,'race')?raceValue(body.race):undefined;
+          const checkExpected=()=>{if(body.expected){const current=character(cid);for(const key of ['aliases','biography','personality','sexuality','speech_style','appearance','notes','race'])if(Object.hasOwn(body.expected,key)&&current[key]!==body.expected[key]&&current[key]!==str(body[key],key==='aliases'?1000:30000))throw fail('Profile text changed on another device. Keep your draft and compare with the latest saved version.',409);}};checkExpected();
           if(body.cover_id){asset(body.cover_id);if(!one('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?',body.cover_id,cid))throw fail('Assign this character to the cover first.');}
-          await folderSync.renameCharacter(cid,name);checkExpected();transaction(()=>{run('UPDATE characters SET name=?,aliases=?,biography=?,personality=?,appearance=?,notes=?,cover_id=? WHERE id=?',name,str(body.aliases,1000),str(body.biography),str(body.personality),str(body.appearance),str(body.notes),body.cover_id||null,cid);for(const field of ['sexuality','speech_style'])if(Object.hasOwn(body,field))run(`UPDATE characters SET ${field}=? WHERE id=?`,str(body[field]),cid);});return json(character(cid));
+          if(name!==c.name)throw fail('A névhez használd a teljes átnevezési műveletet.',409);await folderSync.renameCharacter(cid,name);checkExpected();transaction(()=>{if(race!==undefined)run('UPDATE characters SET race=? WHERE id=?',race,cid);run('UPDATE characters SET name=?,aliases=?,biography=?,personality=?,appearance=?,notes=?,cover_id=? WHERE id=?',name,str(body.aliases,1000),str(body.biography),str(body.personality),str(body.appearance),str(body.notes),body.cover_id||null,cid);for(const field of ['sexuality','speech_style'])if(Object.hasOwn(body,field))run(`UPDATE characters SET ${field}=? WHERE id=?`,str(body[field]),cid);});return json(character(cid));
         }
       }
       const ca=p.match(/^\/api\/characters\/([^/]+)\/canon$/);
       if(ca&&req.method==='POST'){
-        return json(await saveCanon({characterId:ca[1],appearance:body.appearance,references:body.references,reason:body.reason,expectedRevisionId:body.expected_revision_id,expectedReferences:body.expected_references}));
+        return json(await saveCanon({characterId:ca[1],appearance:body.appearance,references:body.references,reason:body.reason,expectedRevisionId:body.expected_revision_id,expectedReferences:body.expected_references,expectedFingerprints:body.expected_fingerprints}));
       }
       const integrity=p.match(/^\/api\/characters\/([^/]+)\/integrity$/);
       if(integrity&&req.method==='POST'){
@@ -370,8 +394,8 @@ export async function createApp(options={}) {
       if(p==='/api/restore'&&req.method==='POST'){
         if(body.schema_version!==1)throw fail('Unsupported backup version');
         if(one('SELECT COUNT(*) n FROM characters').n||one('SELECT COUNT(*) n FROM media').n)throw fail('Restore requires an empty catalogue. Use a separate data directory to avoid overwriting your work.');
-        const tables={characters:['id','name','aliases','biography','personality','appearance','notes','cover_id','created_at','sexuality','speech_style'],media:['id','relative_path','folder','kind','size','modified_at','created_at'],depictions:['media_id','character_id'],media_notes:['media_id','tags','notes'],reviews:['id','media_id','character_id','decision','rating','notes','created_at'],canon:['id','character_id','parent_id','appearance','references_json','reason','created_at'],relationships:['id','source_id','target_id','description']};
-        transaction(()=>{taxonomy.prepareRestore(body);for(const [t,cols] of Object.entries(tables)){if(!Array.isArray(body[t]))throw fail('Incomplete backup');for(const row of body[t]){if(t==='media'&&(path.isAbsolute(row.relative_path)||path.relative(root,path.resolve(root,row.relative_path)).startsWith('..')))throw fail('Invalid media path in backup');run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??(['sexuality','speech_style'].includes(c)?'':null)));}}if(body.sorted_folders!==undefined){if(!Array.isArray(body.sorted_folders))throw fail('Invalid folder assignments in backup');for(const r of body.sorted_folders)run('INSERT INTO sorted_folders VALUES(?,?)',r.folder,r.character_id);}if(body.file_moves!==undefined){if(!Array.isArray(body.file_moves))throw fail('Invalid move history');for(const r of body.file_moves)run('INSERT INTO file_moves VALUES(?,?,?,?,?,?,?)',r.id,r.media_id,r.from_path,r.to_path,r.status,r.sha256,r.created_at);}for(const [t,cols] of Object.entries(extraTables)){if(body[t]===undefined)continue;if(!Array.isArray(body[t]))throw fail('Invalid additional backup records');for(const row of body[t])run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??null));}storyEvents.validateRestore();mediaImports.uploads.afterRestore();});return json({ok:true});
+        const tables={characters:['id','name','aliases','biography','personality','appearance','notes','cover_id','created_at','sexuality','speech_style','race'],media:['id','relative_path','folder','kind','size','modified_at','created_at'],depictions:['media_id','character_id'],media_notes:['media_id','tags','notes'],reviews:['id','media_id','character_id','decision','rating','notes','created_at'],canon:['id','character_id','parent_id','appearance','references_json','reason','created_at'],relationships:['id','source_id','target_id','description']};
+        transaction(()=>{taxonomy.prepareRestore(body);for(const [t,cols] of Object.entries(tables)){if(!Array.isArray(body[t]))throw fail('Incomplete backup');for(const row of body[t]){if(t==='media'&&(path.isAbsolute(row.relative_path)||path.relative(root,path.resolve(root,row.relative_path)).startsWith('..')))throw fail('Invalid media path in backup');run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>c==='race'?raceValue(row[c]):row[c]??(['sexuality','speech_style'].includes(c)?'':null)));}}if(body.sorted_folders!==undefined){if(!Array.isArray(body.sorted_folders))throw fail('Invalid folder assignments in backup');for(const r of body.sorted_folders)run('INSERT INTO sorted_folders VALUES(?,?)',r.folder,r.character_id);}if(body.file_moves!==undefined){if(!Array.isArray(body.file_moves))throw fail('Invalid move history');for(const r of body.file_moves)run('INSERT INTO file_moves VALUES(?,?,?,?,?,?,?)',r.id,r.media_id,r.from_path,r.to_path,r.status,r.sha256,r.created_at);}for(const [t,cols] of Object.entries(extraTables)){if(body[t]===undefined)continue;if(!Array.isArray(body[t]))throw fail('Invalid additional backup records');for(const row of body[t])run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??null));}characterCrops.validateRestore();storyEvents.validateRestore();mediaImports.uploads.afterRestore();});return json({ok:true});
       }
       const fm=p.match(/^\/media\/([^/]+)$/);
       if(fm&&['GET','HEAD'].includes(req.method)){
@@ -382,8 +406,8 @@ export async function createApp(options={}) {
         const headers={'Content-Type':types[path.extname(full).toLowerCase()]||'application/octet-stream','Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':m.kind==='image'?'private, no-cache':'private, max-age=60','ETag':etag,'X-Content-Type-Options':'nosniff'};if(status===206)headers['Content-Range']=`bytes ${start}-${end}/${s.size}`;
         res.writeHead(status,headers);if(req.method==='HEAD')return res.end();const stream=createReadStream(full,{start,end});stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);return;
       }
-      if(req.method==='GET'&&['/','/style.css','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/client.js','/enhancements.js','/picture-crop.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/location-editor.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-canvas-model.js','/location-canvas.css'].includes(p)){
-        const file=path.join(appDir,'public',p==='/'?'index.html':p.slice(1));const data=await fs.readFile(file);res.writeHead(200,{'Content-Type':p.endsWith('.css')?'text/css':p.endsWith('.js')?'text/javascript':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",'X-Content-Type-Options':'nosniff'});return res.end(data);
+      if(req.method==='GET'&&['/character-rename.html','/character-rename.js','/character-rename.css','/','/style.css','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/client.js','/character-options.js','/enhancements.js','/picture-crop.js','/character-reference-crops.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/location-editor.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-canvas-model.js','/location-canvas.css','/permanent-media-delete.js'].includes(p)){
+        const file=path.join(appDir,'public',p==='/'?'index.html':p.slice(1));const data=await fs.readFile(file);res.writeHead(200,{'Content-Type':p.endsWith('.css')?'text/css':p.endsWith('.js')?'text/javascript':'text/html; charset=utf-8','Content-Security-Policy':`default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' ${characterCrops.adminOrigin()||''}; frame-ancestors 'none'`,'X-Content-Type-Options':'nosniff'});return res.end(data);
       }
       throw fail('Not found',404);
     }catch(e){if(!res.headersSent)json({error:e.status?e.message:'The operation could not be completed. Your original media has not been changed.'},e.status||500);else res.destroy();}
@@ -398,11 +422,12 @@ export async function createApp(options={}) {
     if(grokConfig===undefined){try{grokConfig=JSON.parse(await fs.readFile(path.join(dataDir,'grok-gateway.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')console.error('Grok connection approval disabled: unreadable local configuration.');}}
     let grokConnections=null;try{grokConnections=mobileConfig?.enabled===true?createGrokConnections(grokConfig,mobileConfig):null;}catch{console.error('Grok approval disabled: invalid gateway configuration. Existing mobile access remains available.');}
     previewMedia=async mediaId=>{const reader=await openMcpCatalogue({database:path.join(dataDir,'universe.sqlite'),mediaRoot:root,availability:options.mobileAvailability,makeThumbnail:options.mobileThumbnail});try{const result=await reader.call('get_media',{media_id:mediaId,include_image:true,image_quality:'reference'});if(!result.image)throw fail('No verified media preview is available.',404);return {bytes:Buffer.from(result.image.data,'base64'),mimeType:result.image.mimeType};}finally{reader.close();}};
-    const referencePreview=async(characterId,mediaId)=>{const reader=await openMcpCatalogue({database:path.join(dataDir,'universe.sqlite'),mediaRoot:root,availability:options.mobileAvailability,makeThumbnail:options.mobileThumbnail,maxInlineImageBytes:20*1024*1024});try{const result=await reader.call(characterId?'get_approved_references':'get_media',{...(characterId?{character_id:characterId}:{}),media_id:mediaId,include_image:true,image_quality:'original'});if(!result.image||result.data.image_info?.representation!=='original')throw fail('No verified original image is available.',404);return {bytes:Buffer.from(result.image.data,'base64'),mimeType:result.image.mimeType,sha256:result.data.image_info.sha256};}finally{reader.close();}};
-    mobileServer=createMobileServer({config:mobileConfig,all,one,run,transaction,ghostProfiles,mcpChanges:approveMcp,mediaImports:approveMcp?mediaImports:null,imageGeneration:approveMcp?imageGeneration:null,grokConnections,referencePreview,locationEditor:locations.editor,sorting,scan,scanRunning:()=>scanning,reconciliation,createCharacter:folderSync.createCharacterWithFolder,isBusy:()=>mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking()});
+    const referencePreview=async(characterId,mediaId,runId,referenceId)=>{if(runId)return imageGeneration.previewReference(runId,characterId,mediaId,referenceId);const reader=await openMcpCatalogue({database:path.join(dataDir,'universe.sqlite'),mediaRoot:root,availability:options.mobileAvailability,makeThumbnail:options.mobileThumbnail,maxInlineImageBytes:20*1024*1024});try{const hasCrop=characterId&&(await reader.call('get_approved_references',{character_id:characterId,media_id:mediaId,...(referenceId?{reference_id:referenceId}:{})})).data.references[0]?.crop;const result=await reader.call(characterId?'get_approved_references':'get_media',{...(characterId?{character_id:characterId}:{}),media_id:mediaId,...(referenceId?{reference_id:referenceId}:{}),include_image:true,image_quality:hasCrop?'reference':'original'});if(!result.image)throw fail('No verified original image is available.',404);return {bytes:Buffer.from(result.image.data,'base64'),mimeType:result.image.mimeType,sha256:result.data.image_info.sha256};}finally{reader.close();}};
+    mobileServer=createMobileServer({config:mobileConfig,all,one,run,transaction,characterCrops:approveMcp?characterCrops:null,desktopOrigin:()=>server.listening?'http://127.0.0.1:'+server.address().port:null,characterRename:approveMcp?characterRename:null,ghostProfiles,mcpChanges:approveMcp,mediaImports:approveMcp?mediaImports:null,imageGeneration:approveMcp?imageGeneration:null,grokConnections,referencePreview,locationEditor:locations.editor,sorting,scan,scanRunning:()=>scanning,reconciliation,createCharacter:folderSync.createCharacterWithFolder,isBusy:()=>mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking()});
   }catch(e){console.error('Mobile access disabled: '+e.message);}
+  if(mobileServer&&mcpWriteConfig?.enabled===true&&mobileConfig.login.toLowerCase()===mcpWriteConfig.login&&mobileConfig.origin===mcpWriteConfig.origin)characterCrops.setAdminOrigin(mobileConfig.origin);
   const closeServer=s=>new Promise(resolve=>{if(!s?.listening)return resolve();s.close(()=>resolve());s.closeIdleConnections();});
-  return {server,mobileServer,storyMigrationBackup,imageMigrationBackup,mediaUploadMigrationBackup,mobilePort:mobileConfig?.port??4318,db,root,dataDir,folderSync,imageGeneration,close:async()=>{await imageGeneration.settle();await Promise.all([closeServer(server),closeServer(mobileServer)]);db.close();}};
+  return {server,mobileServer,characterRename,characterCropMigrationBackup,storyMigrationBackup,imageMigrationBackup,mediaUploadMigrationBackup,mobilePort:mobileConfig?.port??4318,db,root,dataDir,folderSync,imageGeneration,close:async()=>{await imageGeneration.settle();await Promise.all([closeServer(server),closeServer(mobileServer)]);db.close();}};
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

@@ -6,17 +6,28 @@ $entries=[System.Collections.Generic.List[object]]::new()
 function Add-PrivateFile([string]$File,[string]$Logical){
   if(-not(Test-Path -LiteralPath $File -PathType Leaf)){return}
   $item=Get-Item -LiteralPath $File -Force
-  if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Linked private configuration refused.'}
+  if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){
+    # OneDrive cloud files have reparse attributes without being symlinks.
+    # Use the same native lstat distinction as the application's storage layer.
+    $node=Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+    if(-not(Test-Path -LiteralPath $node)){$node=(Get-Command node -ErrorAction Stop).Source}
+    & $node -e "const fs=require('node:fs');const s=fs.lstatSync(process.argv[1]);if(!s.isFile()||s.isSymbolicLink())process.exit(2);" $item.FullName
+    if($LASTEXITCODE -ne 0){throw 'Linked private configuration refused.'}
+  }
   $bytes=[IO.File]::ReadAllBytes($item.FullName)
   $entries.Add(@{path=$Logical;bytes=[Convert]::ToBase64String($bytes)})
 }
 foreach($name in @('mcp-config.json','mcp-tunnel-key.xml')){Add-PrivateFile (Join-Path $LocalBase $name) ('local-base/'+$name)}
-foreach($name in @('grok-gateway.json','mcp-writes.json','mobile-access.json','image-generation.json','sogni-key.dpapi')){Add-PrivateFile (Join-Path $DataDir $name) ('data-dir/'+$name)}
+foreach($name in @('grok-gateway.json','mcp-writes.json','mobile-access.json','image-generation.json','character-policy.json','sogni-key.dpapi')){Add-PrivateFile (Join-Path $DataDir $name) ('data-dir/'+$name)}
 foreach($pair in @(@((Join-Path $LocalBase 'mcp-runtime\profiles'),'local-base/mcp-runtime/profiles'),@((Join-Path $DataDir 'grok-runtime'),'data-dir/grok-runtime'))){
   if(Test-Path -LiteralPath $pair[0]){foreach($file in Get-ChildItem -LiteralPath $pair[0] -Recurse -File -Force){
     if($file.Extension -in @('.json','.yaml','.yml','.xml','.dpapi')){Add-PrivateFile $file.FullName ($pair[1]+'/'+$file.FullName.Substring($pair[0].Length+1).Replace('\','/'))}
   }}
 }
+# Private organized-layout marker and optional local analysis credential remain encrypted.
+$mcpFile=Join-Path $LocalBase 'mcp-config.json'
+if(Test-Path -LiteralPath $mcpFile){$mcp=Get-Content -LiteralPath $mcpFile -Raw -Encoding UTF8|ConvertFrom-Json;if($mcp.mediaRoot){Add-PrivateFile (Join-Path $mcp.mediaRoot '00_SYSTEM\config\storage-layout.json') 'media-root/00_SYSTEM/config/storage-layout.json'}}
+Add-PrivateFile (Join-Path $LocalBase 'analysis-trial\credentials\openai-analysis-key.dpapi') 'local-base/analysis-trial/credentials/openai-analysis-key.dpapi'
 $taskCount=0
 foreach($task in @(Get-ScheduledTask -TaskName '*Living*Universe*' -ErrorAction SilentlyContinue)){
   $xml=Export-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath

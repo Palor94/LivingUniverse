@@ -309,3 +309,26 @@ merely by deploying this capability.
 ## 2026-10-30: Explicit organized OneDrive layout
 
 An opt-in storage-layout.json separates runtime source, character folders, shared media, staging, exports, backups and archive. Keep the live database and credentials outside OneDrive. IDs, depiction links, canon and immutable historical manifests survive journalled path migration. Scanner skips system/import/export/backup/archive trees. Imports commit once into shared Unassigned; character creation/rename/moves resolve nested folders. Consistent snapshots are staged locally and may publish only into the exact reserved 90_BACKUPS destination, which is excluded from media scans.
+
+## 2026-10-31: Owner prohibition on female character creation
+
+The owner prohibits creating, generating or accepting female characters and profiles, including supporting characters invented from another profile. The shared gender guidance and downloaded generation instructions carry this rule. The operator-owned local character-policy.json enables server enforcement for desktop/mobile/MCP creation, structured proposals and acceptance, image-plan preparation and execution; unknown gender requires clarification. New profile biographies carry an explicit gender declaration. Connection-local SQLite triggers protect insert/update/restore and reconciliation paths. Deleted identity hashes prevent accidental recreation without retaining their profile text. Existing image plans require a new plan under the active policy. Text and declared gender are checked; external provider image contents are not classified by a visual model. Existing human review and non-canon output status remain required.
+
+## 2026-10-31: Explicit character-specific reference crops
+
+Store normalized oriented regions per media/character/role without copying or replacing originals. Draft saves never affect existing approved references. Canon approvals and generation manifests snapshot coordinates alongside the source fingerprint; omitted regions preserve prior approvals. Compare coordinates as well as revision/source hashes because reference-only changes retain the appearance revision ID. Use approved regions for reference display, plugin delivery and provider inputs, with whole-source fallback only when no region is approved or original bytes are explicitly requested. Keep private human review, source integrity checks, export/restore and completed manifests intact. See docs/CHARACTER_REFERENCE_CROPS.md.
+
+
+## 2026-10-31: Complete rename includes primary name and OneDrive folder
+
+The owner explicitly requested one full rename instead of separate prose, name
+and folder steps. Trusted MCP rename executes that explicitly requested operation
+with stable IDs, verified backup, exact-plan conflicts, durable filesystem
+compensation and audit. Preview-only remains explicit; review policy and ambiguous
+identity selection remain supported. This supersedes the earlier development-only
+separate folder workflow and mandatory private-page restriction for trusted rename.
+Preserve existing source/profiles/canon and the local character policy.
+
+## 2026-10-31: Owner-authorized one-click crop approval
+
+The owner explicitly changed Save selection to approve the selected crop immediately, only through the authenticated administrator interface. Use the existing Tailscale creator identity and exact Origin/CSRF checks; no unauthenticated approval fallback or MCP trusted-mode bypass. Append an independently identified reference without replacing prior images/crops. Commit depiction assignment, crop, new canon revision and attributed approval history together; retries are idempotent and undo appends a compensating revision. This supersedes the earlier draft-only Save selection workflow and reference-only no-history rule for these new explicit crop approvals. Preserve old references at deployment. See docs/CHARACTER_REFERENCE_CROPS.md.

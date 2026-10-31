@@ -71,7 +71,7 @@ export function installFolderSync({db,root,dataDir,all,one,run,transaction,fail,
     }finally{busy=false;moving.delete('folder-name-sync');}
   }
   async function renameCharacter(cid,name){const c=one('SELECT name FROM characters WHERE id=?',cid);if(!c)throw fail('Character not found',404);if(c.name===name)return {completed:[],errors:[]};return synchronize({character_id:cid,name,rename:true});}
-  async function createCharacterWithFolder(cid,name){
+  async function createCharacterWithFolder(cid,name,gender){
     validFolder(name);
     if(busy||moving.size||isScanning())throw fail('Wait for the current scan or file operation.',409);
     busy=true;let created=false,createdStat=null,folder=characterFolder(root,name),full=null;
@@ -90,7 +90,7 @@ export function installFolderSync({db,root,dataDir,all,one,run,transaction,fail,
       validate();full=await checked(folder,false);
       try{await fs.mkdir(full);created=true;}catch(e){if(e.code!=='EEXIST')throw e;}
       await checked(folder);const stat=await fs.lstat(full);if(!stat.isDirectory())throw fail('A file already uses this name. Choose a distinct character name.',409);if(created)createdStat=stat;
-      transaction(()=>{const existing=validate();if(!existing)run('INSERT INTO characters(id,name,created_at) VALUES(?,?,?)',cid,name,now());run('INSERT INTO sorted_folders VALUES(?,?) ON CONFLICT(folder) DO NOTHING',folder,cid);});
+      transaction(()=>{const existing=validate();if(!existing)run('INSERT INTO characters(id,name,biography,created_at) VALUES(?,?,?,?)',cid,name,gender?'Nem: '+String(gender)+'.':'',now());run('INSERT INTO sorted_folders VALUES(?,?) ON CONFLICT(folder) DO NOTHING',folder,cid);});
       return {folder,folder_created:created};
     }catch(e){
       // Only remove our own still-empty directory after a database failure.
@@ -102,7 +102,7 @@ export function installFolderSync({db,root,dataDir,all,one,run,transaction,fail,
   async function handle({p,body,req,json}){
     if(p==='/api/folder-names'&&req.method==='GET'){const r=await plansFor(),token=randomUUID();for(const [k,v] of previews)if(v.expires<Date.now())previews.delete(k);previews.set(token,{signature:signature(r),expires:Date.now()+900000});json({token,plans:r.plans.map(({files,dirs,...p})=>({...p,file_count:files.length})),unmapped:r.unmapped,history:all('SELECT id,source,destination,status,error,created_at FROM folder_changes ORDER BY rowid DESC LIMIT 50')});return true;}
     if(p==='/api/folder-names/sync'&&req.method==='POST'){const preview=previews.get(body.token);if(!preview||preview.expires<Date.now())throw fail('Open a fresh folder-name preview before synchronizing.',409);const result=await synchronize({expectedSignature:preview.signature});previews.delete(body.token);json(result);return true;}
-    const match=p.match(/^\/api\/characters\/([^/]+)\/profile-field$/);if(match&&req.method==='POST'&&body.field==='name'){const name=String(body.value??'').trim();if(!name||name.length>200)throw fail('Enter a character name of 1–200 characters.');json({ok:true,folder_sync:await renameCharacter(match[1],name)});return true;}
+    const match=p.match(/^\/api\/characters\/([^/]+)\/profile-field$/);if(match&&req.method==='POST'&&body.field==='name'){if(typeof body.value!=='string'||!body.value.trim()||/[\\/:*?"<>|]/.test(body.value))throw fail('Érvénytelen név.');throw fail('A névhez használd a teljes átnevezési műveletet.',409);}
     return false;
   }
   return {handle,renameCharacter,synchronize,createCharacterWithFolder,isBusy:()=>busy};

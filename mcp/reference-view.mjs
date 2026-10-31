@@ -24,7 +24,7 @@ export function mountReferencePreview(){
     }
     picture.src='data:'+mime+';base64,'+preview.data;picture.hidden=false;
     picture.alt='Approved character reference — '+String(preview.role||'general');
-    status.textContent=(info?.representation==='original'||preview.representation==='original'?'Approved original reference · ':info?.representation==='reference'||preview.representation==='reference'?'Approved high-quality reference · ':'Approved reference preview · ')+String(preview.role||'general');
+    status.textContent=(info?.representation==='original'||preview.representation==='original'?'Approved original reference · ':info?.representation==='reference'||info?.representation==='character_crop'||preview.representation==='reference'?'Approved high-quality reference · ':'Approved reference preview · ')+String(preview.role||'general');
     details.textContent='Original fingerprint verified · Canon revision '+String(preview.revision_id||'unknown')+(info?.sha256?' · Delivered SHA-256 '+info.sha256:'')+(info?.source?.sha256?' · Original SHA-256 '+info.source.sha256:'');
   }
   function compatibility(globals){

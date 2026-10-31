@@ -1,3 +1,4 @@
+import {renameFixture} from './complete-rename-fixture.mjs';
 import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,7 +32,7 @@ test('private catalogue: shared media, immutable canon, persistence, restore, an
     assert.equal((await approveCanon(request,peter.id,{appearance:'New draft',references:[{media_id:image.id,role:'body'}]})).status,400);
     await fs.writeFile(mediaFile,bytes);
     await call('/api/media/'+image.id+'/review',{character_id:peter.id,decision:'rejected',rating:2,notes:'Eyes are incorrect'});
-    await call('/api/characters/'+peter.id,{...peter,name:'Pákozdi Péter',appearance:'Draft with different clothing'},'PUT');
+    await renameFixture(app,peter.id,'Pákozdi Péter');await call('/api/characters/'+peter.id,{...peter,name:'Pákozdi Péter',appearance:'Draft with different clothing'},'PUT');
     const profile=await call('/api/characters/'+peter.id);assert.equal(profile.canon.id,initial.id);assert.equal(profile.canon.appearance,'User-approved physique');assert.equal((await call('/api/media?character='+peter.id)).total,1);
     assert.equal((await request('/api/media/'+image.id,{character_ids:[attila.id]},'PUT')).status,400);
     const next=await approveCanon(call,peter.id,{appearance:initial.appearance,references:[],reason:'Remove reference explicitly'});assert.equal(next.id,initial.id);assert.equal(next.parent_id,initial.parent_id);
@@ -67,7 +68,7 @@ test('one-click folder sorting reuses characters, preserves shared assignments, 
     const result=await call('/api/sort-folders',{folders:['Attila','Dezső']});assert.equal(result.results[0].character_id,attila.id);assert.equal(result.results.reduce((s,r)=>s+r.added,0),4);
     assert.equal((await call('/api/media/'+one.id)).characters.length,2);assert.equal((await call('/api/state')).stats.inbox,4);assert.equal((await call('/api/characters/'+attila.id)).canon,null);
     assert.equal((await call('/api/sort-folders',{folders:['Attila','Dezső']})).results.reduce((s,r)=>s+r.added,0),0);
-    await call('/api/characters/'+attila.id,{...attila,name:'Attila renamed'},'PUT');await fs.writeFile(path.join(root,'Attila renamed','new.png'),'new fixture');await call('/api/scan',{});
+    await renameFixture(app,attila.id,'Attila renamed');await fs.writeFile(path.join(root,'Attila renamed','new.png'),'new fixture');await call('/api/scan',{});
     const repeated=await call('/api/sort-folders',{folders:['Attila renamed']});assert.equal(repeated.results[0].character_id,attila.id);assert.equal(repeated.results[0].added,1);assert.equal((await call('/api/state')).characters.length,3);
     const backup=await call('/api/export');await app.close();await start(path.join(temp,'restored'));await call('/api/restore',backup);assert.equal((await call('/api/sort-folders',{folders:['Attila renamed']})).results[0].character_id,attila.id);
     const bad=await fetch(base+'/api/sort-folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folders:['Dezső','not a folder']})});assert.equal(bad.status,409);

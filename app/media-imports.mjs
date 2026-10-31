@@ -90,6 +90,7 @@ export function installMediaImports({db,root,dataDir,one,all,run,transaction,con
     const s=session(id,true);if(!validKey(slot))throw problem('INVALID_ARGUMENT','Reuse a stable 8–128 character slot key for this file.');const selectedName=filename(name);
     if(expectedSha256!==undefined&&!/^[a-f0-9]{64}$/.test(expectedSha256))throw problem('INVALID_ARGUMENT','Expected SHA-256 must be lowercase hexadecimal.');
     if(processing||isBusy())throw problem('BUSY','Another import or file operation is running. Retry this same import and slot.',409);
+    if(one("SELECT 1 FROM media_import_items WHERE import_id=? AND slot_key=? AND status='erased'",id,slot))throw problem('MEDIA_ERASED','This image was permanently deleted. Use a new import for an explicit new upload.',410);
     slotAllowed(id,slot);
     processing=true;let temp,handle;
     const timer=setTimeout(()=>stream.destroy?.(problem('UPLOAD_TIMEOUT','The upload timed out.',408)),60000);timer.unref();

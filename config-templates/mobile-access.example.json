@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "origin": "https://example.ts.net",
+  "login": "creator@example.invalid",
+  "port": 4318
+}

@@ -1,5 +1,7 @@
 # Living Universe
 
+2026-10-31 source checkpoint: see [PRE_CLOUD_MIGRATION.md](docs/PRE_CLOUD_MIGRATION.md) for pinned development-source snapshots, blank reconstruction templates, test results and Windows/Linux limitations. No server migration has been performed.
+
 ## Mentés és helyreállítás
 
 A közös alkalmazás- és ChatGPT/Grok-csatlakozóforrás a GitHub `Palor94/LivingUniverse` repository `main` ágán található. A mentési egységek, az egykattintásos friss mentés és az elkülönített helyreállítás belépőpontja: **[RECOVERY.md](RECOVERY.md)**. A privát adatbázis, helyszíntervek, helyi fájl-visszaállítási állományok és titkosított beállítások külön, dátumozott OneDrive-mentést kapnak; az eredeti médiatár a meglévő OneDrive-gyökérben marad.
@@ -206,3 +208,16 @@ az update_profile_template trusted módban menti az explicit kért mezőmódosí
 bővítést vagy átrendezést. Verzióellenőrzés, ismétlésvédelem és előzmény védi;
 a meglévő karakterértékek és kánon változatlanok. Részletek:
 [Közös profilsablon](docs/GHOST_PROFILE.md).
+
+## Character-specific reference crops
+
+Shared JPEG/PNG images now support separate face/body/detail/general crop drafts for every assigned character. On the authenticated admin crop UI, Save selection atomically adds and approves a new reference, preserving originals and every prior reference. Attributed revision history supports undo; MCP proposals retain their separate human review. See [usage and API](docs/CHARACTER_REFERENCE_CROPS.md).
+
+
+## Teljes névváltoztatás a pluginból
+
+A `rename_character` a stabil ID megtartásával együtt módosítja az elsődleges nevet,
+az egyértelmű szöveges hivatkozásokat és a OneDrive-karaktermappát. Trusted módban
+a kifejezett átnevezési kérés elég; `preview_only:true` csak előnézet. Mentés,
+audit, hibahelyreállítás és visszavonás egy szolgáltatásban.
+[Részletek](docs/COMPLETE_CHARACTER_RENAME.md).

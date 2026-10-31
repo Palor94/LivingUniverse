@@ -1,3 +1,4 @@
+import {renameFixture} from './complete-rename-fixture.mjs';
 import {approveCanon} from './canon-client.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +27,7 @@ test('organized scan separates character folders and excludes backups, imports, 
 }));
 test('organized character creation, rename and physical move preserve IDs and canonical hashes',()=>fixture(async({root,app,call,request})=>{
  const id=randomUUID();await app.folderSync.createCharacterWithFolder(id,'Ádám');await fs.writeFile(path.join(root,'10_CHARACTERS','Ádám','face.png'),png);await call('/api/scan',{});const m=app.db.prepare('SELECT * FROM media').get();app.db.prepare('INSERT INTO depictions VALUES(?,?)').run(m.id,id);
- const c=await approveCanon(call,id,{appearance:'Approved fixture',references:[{media_id:m.id,role:'face'}]});await call('/api/characters/'+id+'/profile-field',{field:'name',value:'Béla'});const after=await call('/api/media/'+m.id);assert.equal(after.relative_path,path.join('10_CHARACTERS','Béla','face.png'));assert.equal((await call('/api/characters/'+id)).canon.id,c.id);assert.equal((await call('/api/characters/'+id+'/integrity',{})).results[0].status,'unchanged');
+ const c=await approveCanon(call,id,{appearance:'Approved fixture',references:[{media_id:m.id,role:'face'}]});await renameFixture(app,id,'Béla');const after=await call('/api/media/'+m.id);assert.equal(after.relative_path,path.join('10_CHARACTERS','Béla','face.png'));assert.equal((await call('/api/characters/'+id)).canon.id,c.id);assert.equal((await call('/api/characters/'+id+'/integrity',{})).results[0].status,'unchanged');
  await fs.mkdir(path.join(root,'20_SHARED_MEDIA','Unassigned'),{recursive:true});await fs.writeFile(path.join(root,'20_SHARED_MEDIA','Unassigned','new.png'),png);await call('/api/scan',{});const fresh=app.db.prepare('SELECT * FROM media WHERE id<>?').get(m.id);const p=await call('/api/media/'+fresh.id+'/move/preview',{folder:'Béla'});assert.equal(p.to,path.join('10_CHARACTERS','Béla','new.png'));await call('/api/media/'+fresh.id+'/move',{folder:'Béla',from_path:p.from});assert.equal((await call('/api/scan',{})).added,0);
  assert.equal((await request('/api/media/'+fresh.id+'/move/preview',{folder:'../00_SYSTEM'})).status,400);
 }));

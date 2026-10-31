@@ -56,3 +56,14 @@
 .template-field-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;border-bottom:1px solid #465058;padding:12px 0}.template-field-row input{width:100%;box-sizing:border-box}.template-field-row small{grid-column:1/-1;color:#a9acac}#template-fields-form fieldset{padding:20px;border:1px solid #465058;border-radius:10px}#structured-profile>.panel{margin:16px 0}#structured-profile details>summary{cursor:pointer}#structured-profile textarea{width:100%;box-sizing:border-box}#structured-profile #ghost-form fieldset{min-width:0}@media(max-width:600px){.template-field-row{grid-template-columns:1fr}}
 
 .profile-overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}.profile-overview-grid>section{padding:16px;border:1px solid #465058;border-radius:10px;min-width:0}.profile-overview-grid h3{margin:0 0 10px;font-size:17px}.profile-overview-grid p{font-size:14px;line-height:1.65;overflow-wrap:anywhere;margin:10px 0}.profile-overview-grid small{display:block;color:#b6ac97;font-size:11px}.profile-overview{margin-bottom:24px}.profile-overview>p{color:#a9acac}
+
+/* Persistent, explicitly destructive controls for one selected image. */
+.topbar #permanent-delete {flex:none;white-space:nowrap;margin-left:12px}
+.viewer-sort-nav:has(#viewer-permanent-delete) {position:sticky;top:0;z-index:5;background:var(--panel,#191a1e);flex-wrap:wrap}
+#permanent-delete:disabled,#library-permanent-delete:disabled,#viewer-permanent-delete:disabled {opacity:.45;cursor:not-allowed}
+
+.topbar:has(#permanent-delete) {position:sticky;top:0;z-index:10;background:var(--bg,#0f1116)}
+
+.name-suggestion-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.4rem;align-items:center}
+.name-suggestion-row input{min-width:0}
+.name-suggestion-row button{padding:.55rem .65rem}

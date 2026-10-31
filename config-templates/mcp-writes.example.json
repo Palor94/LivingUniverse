@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "approval_mode": "review",
+  "token": "",
+  "database_id": "",
+  "origin": "https://example.ts.net",
+  "login": "creator@example.invalid",
+  "app_url": "http://127.0.0.1:4317"
+}

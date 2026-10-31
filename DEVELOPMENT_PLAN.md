@@ -66,3 +66,5 @@ Reference retention update (2026-10-29): explicit reference removal now scrubs h
 2026-10-29 user correction implemented: separate non-playable template character; remove per-character Ghost tab; integrate shared fields, accepted values and download/upload controls into regular desktop/mobile profiles. Template additions appear empty for all characters.
 
 2026-10-30: Shared anatomy/appearance_detail field guidance now covers the supplied A–D checklist; full-generation package version 2 exports the current shared guidance. Existing field values and canon remain unchanged.
+
+2026-10-31: authenticated admin one-click crop saving atomically adds an approved, independently identified reference and reversible attributed revision history. Multiple approved crops per source/character flow into plugin reads and generation inputs without replacing prior references.

@@ -1,3 +1,4 @@
+import {raceValue} from './character-creation.mjs';
 import {catalogueFolder,trashFolder,mediaDestinationAllowed} from './storage-layout.mjs';
 import {promises as fs,constants} from 'node:fs';
 import path from 'node:path';
@@ -13,6 +14,8 @@ export const extraTables={
   media_import_metadata:['import_id','title','description','reference_candidate'],
   media_uploads:['id','import_id','slot_key','request_hash','filename','content_type','size','sha256','received_bytes','status','error_code','created_at','expires_at'],
   media_upload_chunks:['upload_id','offset','size','sha256'],
+  character_crop_approvals:['id','character_id','media_id','role','reference_id','revision_id','operation','undo_of','request_hash','payload_json','actor','created_at'],
+  character_reference_crops:['media_id','character_id','role','crop_json','source_sha256','version','updated_at'],
   media_image_edits:['id','media_id','status','original_sha256','cropped_sha256','crop_json','original_size','original_mtime','created_at','restored_at'],
   mcp_reference_changes:['id','request_key','request_hash','change_hash','character_id','payload_json','status','created_at','expires_at','approved_by','approved_at','applied_at','result_json'],
   mcp_changes:['id','request_key','request_hash','change_hash','operation','payload_json','status','created_at','expires_at','approved_by','approved_at','applied_at','result_json'],
@@ -86,7 +89,7 @@ export function installEnhancements(ctx){
   async function handle({p,body,req,json}){
     let match;
     if((match=p.match(/^\/api\/characters\/([^/]+)\/profile-field$/))&&req.method==='POST'){
-      const current=character(match[1]);if(!['name','aliases','biography','personality','sexuality','speech_style','appearance','notes'].includes(body.field))throw fail('Unknown profile field.');const value=String(body.value??'').slice(0,body.field==='name'?200:30000);if(body.field==='name'&&!value.trim())throw fail('A character needs a name.');if(Object.hasOwn(body,'expected')&&current[body.field]!==body.expected&&current[body.field]!==value)throw fail('This field changed on another device. Your text is still in the editor; compare it with the latest saved version before retrying.',409);run(`UPDATE characters SET ${body.field}=? WHERE id=?`,value,match[1]);json({ok:true});return true;
+      const current=character(match[1]);if(!['name','aliases','biography','personality','sexuality','speech_style','appearance','notes','race'].includes(body.field))throw fail('Unknown profile field.');const value=body.field==='race'?raceValue(body.value):String(body.value??'').slice(0,body.field==='name'?200:30000);if(body.field==='name'&&!value.trim())throw fail('A character needs a name.');if(Object.hasOwn(body,'expected')&&current[body.field]!==body.expected&&current[body.field]!==value)throw fail('This field changed on another device. Your text is still in the editor; compare it with the latest saved version before retrying.',409);run(`UPDATE characters SET ${body.field}=? WHERE id=?`,value,match[1]);json({ok:true});return true;
     }
     if(p==='/api/protagonist'&&req.method==='GET'){json({character:protagonist()});return true;}
     if((match=p.match(/^\/api\/characters\/([^/]+)\/cover-crop$/))&&req.method==='POST'){

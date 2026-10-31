@@ -1,0 +1,2 @@
+-- Restore a complete compatible backup to revert approval history and canon together.
+-- Intentionally do not discard attributed approval/undo history independently.

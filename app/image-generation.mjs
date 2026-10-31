@@ -3,6 +3,8 @@ import path from 'node:path';
 import {Readable} from 'node:stream';
 import {randomUUID,createHash} from 'node:crypto';
 import {backup,DatabaseSync} from 'node:sqlite';
+import {referenceCrop,sameCrop,referenceKey} from './reference-crop.mjs';
+import {referenceImage} from '../mcp/images.mjs';
 import {cloudAvailability} from './duplicates.mjs';
 import {validateMedia} from './media-imports.mjs';
 import {configuredImageProviders,imageProviderSpecs,generateProviderImage,GenerationError} from './image-providers.mjs';
@@ -20,7 +22,7 @@ export async function backupBeforeImageGeneration(db,dataDir){
   const copy=new DatabaseSync(file,{readOnly:true});try{if(copy.prepare('PRAGMA integrity_check').get().integrity_check!=='ok'||copy.prepare('PRAGMA foreign_key_check').all().length)fail('BACKUP_FAILED','The generation migration backup could not be verified.',500);}finally{copy.close();}return file;
 }
 
-export function installImageGeneration({db,root,dataDir,one,all,run,transaction,mediaImports,writeConfig,config={},isBusy=()=>false,clock=()=>Date.now(),availability=cloudAvailability,decodeImage,generate=generateProviderImage,env=process.env}){
+export function installImageGeneration({db,root,dataDir,one,all,run,transaction,mediaImports,characterPolicy,writeConfig,config={},isBusy=()=>false,clock=()=>Date.now(),availability=cloudAvailability,decodeImage,generate=generateProviderImage,env=process.env}){
   db.exec(readFileSync(new URL('./migrations/018-image-generation.up.sql',import.meta.url),'utf8'));
   const active=new Map();let preparing=false;
   const now=()=>new Date(clock()).toISOString();
@@ -32,11 +34,12 @@ export function installImageGeneration({db,root,dataDir,one,all,run,transaction,
   function get(rid){enabled();id(rid);const row=one('SELECT * FROM image_generation_runs WHERE id=?',rid);if(!row)fail('NOT_FOUND','Generation run not found.',404);return row;}
   function view(rid){const row=get(rid),output=one('SELECT * FROM image_generation_outputs WHERE run_id=?',rid);return {run_id:row.id,status:row.status,manifest:JSON.parse(row.manifest_json),manifest_hash:row.manifest_hash,created_at:row.created_at,expires_at:row.expires_at,approval_url:writeConfig.origin+'/image-generation/'+row.id,approved_by:row.approved_by,approved_at:row.approved_at,error_code:row.error_code,output:output?{media_id:output.media_id,sha256:output.sha256,size:output.size,receipt:JSON.parse(output.receipt_json),active:!!one('SELECT 1 FROM active_media WHERE id=?',output.media_id)}:null,canon_approved:false,events:all('SELECT event,actor,detail,created_at FROM image_generation_events WHERE run_id=? ORDER BY rowid',rid)};}
   function currentBinding(binding){
+    characterPolicy?.assertGeneration(binding.character_id);
     const c=one('SELECT c.id,c.name FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE c.id=? AND u.merged_into IS NULL',id(binding.character_id));
     const canon=one('SELECT * FROM canon WHERE character_id=? ORDER BY rowid DESC LIMIT 1',binding.character_id);
     if(!c||!canon||canon.id!==binding.revision_id)fail('STALE_CANON','An approved character revision changed or is unavailable. Prepare and review a fresh plan.',409);
     let refs;try{refs=JSON.parse(canon.references_json);}catch{fail('CANON_INVALID','Review the approved references locally.',409);}
-    for(const selected of binding.references)if(!refs.some(r=>r.media_id===selected.media_id&&r.sha256===selected.sha256&&r.role===selected.role))fail('STALE_REFERENCE','A selected reference is no longer approved.',409);
+    for(const selected of binding.references)if(!refs.some(r=>r.media_id===selected.media_id&&(!selected.reference_id||r.reference_id===selected.reference_id)&&r.sha256===selected.sha256&&r.role===selected.role&&sameCrop(r.crop,selected.crop)))fail('STALE_REFERENCE','A selected reference is no longer approved.',409);
     return {c,canon};
   }
   async function source(ref){
@@ -50,9 +53,11 @@ export function installImageGeneration({db,root,dataDir,one,all,run,transaction,
     if(!relative||relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))fail('UNSAFE_REFERENCE','Reference storage escaped the media root.',403);
     if(await availability(file)!=='local')fail('REFERENCE_OFFLINE','Make the selected reference available locally before preparing generation.',409);
     const handle=await fs.open(file,constants.O_RDONLY|(constants.O_NOFOLLOW||0));
-    try{const stat=await handle.stat();if(!stat.isFile()||stat.size>20*1024*1024)fail('REFERENCE_LIMIT','Each reference must be a regular image up to 20 MiB.');const bytes=await handle.readFile();if(bytes.length>20*1024*1024||hash(bytes)!==ref.sha256)fail('REFERENCE_CHANGED','Reference bytes differ from approved canon. No generation was sent.',409);const type=await validateMedia(bytes,{decodeImage});if(type.kind!=='image')fail('REFERENCE_FORMAT','Only approved PNG/JPEG reference originals are supported.');return {bytes,contentType:type.contentType};}finally{await handle.close();}
+    try{const stat=await handle.stat();if(!stat.isFile()||stat.size>20*1024*1024)fail('REFERENCE_LIMIT','Each reference must be a regular image up to 20 MiB.');const bytes=await handle.readFile();if(bytes.length>20*1024*1024||hash(bytes)!==ref.sha256)fail('REFERENCE_CHANGED','Reference bytes differ from approved canon. No generation was sent.',409);const type=await validateMedia(bytes,{decodeImage});if(type.kind!=='image')fail('REFERENCE_FORMAT','Only approved PNG/JPEG reference originals are supported.');if(ref.crop){const image=await referenceImage(bytes,referenceCrop(ref.crop));return {bytes:Buffer.from(image.data,'base64'),contentType:image.mimeType};}return {bytes,contentType:type.contentType};}finally{await handle.close();}
   }
   async function validate(manifest){
+    characterPolicy?.assertPrompt(manifest.prompt);
+    if(characterPolicy?.enabled&&manifest.character_policy?.reject_female_characters!==true)fail('CHARACTER_POLICY_CHANGED','Prepare and approve a fresh plan under the current character policy.',409);
     const references=[];let size=0;
     for(const b of manifest.characters){currentBinding(b);for(const ref of b.references){const input=await source(ref);size+=input.bytes.length;if(size>20*1024*1024)fail('REFERENCE_LIMIT','Combined reference originals must be at most 20 MiB.');references.push(input);}}
     // Recheck after asynchronous file reads before approval/submission.
@@ -66,6 +71,7 @@ export function installImageGeneration({db,root,dataDir,one,all,run,transaction,
     if(typeof args.prompt!=='string'||!args.prompt.trim()||args.prompt.length>12000)fail('INVALID_ARGUMENT','Use a scene prompt of 1–12000 characters.');
     if(!Array.isArray(args.characters)||!args.characters.length||args.characters.length>5)fail('INVALID_ARGUMENT','Select 1–5 distinct character bindings.');
     const size=args.size??'1024x1024';if(!['1024x1024','1536x1024','1024x1536'].includes(size))fail('INVALID_ARGUMENT','Unsupported output size.');
+    characterPolicy?.assertPrompt(args.prompt);
     const requestHash=digest({...args,size}),prior=one('SELECT * FROM image_generation_runs WHERE request_key=?',args.request_key);
     if(prior){if(prior.request_hash!==requestHash)fail('IDEMPOTENCY_CONFLICT','This request key belongs to another plan.',409);return view(prior.id);}
     if(preparing||active.size||isBusy())fail('BUSY','Another generation or file operation is active. Retry this request key.',409);
@@ -79,12 +85,13 @@ export function installImageGeneration({db,root,dataDir,one,all,run,transaction,
         if(seen.has(b.character_id))fail('INVALID_ARGUMENT','Each character needs one distinct binding.');seen.add(b.character_id);
         if(!Array.isArray(b.reference_ids)||!b.reference_ids.length||b.reference_ids.length>16||new Set(b.reference_ids).size!==b.reference_ids.length)fail('INVALID_ARGUMENT','Select 1–16 distinct approved reference IDs for each character.');
         const {c,canon}=currentBinding({...b,references:[]}),refs=JSON.parse(canon.references_json);
-        return {slot:slot+1,character_id:c.id,name:c.name,revision_id:canon.id,appearance:canon.appearance,references:b.reference_ids.map(mid=>{id(mid);const r=refs.find(r=>r.media_id===mid);if(!r||!/^[a-f0-9]{64}$/.test(r.sha256)||!['face','body','detail','general'].includes(r.role))fail('REFERENCE_NOT_APPROVED','Use fingerprinted references from the exact approved revision.');return {input_index:++index,media_id:mid,role:r.role,sha256:r.sha256};})};
+        return {slot:slot+1,character_id:c.id,name:c.name,revision_id:canon.id,appearance:canon.appearance,references:b.reference_ids.map(mid=>{id(mid);const r=refs.find(r=>referenceKey(r)===mid)||((refs.filter(r=>r.media_id===mid).length===1)?refs.find(r=>r.media_id===mid):null);if(!r||!/^[a-f0-9]{64}$/.test(r.sha256)||!['face','body','detail','general'].includes(r.role))fail('REFERENCE_NOT_APPROVED','Use fingerprinted references from the exact approved revision.');return {input_index:++index,media_id:r.media_id,...(r.reference_id?{reference_id:r.reference_id}:{}),role:r.role,sha256:r.sha256,...(r.crop?{crop:referenceCrop(r.crop)}:{})};})};
       });
       if(index>provider.max_references)fail('REFERENCE_LIMIT','This provider accepts at most '+provider.max_references+' reference images.');
-      const providerPrompt='Create one image of the selected fictional adults. Keep facial identity and body proportions consistent with each character\'s references. Character-slot bindings are descriptive; do not mix identities.\n'+bindings.map(b=>'Character slot '+b.slot+': '+JSON.stringify({name:b.name,approved_appearance:b.appearance,reference_inputs:b.references.map(r=>({image:r.input_index,role:r.role}))})).join('\n')+'\nScene requested by the creator:\n'+args.prompt;
+      const policyPrompt=characterPolicy?.enabled?'Only non-female characters may appear. Do not generate women or female characters.\n':'';
+      const providerPrompt=policyPrompt+'Create one image of the selected fictional adults. Keep facial identity and body proportions consistent with each character\'s references. Character-slot bindings are descriptive; do not mix identities.\n'+bindings.map(b=>'Character slot '+b.slot+': '+JSON.stringify({name:b.name,approved_appearance:b.appearance,reference_inputs:b.references.map(r=>({image:r.input_index,role:r.role}))})).join('\n')+'\nScene requested by the creator:\n'+args.prompt;
       if(providerPrompt.length>30000)fail('PROMPT_LIMIT','Selected approved appearance plus scene exceeds the provider prompt limit.');
-      const manifest={schema_version:1,provider:args.provider,model:provider.model,task:'reference_conditioned_edit',prompt:args.prompt,provider_prompt:providerPrompt,characters:bindings,size,n:1,estimated_cost_usd:provider.estimated_cost_usd,actual_cost_usd:null,regional_binding:false,safety_identifier:hash(writeConfig.login),identity_guaranteed:false};
+      const manifest={schema_version:1,...(characterPolicy?.description?{character_policy:characterPolicy.description}:{}),provider:args.provider,model:provider.model,task:'reference_conditioned_edit',prompt:args.prompt,provider_prompt:providerPrompt,characters:bindings,size,n:1,estimated_cost_usd:provider.estimated_cost_usd,actual_cost_usd:null,regional_binding:false,safety_identifier:hash(writeConfig.login),identity_guaranteed:false};
       if(args.provider==='sogni')Object.assign(manifest,{model_label:provider.model_label,loras:provider.loras,lora_strengths:provider.lora_strengths});
       await validate(manifest);const rid=randomUUID();
       transaction(()=>{run("INSERT INTO image_generation_runs VALUES(?,?,?,?,?,'pending',?,?,NULL,NULL,NULL)",rid,args.request_key,requestHash,JSON.stringify(manifest),digest(manifest),now(),new Date(clock()+86400000).toISOString());event(rid,'prepared');});return view(rid);
@@ -150,5 +157,6 @@ export function installImageGeneration({db,root,dataDir,one,all,run,transaction,
     if(hide&&one("SELECT 1 FROM canon c WHERE c.rowid=(SELECT MAX(c2.rowid) FROM canon c2 WHERE c2.character_id=c.character_id) AND EXISTS(SELECT 1 FROM json_each(c.references_json) WHERE json_extract(value,'$.media_id')=?)",m.id))fail('CANON_REFERENCE_PROTECTED','Retire this approved reference explicitly before withdrawing its media.',409);
     transaction(()=>{if(hide){run('INSERT OR IGNORE INTO media_hidden VALUES(?,?,0,?)',m.id,m.relative_path,now());run('UPDATE characters SET cover_id=NULL WHERE cover_id=?',m.id);}run("UPDATE image_generation_runs SET status='withdrawn' WHERE id=?",rid);event(rid,hide?'withdrawn_media_to_catalogue_trash':'withdrawn_shared_media_retained',actor);});return view(rid);
   }
-  return {capabilities,prepare,view,decide,execute,withdraw,isBusy:()=>preparing||active.size>0,settle:()=>Promise.allSettled([...active.values()])};
+  async function previewReference(rid,cid,mid,referenceId){const manifest=view(rid).manifest,binding=manifest.characters.find(b=>b.character_id===cid),ref=binding?.references.find(r=>r.media_id===mid&&(!referenceId||referenceKey(r)===referenceId));if(!ref)fail('NOT_FOUND','Reference not found in this plan.',404);currentBinding(binding);const input=await source(ref);currentBinding(binding);return {bytes:input.bytes,mimeType:input.contentType,sha256:hash(input.bytes)};}
+  return {capabilities,prepare,view,decide,execute,withdraw,previewReference,isBusy:()=>preparing||active.size>0,settle:()=>Promise.allSettled([...active.values()])};
 }

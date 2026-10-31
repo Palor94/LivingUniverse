@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "public_origin": "https://example.ts.net:8443",
+  "private_origin": "https://example.ts.net",
+  "port": 4320,
+  "redirect_hosts": [
+    "grok.com",
+    "www.cursor.com"
+  ],
+  "state_file": "/srv/living-universe/data/grok-runtime/oauth-state.json",
+  "control_token": ""
+}

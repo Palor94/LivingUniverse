@@ -48,10 +48,10 @@ export function validateEntry(e,f){
 }
 // Additive, portable records use the existing backed-up settings table. No character
 // columns, media, relationships or appearance-canon records are rewritten.
-export function installGhostProfiles({one,run,transaction}){
+export function installGhostProfiles({one,run,transaction,characterPolicy}){
   const read=(key,fallback)=>{const row=one('SELECT value FROM application_settings WHERE key=?',key);return row?JSON.parse(row.value):structuredClone(fallback);};
   const write=(key,value)=>run('INSERT INTO application_settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',key,JSON.stringify(value));
-  const template=()=>({...read('ghost:template',defaultTemplate),character:templateCharacter});
+  const template=()=>({...read('ghost:template',defaultTemplate),character:templateCharacter,...(characterPolicy?.description?{character_policy:characterPolicy.description}:{})});
   function get(cid){const c=one('SELECT * FROM characters WHERE id=?',cid);if(!c)throw error('Nincs ilyen karakter.',404);const record=read('ghost:character:'+cid,{version:0,values:{},history:[],proposals:[]});return {...record,template:template(),character_id:cid,profile_version:profileVersion(c),legacy:Object.fromEntries(['biography','appearance','personality','speech_style','sexuality'].map(k=>[k,c[k]||'']))};}
   function persistTemplate(body,actor='local-creator'){
     const old=template();if(body.expected_version!==old.version)throw error('A sablon közben megváltozott.',409);
@@ -77,6 +77,7 @@ export function installGhostProfiles({one,run,transaction}){
     if(body.from_legacy===true){values={};for(const f of current.template.fields)if(f.source&&current.legacy[f.source]&&!current.values[f.id])values[f.id]={value:current.legacy[f.source],interpretation:'Változtatás nélkül átvett meglévő munkaszöveg.',kind:'hypothesis',source:'Meglévő profil: '+f.source,visibility:'creator'};}
     if(!object(values)||!Object.keys(values).length||Object.keys(values).length>100||typeof body.model!=='string'||!body.model.trim()||body.model.length>200)throw error('Adj meg javaslatokat és forrásmodell-nevet.');
     for(const [id,e] of Object.entries(values)){const f=current.template.fields.find(f=>f.id===id);if(!f)throw error('Ismeretlen sablonmező.');validateEntry(e,f);}
+    characterPolicy?.assertValues(values,cid,{requireKnown:body.from_legacy!==true});
     const duplicate=current.proposals.find(p=>p.status==='pending'&&p.base_version===current.version&&p.template_version===current.template.version&&p.profile_version===current.profile_version&&p.model===body.model&&digest(p.values)===digest(values));if(duplicate)return duplicate;
     const p={id:randomUUID(),base_version:current.version,template_version:current.template.version,profile_version:current.profile_version,values,model:body.model,status:'pending',at:new Date().toISOString()};
     const {template:t,character_id,profile_version,legacy,...record}=current;record.proposals.push(p);write('ghost:character:'+cid,record);return p;});}
@@ -86,6 +87,7 @@ export function installGhostProfiles({one,run,transaction}){
       if(body.expected_version!==current.version||p.base_version!==current.version||p.template_version!==t.version||p.profile_version!==profile_version)throw error('A javaslat alapjául szolgáló adat megváltozott. Készíts friss javaslatot.',409);
       if(!object(body.values)||!Object.keys(body.values).length)throw error('Válassz legalább egy mezőt.');
       for(const [id,e] of Object.entries(body.values)){if(!Object.hasOwn(p.values,id))throw error('Csak a javasolt mezők fogadhatók el.');validateEntry(e,t.fields.find(f=>f.id===id));}
+      characterPolicy?.assertValues(body.values,cid,{requireKnown:true});
       record.history.push({version:current.version,values:current.values,actor,proposal_id:pid,at:new Date().toISOString()});record.values={...record.values,...body.values};record.version++;p.accepted_values=body.values;
     }
     p.status=body.decision==='accept'?'accepted':'rejected';p.decided_at=new Date().toISOString();p.actor=actor;write('ghost:character:'+cid,record);return get(cid);});}

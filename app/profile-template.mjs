@@ -12,7 +12,7 @@ export function readProfileTemplate(template,args={}){
   if(field_ids!==undefined&&(!Array.isArray(field_ids)||!field_ids.length||field_ids.length>20||field_ids.some(v=>!id(v))||new Set(field_ids).size!==field_ids.length))fail('INVALID_ARGUMENT','Select 1–20 distinct field IDs.');
   if(field_ids?.some(id=>!template.fields.some(f=>f.id===id)))fail('UNKNOWN_FIELD','A selected field is not in the current shared template.',404);
   const selected=field_ids?template.fields.filter(f=>field_ids.includes(f.id)):template.fields;
-  return {template_version:template.version,scope:'shared_all_characters',field_count:template.fields.length,
+  return {template_version:template.version,scope:'shared_all_characters',...(template.character_policy?{character_policy:template.character_policy}:{}),field_count:template.fields.length,
     field_index:template.fields.map(({id,label,group,type,max})=>({id,label,group,type,...(max===undefined?{}:{max})})),
     fields:structuredClone(selected.slice(offset,offset+limit)),next_offset:offset+limit<selected.length?offset+limit:null,
     selected_count:selected.length,editing:{existing_fields:['label','group','guidance'],add_fields:true,reorder:true,remove_fields:false,change_existing_id_type_scale_source:false,character_values_unchanged:true}};

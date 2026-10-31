@@ -22,10 +22,19 @@ try {
                 if ($rotations.ContainsKey([int]$orientation)) { $image.RotateFlip([Drawing.RotateFlipType]$rotations[[int]$orientation]) }
             } catch { }
         }
+        $sourceX = 0; $sourceY = 0; $sourceW = $image.Width; $sourceH = $image.Height
+        if ($null -ne $request.crop) {
+            $c = $request.crop
+            if ($c.x -lt 0 -or $c.y -lt 0 -or $c.w -lt .01 -or $c.h -lt .01 -or ($c.x+$c.w) -gt 1 -or ($c.y+$c.h) -gt 1) { throw 'Invalid crop' }
+            $sourceX = [int][Math]::Floor($c.x*$image.Width+.5)
+            $sourceY = [int][Math]::Floor($c.y*$image.Height+.5)
+            $sourceW = [Math]::Max(1,[int][Math]::Floor(($c.x+$c.w)*$image.Width+.5)-$sourceX)
+            $sourceH = [Math]::Max(1,[int][Math]::Floor(($c.y+$c.h)*$image.Height+.5)-$sourceY)
+        }
         $codec = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object MimeType -eq 'image/jpeg'
         while ($edge -ge 48) {
-            $scale = [Math]::Min(1.0, $edge / [double][Math]::Max($image.Width, $image.Height))
-            $bitmap = [Drawing.Bitmap]::new([Math]::Max(1,[int]($image.Width*$scale)), [Math]::Max(1,[int]($image.Height*$scale)))
+            $scale = [Math]::Min(1.0, $edge / [double][Math]::Max($sourceW, $sourceH))
+            $bitmap = [Drawing.Bitmap]::new([Math]::Max(1,[int]($sourceW*$scale)), [Math]::Max(1,[int]($sourceH*$scale)))
             try {
                 $graphics = [Drawing.Graphics]::FromImage($bitmap)
                 try {
@@ -34,7 +43,7 @@ try {
                         $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
                         $graphics.CompositingQuality = [Drawing.Drawing2D.CompositingQuality]::HighQuality
                     }
-                    $graphics.Clear([Drawing.Color]::White); $graphics.DrawImage($image,0,0,$bitmap.Width,$bitmap.Height)
+                    $graphics.Clear([Drawing.Color]::White); $graphics.DrawImage($image,[Drawing.Rectangle]::new(0,0,$bitmap.Width,$bitmap.Height),$sourceX,$sourceY,$sourceW,$sourceH,[Drawing.GraphicsUnit]::Pixel)
                 } finally { $graphics.Dispose() }
                 foreach ($quality in $qualities) {
                     $output = [IO.MemoryStream]::new()

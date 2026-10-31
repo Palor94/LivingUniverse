@@ -3,13 +3,13 @@ const roles={face:'Face & eyes',body:'Body & proportions',detail:'Distinctive de
 let session,change,busy=false;
 async function api(route,body){const r=await fetch(route,{method:body?'PUT':'GET',cache:'no-store',headers:body?{'Content-Type':'application/json','X-LU-CSRF':session.csrf}:{},body:body?JSON.stringify(body):undefined});const value=await r.json();if(!r.ok)throw Error(value.error||'Unable to review this reference selection.');return value;}
 function text(tag,value){const e=document.createElement(tag);e.textContent=value;return e;}
-function references(title,items){const section=text('section','');section.className='field';section.append(text('h2',title));if(!items.length){section.append(text('p','No approved references.'));$('#comparison').append(section);return;}const grid=text('div','');grid.className='media-grid';for(const ref of items){const card=text('article','');card.className='panel';const img=document.createElement('img');img.src=`/api/mcp-reference-preview/${id}/${ref.media_id}`;img.alt=`${roles[ref.role]||'Reference'} preview`;img.loading='lazy';img.style.width='100%';img.style.maxHeight='360px';img.style.objectFit='contain';card.append(img,text('strong',roles[ref.role]||'Reference'),text('small',ref.media_id));grid.append(card);}section.append(grid);$('#comparison').append(section);}
+function references(title,items,side){const section=text('section','');section.className='field';section.append(text('h2',title));if(!items.length){section.append(text('p','No approved references.'));$('#comparison').append(section);return;}const grid=text('div','');grid.className='media-grid';for(const ref of items){const card=text('article','');card.className='panel';const img=document.createElement('img');img.src=`/api/mcp-reference-preview/${id}/${ref.media_id}?side=${side}${ref.reference_id?'&reference_id='+encodeURIComponent(ref.reference_id):''}`;img.alt=`${roles[ref.role]||'Reference'} preview`;img.loading='lazy';img.style.width='100%';img.style.maxHeight='360px';img.style.objectFit='contain';card.append(img,text('strong',roles[ref.role]||'Reference'),text('small',ref.media_id));grid.append(card);}section.append(grid);$('#comparison').append(section);}
 function render(){
   const saved=change.status==='applied',approved=change.status==='approved',root=$('#comparison');
   root.replaceChildren();root.append(text('h2',change.character_name+' · reference set'));
   if(change.reason)root.append(text('p',change.reason));
-  references(saved?'Before this update':'Currently approved',change.original||[]);
-  references(saved?'Saved reference set':'Proposed selection',change.proposed||[]);
+  references(saved?'Before this update':'Currently approved',change.original||[],'before');
+  references(saved?'Saved reference set':'Proposed selection',change.proposed||[],'after');
   $('#status').textContent=saved
     ?`Saved to catalogue · ${(change.proposed||[]).length} references · Version ${change.result?.revision_id||''}`
     :approved?'Approved, but not saved yet. Use the save button below to finish.'

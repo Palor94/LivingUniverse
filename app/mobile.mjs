@@ -3,7 +3,7 @@ import {randomBytes} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 
 const fields={aliases:1000,biography:30000,personality:30000,sexuality:30000,speech_style:30000,appearance:30000,notes:30000};
-export function createMobileServer({config,all,one,run,transaction,mcpChanges=null,ghostProfiles=null,mediaImports=null,imageGeneration=null,grokConnections=null,referencePreview=null,locationEditor=null,sorting=null,scan=null,scanRunning=()=>false,reconciliation=null,createCharacter=null,isBusy=()=>false}){
+export function createMobileServer({config,all,one,run,transaction,characterCrops=null,desktopOrigin=()=>null,characterRename=null,mcpChanges=null,ghostProfiles=null,mediaImports=null,imageGeneration=null,grokConnections=null,referencePreview=null,locationEditor=null,sorting=null,scan=null,scanRunning=()=>false,reconciliation=null,createCharacter=null,isBusy=()=>false}){
   if(config?.enabled!==true)return null;
   const origin=new URL(config.origin);
   if(origin.protocol!=='https:'||!origin.hostname.endsWith('.ts.net')||origin.port||origin.pathname!=='/'||origin.search||origin.hash||origin.username||origin.password)throw Error('Mobile access requires one exact HTTPS .ts.net origin.');
@@ -21,15 +21,38 @@ export function createMobileServer({config,all,one,run,transaction,mcpChanges=nu
       if(![origin.host,localHost].includes(req.headers.host))throw fail('Untrusted Host.',403);
       if(String(req.headers['tailscale-user-login']||'').toLowerCase()!==login)throw fail('Your Tailscale identity is not authorized.',403);
       const url=new URL(req.url,origin),p=url.pathname;
+      const cropAdminRoute=p.match(/^\/api\/admin\/reference-crops\/([a-f0-9-]{36})\/([a-f0-9-]{36})\/(face|body|detail|general)(?:\/(approve|undo))?$/i);
+      if(p==='/api/admin/reference-crops/session'||cropAdminRoute){
+        if(!characterCrops)throw fail('Administrator crop approval is not enabled.',403);
+        const caller=req.headers.origin,localCreator=desktopOrigin();
+        if(!caller||![origin.origin,localCreator].includes(caller))throw fail('Untrusted administrator Origin.',403);
+        headers['Access-Control-Allow-Origin']=caller;headers.Vary='Origin';
+        if(req.method==='OPTIONS'){
+          if(req.headers['access-control-request-method']!=='PUT'||String(req.headers['access-control-request-headers']||'').toLowerCase().split(',').map(v=>v.trim()).some(v=>!['content-type','x-lu-crop-csrf'].includes(v)))throw fail('Unsupported administrator preflight.',403);
+          res.writeHead(204,{...headers,'Access-Control-Allow-Methods':'GET, PUT','Access-Control-Allow-Headers':'Content-Type, X-LU-Crop-CSRF'});return res.end();
+        }
+        if(p.endsWith('/session')&&req.method==='GET')return json({csrf,actor:login,role:'admin'});
+        if(cropAdminRoute){const [,mid,cid,role,operation]=cropAdminRoute;
+          if(req.method==='GET'&&!operation)return json(await characterCrops.context(mid,cid,role));
+          if(req.method!=='PUT'||!operation)throw fail('Unsupported administrator crop action.',405);
+          if(req.headers['x-lu-crop-csrf']!==csrf)throw fail('Reload the administrator session before saving.',403);
+          if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||''))throw fail('Expected JSON.',415);
+          let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>16384)throw fail('Crop request is too large.',413);raw+=chunk;}let args;try{args=JSON.parse(raw);}catch{throw fail('Invalid JSON.');}
+          if(isBusy())throw fail('A catalogue operation is active. Retry shortly.',409);
+          return json(await characterCrops[operation](mid,cid,role,args,login));
+        }
+        throw fail('Unsupported administrator crop action.',405);
+      }
       if(req.headers.origin&&req.headers.origin!==origin.origin)throw fail('Untrusted Origin.',403);
       const reviewPage=/^\/mcp-change\/[0-9a-f-]{36}$/i.test(p),referenceReview=/^\/mcp-reference\/[0-9a-f-]{36}$/i.test(p);
       const importPage=/^\/media-import\/[0-9a-f-]{36}$/i.test(p),connectPage=/^\/grok-connect\/[0-9a-f]{32}$/i.test(p);
+      const renamePage=p==='/character-rename.html';
       const ghostPage=/^\/ghost-profile\/[0-9a-f-]{36}$/i.test(p);
       const ghostApi=/^\/api\/characters\/[0-9a-f-]{36}\/ghost(?:\/proposals(?:\/[0-9a-f-]{36}\/decision)?)?$/i.test(p);
       const generationPage=/^\/image-generation\/[0-9a-f-]{36}$/i.test(p);
       const previewRoute=p.match(/^\/approved-preview\/([0-9a-f-]{36})\/([0-9a-f-]{36})$/i);
       const originalRoute=/^\/media-original\/([a-fA-F0-9-]{36})$/.exec(p);
-      const entryNavigation=req.method==='GET'&&(p==='/'||p==='/media-imports'||reviewPage||referenceReview||importPage||connectPage||generationPage||ghostPage||previewRoute||originalRoute)&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document';
+      const entryNavigation=req.method==='GET'&&(p==='/'||p==='/media-imports'||reviewPage||referenceReview||importPage||connectPage||generationPage||ghostPage||renamePage||previewRoute||originalRoute)&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document';
       if(req.headers['sec-fetch-site']==='cross-site'&&!entryNavigation)throw fail('Cross-site request blocked.',403);
       if(!['GET','PATCH','PUT'].includes(req.method)&&!(req.method==='POST'&&ghostApi&&ghostProfiles))throw fail('This operation is not available in the mobile editor.',405);
       if(req.method!=='GET'&&imageGeneration?.isBusy()&&!p.startsWith('/api/image-generation/'))throw fail('An approved image generation is running. Retry shortly.',409);
@@ -48,6 +71,14 @@ export function createMobileServer({config,all,one,run,transaction,mcpChanges=nu
         try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw fail('Invalid JSON.');}
         if(!body||Array.isArray(body)||typeof body!=='object')throw fail('Invalid edit.');
         if(isBusy())throw fail('The desktop is organizing folders. Your draft is retained; retry shortly.',409);
+      }
+      if(characterRename){
+        const rename=p.match(/^\/api\/character-renames\/([a-f0-9-]{36})(?:\/(decision|undo))?$/i);
+        if(p==='/api/character-renames'&&req.method==='GET')return json({csrf,history:[]});
+        if(rename&&req.method==='GET'&&!rename[2])return json(characterRename.get({plan_id:rename[1],offset:Number(url.searchParams.get('offset')||0),limit:100},true));
+        if(rename&&req.method==='PUT'&&rename[2]==='decision')return json(await characterRename.decide(rename[1],body,login));
+        if(rename&&req.method==='PUT'&&rename[2]==='undo')return json(await characterRename.prepareUndo({...body,plan_id:rename[1]}));
+        if(req.method==='GET'&&(renamePage||p==='/character-rename.js'||p==='/character-rename.css')){const file=renamePage?'character-rename.html':p.slice(1);const content=await fs.readFile(new URL('./public/'+file,import.meta.url));res.writeHead(200,{...headers,'Content-Type':renamePage?'text/html; charset=utf-8':p.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8'});return res.end(content);}
       }
       if(ghostProfiles){
         const ghost=p.match(/^\/api\/characters\/([0-9a-f-]{36})\/ghost(?:\/proposals(?:\/([0-9a-f-]{36})\/decision)?)?$/i);
@@ -89,7 +120,7 @@ export function createMobileServer({config,all,one,run,transaction,mcpChanges=nu
         if(p==='/api/location-editor'&&req.method==='PUT')return json(locationEditor.create(body));
         const place=p.match(/^\/api\/location-editor\/([^/]+)$/);if(place&&['GET','PUT'].includes(req.method)){let id;try{id=decodeURIComponent(place[1]);}catch{throw fail('Invalid location identifier.');}return json(req.method==='GET'?locationEditor.get(id):locationEditor.save(id,body));}
       }
-      if((previewRoute||originalRoute)&&referencePreview&&req.method==='GET'){try{const content=await referencePreview(previewRoute?.[1]||null,previewRoute?.[2]||originalRoute[1]);const extension={'image/jpeg':'jpg','image/png':'png','image/gif':'gif','image/bmp':'bmp'}[content.mimeType];if(!extension)throw Error('Unsupported original');res.writeHead(200,{...headers,'Content-Type':content.mimeType,'Content-Disposition':'inline; filename="original-reference.'+extension+'"','Content-Length':content.bytes.length,'X-Content-SHA256':content.sha256});return res.end(content.bytes);}catch{return json({error:'This original image could not be verified. No image or reference was changed.'},409);}}
+      if((previewRoute||originalRoute)&&referencePreview&&req.method==='GET'){try{const content=await referencePreview(previewRoute?.[1]||null,previewRoute?.[2]||originalRoute[1],url.searchParams.get('run_id'),url.searchParams.get('reference_id'));const extension={'image/jpeg':'jpg','image/png':'png','image/gif':'gif','image/bmp':'bmp'}[content.mimeType];if(!extension)throw Error('Unsupported original');res.writeHead(200,{...headers,'Content-Type':content.mimeType,'Content-Disposition':'inline; filename="original-reference.'+extension+'"','Content-Length':content.bytes.length,'X-Content-SHA256':content.sha256});return res.end(content.bytes);}catch{return json({error:'This original image could not be verified. No image or reference was changed.'},409);}}
       const connection=p.match(/^\/api\/grok-connections\/([a-f0-9]{32})$/i);
       if(connection&&grokConnections){if(req.method==='GET')return json(await grokConnections.view(connection[1]));if(req.method==='PUT')return json(await grokConnections.decide(connection[1],body,login));throw fail('Use the private connection page.',405);}
       if(grokConnections&&req.method==='GET'&&(connectPage||p==='/grok-connect.js')){const content=await fs.readFile(new URL('./public/'+(connectPage?'grok-connect.html':'grok-connect.js'),import.meta.url));res.writeHead(200,{...headers,'Content-Type':connectPage?'text/html; charset=utf-8':'text/javascript'});return res.end(content);}
@@ -144,7 +175,7 @@ export function createMobileServer({config,all,one,run,transaction,mcpChanges=nu
       }
       const referenceImage=p.match(/^\/api\/mcp-reference-preview\/([0-9a-f-]{36})\/([0-9a-f-]{36})$/i);
       if(referenceImage&&mcpChanges&&req.method==='GET'){
-        const preview=await mcpChanges.previewReference(referenceImage[1],referenceImage[2]);if(!preview?.bytes)throw fail('No verified preview is available.',404);
+        const preview=await mcpChanges.previewReference(referenceImage[1],referenceImage[2],url.searchParams.get('side')||'after',url.searchParams.get('reference_id'));if(!preview?.bytes)throw fail('No verified preview is available.',404);
         res.writeHead(200,{...headers,'Content-Type':['image/jpeg','image/png'].includes(preview.mimeType)?preview.mimeType:'image/jpeg','Content-Disposition':'inline; filename="reference-proposal"','Content-Length':preview.bytes.length});return res.end(preview.bytes);
       }
       if(mcpChanges&&req.method==='GET'&&(reviewPage||p==='/mcp-change.js')){const content=await fs.readFile(new URL('./public/'+(reviewPage?'mcp-change.html':'mcp-change.js'),import.meta.url));res.writeHead(200,{...headers,'Content-Type':reviewPage?'text/html; charset=utf-8':'text/javascript'});return res.end(content);}
@@ -152,9 +183,9 @@ export function createMobileServer({config,all,one,run,transaction,mcpChanges=nu
       if(p==='/api/characters'&&req.method==='GET')return json({characters:all('SELECT c.id,c.name,c.aliases FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL')});
       const create=p.match(/^\/api\/characters\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/create$/i);
       if(create&&req.method==='PUT'){
-        if(Object.keys(body).length!==1||typeof body.name!=='string'||!body.name.trim()||body.name.trim().length>200||/[\x00-\x1f\x7f]/.test(body.name))throw fail('Enter a character name of 1–200 characters. Only the name can be supplied.');
+        if(Object.keys(body).some(k=>!['name','gender'].includes(k))||(body.gender!==undefined&&(!['férfi','nem-bináris'].includes(body.gender)))||typeof body.name!=='string'||!body.name.trim()||body.name.trim().length>200||/[\x00-\x1f\x7f]/.test(body.name))throw fail('Enter a character name of 1–200 characters. Only name and an optional non-female gender can be supplied.');
         if(!createCharacter)throw fail('Character folder creation is unavailable.',503);
-        const name=body.name.trim().normalize('NFC'),folder=await createCharacter(create[1],name);
+        const name=body.name.trim().normalize('NFC'),folder=await createCharacter(create[1],name,body.gender);
         return json({...details(create[1]),...folder});
       }
       const profile=p.match(/^\/api\/characters\/([^/]+)$/);

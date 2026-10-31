@@ -1,0 +1,1 @@
+ALTER TABLE characters ADD COLUMN race TEXT NOT NULL DEFAULT 'human' CHECK (race IN ('human','orc','goblin','troll','minotaur','centaur','satyr_faun','werewolf','lizardfolk_dragonborn','dwarf','ogre','bearfolk_bullfolk'));

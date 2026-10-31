@@ -1,3 +1,4 @@
+import {referenceCrop} from '../app/reference-crop.mjs';
 import {spawn} from 'node:child_process';
 import {readFile} from 'node:fs/promises';
 
@@ -11,8 +12,8 @@ export function dimensions(b){
   throw Error('Unsupported image format.');
 }
 export const thumbnail=bytes=>decodeImage(bytes,false);
-export const referenceImage=bytes=>decodeImage(bytes,true);
-async function decodeImage(bytes,reference){
+export const referenceImage=(bytes,crop=null)=>decodeImage(bytes,true,crop);
+async function decodeImage(bytes,reference,crop=null){
   const maxBytes=reference?MAX_REFERENCE_BYTES:MAX_IMAGE_BYTES,maxEdge=reference?MAX_REFERENCE_EDGE:MAX_EDGE;
   const d=dimensions(bytes);if(!d.width||!d.height||d.width*d.height>40000000||bytes.length>MAX_SOURCE_BYTES)throw Error('Image exceeds safe limits.');
   if(process.platform!=='win32')throw Error('Thumbnail conversion requires the configured Windows image decoder.');
@@ -24,7 +25,7 @@ async function decodeImage(bytes,reference){
     child.on('error',()=>finish(Error('Thumbnail converter unavailable.')));child.stdin.on('error',()=>{});child.stderr.resume();
     child.stdout.on('data',chunk=>{size+=chunk.length;if(size>Math.ceil(maxBytes/3)*4+1024){child.kill();finish(Error('Image exceeds output bound.'));}else chunks.push(chunk);});
     child.on('close',code=>finish(code?Error('Thumbnail conversion unavailable.'):null,Buffer.concat(chunks).toString('ascii').trim()));
-    child.stdin.end(JSON.stringify({data:bytes.toString('base64'),reference}));
+    child.stdin.end(JSON.stringify({data:bytes.toString('base64'),reference,crop:referenceCrop(crop)}));
   });
   if(!/^[A-Za-z0-9+/]+={0,2}$/.test(result))throw Error('Invalid thumbnail.');
   const output=Buffer.from(result,'base64'),d2=dimensions(output);
