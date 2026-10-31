@@ -6,7 +6,7 @@ import {installLocationEditor} from './location-editor.js';
 import {installCharacterGeneration} from './character-generation.js';
 import {installEventTimeline} from './story-events.js';
 import {installEnhancements} from './enhancements.js';
-import {installSorting} from './sorting.js';
+import {installSorting} from './sorting.js?v=album-delete-20261031-1';
 import {installReconciliationUI} from './reconciliation.js';
 import {installDuplicatesUI} from './duplicates.js';
 import {installTaxonomyUI} from './taxonomy.js';
