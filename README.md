@@ -1,5 +1,10 @@
 # Living Universe
 
+Separate Linux compatibility port of the direct-ai source snapshot:
+[isolated lab instructions](docs/DIRECT_AI_LINUX_LAB.md). Install pinned
+dependencies with `pnpm install --frozen-lockfile --ignore-scripts`; `pnpm test`
+runs synthetic tests only. This variant must not open the main application's DB.
+
 ### Hierarchikus helyszínfa
 
 A **Locations / Helyszínek** menüpontban kinyitható helyszínfa, magyar nevek,

@@ -164,7 +164,7 @@ test('existing bilingual alias wins over an unknown suggested ID; generic beach 
   result.tags=[];result.locations=[{hu:'Strand',en:'beach',evidence:'generic',uncertain:false}];const places=[{id:randomUUID(),name:'Strand',breadcrumb:'A / Strand'},{id:randomUUID(),name:'Strand',breadcrumb:'B / Strand'}],place=matchAnalysisResult(result,[],places).find(v=>v.kind==='location');assert.equal(place.target_id,null);assert.equal(place.uncertain,true);assert.equal(place.candidate_ids.length,2);
 });
 
-test('the real Windows derivative decoder feeds only a synthetic JPEG to the loopback adapter',()=>loopback(async({endpoint,seen})=>{
+test('the portable derivative decoder feeds only a synthetic JPEG to the loopback adapter',()=>loopback(async({endpoint,seen})=>{
   await catalogue(async({add,job})=>{const id=await add(),v=await job([id]);assert.equal(v.job.items[0].status,'succeeded');const sent=Buffer.from(seen[1].body.messages[1].images[0],'base64');assert.equal(sent[0],255);assert.equal(sent[1],216);assert.notDeepEqual(sent,bitmap());assert.equal(v.plan.items[0].derivative.sha256,analysisHash(sent));},{providers:[createAnalysisProvider('ollama',localConfig(endpoint))],decode:referenceImage});
 }));
 

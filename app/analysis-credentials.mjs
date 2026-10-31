@@ -1,3 +1,4 @@
+import {serviceCredentialEnvironment} from './service-credentials.mjs';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {execFile} from 'node:child_process';
@@ -6,6 +7,9 @@ const unavailable=()=>Object.assign(Error('A külön helyi OpenAI-tesztkulcs nem
 
 // Explicit manual-pilot use only; never mutates process.env or enables a production provider.
 export async function pilotCredentialEnvironment({env=process.env,run=promisify(execFile),platform=process.platform}={}){
+  if(env.LU_ANALYSIS_CREDENTIAL_FILE||(platform!=='win32'&&env.CREDENTIALS_DIRECTORY)){
+    try{const file=env.LU_ANALYSIS_CREDENTIAL_FILE||path.join(env.CREDENTIALS_DIRECTORY,'OPENAI_ANALYSIS_KEY');const loaded=await serviceCredentialEnvironment(['OPENAI_API_KEY'],{env:{OPENAI_API_KEY_FILE:file}});return {...env,OPENAI_API_KEY:loaded.OPENAI_API_KEY};}catch{throw unavailable();}
+  }
   if(platform!=='win32'||!env.USERPROFILE)throw unavailable();
   const file=path.join(env.USERPROFILE,'AppData','Local','LivingUniverse','analysis-trial','credentials','openai-analysis-key.dpapi');
   try{

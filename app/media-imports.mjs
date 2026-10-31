@@ -1,3 +1,4 @@
+import {samePhysicalPath} from './media-paths.mjs';
 import {promises as fs,constants,readFileSync} from 'node:fs';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
@@ -75,7 +76,7 @@ export function installMediaImports({db,root,dataDir,one,all,run,transaction,con
   }
   function slotAllowed(id,slot){if(!one('SELECT 1 FROM media_import_items WHERE import_id=? AND slot_key=?',id,slot)&&!one('SELECT 1 FROM media_uploads WHERE import_id=? AND slot_key=?',id,slot)&&one('SELECT COUNT(*) n FROM (SELECT slot_key FROM media_import_items WHERE import_id=? UNION SELECT slot_key FROM media_uploads WHERE import_id=?)',id,id).n>=20)throw problem('IMPORT_LIMIT','An import accepts at most 20 file slots.',413);}
   function failed(id,slot,error){try{slotAllowed(id,slot);}catch{return;}const existing=one('SELECT status FROM media_import_items WHERE import_id=? AND slot_key=?',id,slot);run('INSERT INTO media_import_events VALUES(?,?,?,?,?,?)',randomUUID(),id,slot,'failed',error.code||'IMPORT_FAILED',now());if(existing?.status==='committed')return;run("INSERT INTO media_import_items(id,import_id,slot_key,status,error_code,created_at) VALUES(?,?,?,'failed',?,?) ON CONFLICT(import_id,slot_key) DO UPDATE SET status='failed',error_code=excluded.error_code",randomUUID(),id,slot,error.code||'IMPORT_FAILED',now());}
-  async function ordinaryDirectory(dir){await fs.mkdir(dir,{recursive:true});const info=await fs.lstat(dir);if(info.isSymbolicLink()||!info.isDirectory())throw problem('UNSAFE_STORAGE','The import directory must be an ordinary local directory.',409);const real=await fs.realpath(dir);if(path.resolve(real).toLowerCase()!==path.resolve(dir).toLowerCase())throw problem('UNSAFE_STORAGE','Junctions are not permitted in import storage.',409);return real;}
+  async function ordinaryDirectory(dir){await fs.mkdir(dir,{recursive:true});const info=await fs.lstat(dir);if(info.isSymbolicLink()||!info.isDirectory())throw problem('UNSAFE_STORAGE','The import directory must be an ordinary local directory.',409);const real=await fs.realpath(dir);if(!samePhysicalPath(real,dir))throw problem('UNSAFE_STORAGE','Junctions are not permitted in import storage.',409);return real;}
   async function verifyExisting(mediaId,fingerprint){
     const m=one('SELECT * FROM media WHERE id=?',mediaId);if(!m||one('SELECT 1 FROM media_hidden WHERE media_id=?',mediaId))throw problem('MEDIA_HIDDEN','The prior import is missing or removed. Review it in the catalogue before retrying.',409);
     if(path.isAbsolute(m.relative_path)||path.win32.isAbsolute(m.relative_path)||/[\x00:]/.test(m.relative_path))throw problem('UNSAFE_STORAGE','Existing media has an unsafe stored location.',409);

@@ -76,3 +76,39 @@ generation-results/
 
 !/docs/ORIGINAL_IMAGES.md
 !/docs/MCP_INTEGRATION.md
+
+# Isolated Linux compatibility source only.
+!/.gitattributes
+!/.dockerignore
+!/.node-version
+!/.env.example
+!/pnpm-lock.yaml
+!/ops/linux/
+!/ops/testing/
+!/config-templates/
+/config-templates/*
+!/config-templates/*.example.json
+!/config-templates/README.md
+
+# Runtime credentials/media/archives are never source.
+character-policy.json
+grok-gateway.json
+*.pem
+*.pfx
+*.p12
+*.key
+*.enc
+*.zip
+*.7z
+*.tar
+*.gz
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.bmp
+*.heic
+*.mp4
+*.mov
+*.webm

@@ -1,5 +1,14 @@
 # Development plan
 
+## Separate direct-ai Linux port, 2026-10-31
+
+Compatibility changes are isolated on linux-compatibility-direct-ai from snapshot
+18a04672c8e20f8295a7a37efecf1d7c196d2d33. Portable decoding, explicit runtime
+config/credential scopes, a new preprocessing cache identity and source-only lab
+packaging are implemented. Windows portable-backend regression: 279/279 passed.
+Actual Linux, native services and the manual runner lifecycle remain unverified.
+No main schema merge, deployment, provider call or live worker change occurred.
+
 ## 2026-10-31: Expanded Sol-medium processing resumed under explicit start instruction
 
 The user explicitly requested starting after agreeing scope, candidate retrieval

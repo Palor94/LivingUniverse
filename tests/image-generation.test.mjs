@@ -12,7 +12,7 @@ import {createCatalogue} from '../mcp/catalogue.mjs';
 import {createDispatcher} from '../mcp/http-gateway.mjs';
 import {generateProviderImage,GenerationError} from '../app/image-providers.mjs';
 
-const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=','base64');
+const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC','base64');
 const sha=b=>createHash('sha256').update(b).digest('hex');
 async function fixture({generate,clock}={}){
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'lu-generation-')),root=path.join(temp,'media'),dataDir=path.join(temp,'data');await fs.mkdir(root);await fs.mkdir(dataDir);

@@ -1,3 +1,4 @@
+import {mcpConfigPath} from '../app/runtime-config.mjs';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
@@ -5,7 +6,7 @@ import {execFileSync} from 'node:child_process';
 import os from 'node:os';
 
 const args=process.argv.slice(2);if(args.some(a=>!['--enable','--preview'].includes(a)))throw Error('Use --preview or --enable; no secrets are accepted as arguments.');
-const mcpFile=process.env.LU_MCP_CONFIG||path.join(process.env.LOCALAPPDATA,'LivingUniverse','mcp-config.json');
+const mcpFile=mcpConfigPath();
 const mcp=JSON.parse(await fs.readFile(mcpFile,'utf8')),dataDir=path.dirname(mcp.database);
 if(!(await fs.stat(mcp.database)).isFile())throw Error('Existing catalogue required. No replacement will be created.');
 const mobile=JSON.parse(await fs.readFile(path.join(dataDir,'mobile-access.json'),'utf8'));

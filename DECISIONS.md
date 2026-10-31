@@ -1,5 +1,15 @@
 # Decisions
 
+## 2026-10-31: Keep the direct-ai Linux compatibility port separate
+
+Apply selected portability modules in a separate checkout without merging main
+or reusing its database. Portable JPEG preprocessing changes the cache/version
+identity, never original bytes or completed receipts. Dedicated analysis keys
+remain separate from an inherited generic provider key. Outstanding jobs block
+offline path conversion; uncertain paid outcomes are never retried automatically.
+The source-only lab uses synthetic databases/media and fake transports. Passing
+Windows tests is not actual Linux or production-provider validation.
+
 ## 2026-10-31: AI may use proposed observations as explained search hints
 
 The user explicitly allows machine-generated labels to guide candidate retrieval

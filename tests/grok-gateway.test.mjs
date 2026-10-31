@@ -91,7 +91,7 @@ test('authenticated Streamable HTTP reuses existing tools and private approval w
   assert.equal((await reader.call('get_character',{character_id:committed.character_id})).data.name,'Gateway adult, 38');
   // Independently exercise Grok's authenticated HTTP transport. This uses no
   // OpenAI file metadata and does not pretend to be a consumer chat attachment.
-  const picture=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=','base64');
+  const picture=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC','base64');
   const digest=createHash('sha256').update(picture).digest('hex');
   const toolCall=async(name,args)=>{const response=(await rpc('tools/call',{name,arguments:args})).result;assert.equal(response.isError,false,JSON.stringify(response));return response.structuredContent;};
   assert.ok(list.result.tools.some(t=>t.name==='get_profile_template'));assert.ok(list.result.tools.some(t=>t.name==='update_profile_template'));

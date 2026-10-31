@@ -1,3 +1,4 @@
+import {samePhysicalPath} from './media-paths.mjs';
 import {promises as fs,readFileSync,constants} from 'node:fs';
 import path from 'node:path';
 import {Readable} from 'node:stream';
@@ -102,7 +103,7 @@ export function installImageGeneration({db,root,dataDir,one,all,run,transaction,
     await validate(JSON.parse(row.manifest_json));
     transaction(()=>{if(get(rid).status!=='pending')fail('INVALID_STATE','This plan was already decided.',409);run("UPDATE image_generation_runs SET status='approved',approved_by=?,approved_at=? WHERE id=?",actor,now(),rid);event(rid,'approved_external_upload_and_cost',actor);});return view(rid);
   }
-  async function resultDirectory(){const dir=path.join(dataDir,'generation-results');await fs.mkdir(dir,{recursive:true});const s=await fs.lstat(dir);if(s.isSymbolicLink()||!s.isDirectory()||path.resolve(await fs.realpath(dir)).toLowerCase()!==path.resolve(dir).toLowerCase())fail('UNSAFE_STORAGE','Generation recovery storage must be an ordinary local directory.',409);return dir;}
+  async function resultDirectory(){const dir=path.join(dataDir,'generation-results');await fs.mkdir(dir,{recursive:true});const s=await fs.lstat(dir);if(s.isSymbolicLink()||!s.isDirectory()||!samePhysicalPath(await fs.realpath(dir),dir))fail('UNSAFE_STORAGE','Generation recovery storage must be an ordinary local directory.',409);return dir;}
   async function register(rid,manifest,result){
     const type=await validateMedia(result.bytes,{decodeImage});if(type.kind!=='image')fail('INVALID_OUTPUT','The provider must return a decoded image.');
     const fingerprint=hash(result.bytes),existing=one('SELECT id FROM media WHERE id=(SELECT media_id FROM imported_media_blobs WHERE sha256=?)',fingerprint);

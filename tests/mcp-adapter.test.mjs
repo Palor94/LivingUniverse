@@ -54,11 +54,11 @@ test('MCP catalogue is read-only, ID-bound, canon-aware, path-safe, bounded and 
     await fs.symlink(path.join(temp,'outside'),path.join(root,'linked'),process.platform==='win32'?'junction':'dir');
     await assert.rejects(catalogue.call('get_media',{media_id:addUnsafe('linked/secret.bmp'),include_image:true,image_quality:'original'}),{code:'UNSAFE_MEDIA'});
     const offline=await createCatalogue({database,mediaRoot:root,availability:async()=> 'online'});try{await assert.rejects(offline.call('get_media',{media_id:mid,include_image:true,image_quality:'original'}),{code:'MEDIA_OFFLINE',recoverable:true});}finally{offline.close();}
-    if(process.platform==='win32'){
+    {
       const approved=await catalogue.call('get_approved_references',{character_id:cid,media_id:mid,include_image:true,image_quality:'original'});assert.equal(approved.image.type,'image');assert.deepEqual(Buffer.from(approved.image.data,'base64'),bytes);assert.equal(approved.image.mimeType,'image/bmp');assert.equal(approved.data.image_info.width,1600);assert.equal(approved.data.image_info.sha256,hash);const preview=await thumbnail(bytes);
       app.db.prepare('INSERT INTO character_cover_frames VALUES(?,?,?,?,?,?,?,?)').run(cid,video,5,'data:image/jpeg;base64,'+preview.data,'{}',vstat.size,vstat.mtime.toISOString(),'2026-10-25');
       const still=await catalogue.call('get_media',{media_id:video,include_image:true,image_quality:'original',frame_character_id:cid});assert.equal(still.data.video_download_available,false);assert.equal(still.data.selected_still.time_seconds,5);assert.equal(still.data.selected_still.canonical_reference,false);assert.ok(Buffer.from(still.image.data,'base64').length<=MAX_IMAGE_BYTES);
-    }else t.diagnostic('Windows thumbnail converter not available on this platform; metadata/safety tests still run.');
+    }
     await fs.writeFile(path.join(root,'reference.bmp'),bmp(100,100));await assert.rejects(catalogue.call('get_approved_references',{character_id:cid,media_id:mid,include_image:true,image_quality:'original'}),{code:'CANON_MISMATCH'});
     const unbounded=await createCatalogue({database,mediaRoot:root,availability:async()=> 'local',makeThumbnail:async()=>({type:'image',mimeType:'image/jpeg',data:Buffer.alloc(MAX_IMAGE_BYTES+1).toString('base64')})});try{await assert.rejects(unbounded.call('get_media',{media_id:mid,include_image:true,image_quality:'original'}),{code:'IMAGE_UNAVAILABLE'});}finally{unbounded.close();}
     const input=new PassThrough(),output=new PassThrough();let wire='';output.on('data',b=>wire+=b);const running=serve({catalogue,input,output});

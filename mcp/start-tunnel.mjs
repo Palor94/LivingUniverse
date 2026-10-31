@@ -1,10 +1,11 @@
+import {launchNativeTunnel} from './native-tunnel.mjs';
 import {spawn} from 'node:child_process';
 import {readFile,readdir,access} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 export async function launch({selfTest=false,newKey=false,unattended=false,onOutput=null}={}){
-  if(process.platform!=='win32')throw Error('The private key window requires Windows.');
+  if(process.platform!=='win32')return launchNativeTunnel({selfTest,newKey,onOutput:onOutput||undefined});
   const base=path.join(process.env.LOCALAPPDATA,'LivingUniverse','mcp-runtime');
   let client='';if(!selfTest){const versions=(await readdir(base)).filter(v=>/^v\d+\.\d+\.\d+$/.test(v)).sort((a,b)=>b.localeCompare(a,'en',{numeric:true}));
     if(!versions.length)throw Error('The official tunnel client has not been installed at '+base);client=path.join(base,versions[0],'tunnel-client.exe');await access(client);}

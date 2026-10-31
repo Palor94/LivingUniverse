@@ -19,7 +19,7 @@ test('private reference approval saves canon immediately, retries safely, and en
     const base='http://127.0.0.1:'+app.server.address().port,remote='http://127.0.0.1:'+app.mobileServer.address().port,writeConfig=path.join(dataDir,'mcp-writes.json');
     await fs.writeFile(writeConfig,JSON.stringify({...config,app_url:base}));
     const writer=await createWriteClient({database,writeConfig}),call=async(name,args)=>(await writer.call(name,args)).data;
-    const cid=randomUUID(),mid=randomUUID(),filename='reference.png',png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=','base64'),now=new Date().toISOString();
+    const cid=randomUUID(),mid=randomUUID(),filename='reference.png',png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC','base64'),now=new Date().toISOString();
     await fs.writeFile(path.join(root,filename),png);
     app.db.prepare('INSERT INTO characters(id,name,created_at) VALUES(?,?,?)').run(cid,'Reference fixture',now);
     app.db.prepare('INSERT INTO media VALUES(?,?,?,?,?,?,?)').run(mid,filename,'','image',png.length,now,now);

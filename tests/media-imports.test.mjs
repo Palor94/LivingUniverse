@@ -10,7 +10,7 @@ import {createWriteClient} from '../mcp/writes.mjs';
 import {createCatalogue} from '../mcp/catalogue.mjs';
 import {databaseIdentity} from '../app/character-edit.mjs';
 
-const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=','base64');
+const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC','base64');
 const sha=b=>createHash('sha256').update(b).digest('hex');
 function box(type,...data){const payload=Buffer.concat(data),head=Buffer.alloc(8);head.writeUInt32BE(payload.length+8);head.write(type,4,'ascii');return Buffer.concat([head,payload]);}
 const video=()=>box('ftyp',Buffer.from('isom0000isom'));

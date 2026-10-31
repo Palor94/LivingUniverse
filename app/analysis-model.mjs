@@ -5,7 +5,7 @@ import {validateWorldDetails} from './analysis-world.mjs';
 
 export const analysisCategories=['angle','framing','expression','pose','clothing','lighting','background','action','reference_use'];
 export const analysisDefaultGoals=['background','action','angle','framing','reference_use'];
-export const analysisVersions=Object.freeze({prompt:'media-analysis-3',preprocess:'reference-2048-jpeg-1',schema:1});
+export const analysisVersions=Object.freeze({prompt:'media-analysis-3',preprocess:(process.env.LU_IMAGE_DECODER==='portable'||process.platform!=='win32')?'reference-2048-jpeg-portable-2':'reference-2048-jpeg-1',schema:1});
 export const analysisDigest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const analysisHash=bytes=>createHash('sha256').update(bytes).digest('hex');
 export const analysisError=(code,message,status=400)=>Object.assign(Error(message),{code,status});

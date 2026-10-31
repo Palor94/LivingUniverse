@@ -1,3 +1,4 @@
+import {samePhysicalPath} from './media-paths.mjs';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {Readable} from 'node:stream';
@@ -34,7 +35,7 @@ export function installMediaUploads({one,all,run,transaction,dataDir,session,vie
     if(!uuid.test(u.id))fail('UNSAFE_STORAGE','Invalid staging directory identity.',409);
     const base=path.join(dataDir,'upload-staging'),dir=path.join(base,u.id);
     // Never traverse an unexpected entry or recurse through a junction.
-    try{await ordinaryDirectory(base);const s=await fs.lstat(dir);if(s.isSymbolicLink()||!s.isDirectory()||path.resolve(await fs.realpath(dir)).toLowerCase()!==path.resolve(dir).toLowerCase())fail('UNSAFE_STORAGE','Unsafe staging directory; cleanup was not performed.',409);
+    try{await ordinaryDirectory(base);const s=await fs.lstat(dir);if(s.isSymbolicLink()||!s.isDirectory()||!samePhysicalPath(await fs.realpath(dir),dir))fail('UNSAFE_STORAGE','Unsafe staging directory; cleanup was not performed.',409);
       for(const name of await fs.readdir(dir)){if(!/^\d+\.part$/.test(name))continue;const file=path.join(dir,name),st=await fs.lstat(file);if(st.isFile()&&!st.isSymbolicLink())await fs.unlink(file);}
       await fs.rmdir(dir);
     }catch(e){if(e.code!=='ENOENT')throw e;}

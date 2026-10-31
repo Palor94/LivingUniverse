@@ -1,6 +1,6 @@
 import {promises as fs,constants,readFileSync} from 'node:fs';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {pixelCrop} from './public/crop-selection.js';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,sha=/^[a-f0-9]{64}$/;
 const extensions={'.jpg':'jpeg','.jpeg':'jpeg','.png':'png','.webp':'webp'};
@@ -68,7 +68,7 @@ export function installImageCrops({db,root,dataDir,one,all,run,transaction,asset
         const backup=await privateFile(originals,body.edit_id+'.original');await fs.copyFile(file,backup,constants.COPYFILE_EXCL);if(await fingerprint(backup)!==originalHash)throw fail('Original backup verification failed. Nothing was replaced.',409);
         run("INSERT INTO media_image_edits VALUES(?,?,'preparing',?,?,?,?,?,?,NULL)",body.edit_id,mid,originalHash,hash(bytes),JSON.stringify(r),stat.size,stat.mtime.toISOString(),new Date().toISOString());edit=one('SELECT * FROM media_image_edits WHERE id=?',body.edit_id);
       }
-      journal=edit.id;temp=await privateFile(staging,edit.id+(restoring?'-restore':'')+'.image');await fs.writeFile(temp,bytes,{flag:'wx'});if(await fingerprint(temp)!==hash(bytes))throw fail('Crop staging verification failed.',409);
+      journal=edit.id;temp=path.join(path.dirname(file),'.living-universe-crop-'+randomUUID()+'.tmp');await fs.writeFile(temp,bytes,{flag:'wx',mode:0o600});if(await fingerprint(temp)!==hash(bytes))throw fail('Crop staging verification failed.',409);
       const current=available(mid),check=await source(current);if(check.file!==file||await fingerprint(file)!==originalHash||protectedImage(mid))throw fail('The source or approved reference status changed. Nothing was replaced.',409);
       if(restoring)run("UPDATE media_image_edits SET status='restoring' WHERE id=?",edit.id);
       // The verified backup precedes the atomic replacement. EXDEV/locked OneDrive
