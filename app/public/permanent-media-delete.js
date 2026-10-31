@@ -10,7 +10,7 @@ export async function deleteSelectedImage({selected,capability,request}){
 export function installPermanentDeleteUI({$,$$,api,toast,render}){
   let gallery=[],viewer=null,target=null,capability=null,loading=false,busy=false,epoch=0;
   function paint(){
-    for(const b of $$('#permanent-delete,#viewer-permanent-delete')){
+    for(const b of $$('#permanent-delete,#library-permanent-delete,#viewer-permanent-delete')){
       b.disabled=busy||loading||!target||!capability||capability.protected;
       b.textContent=busy?'Törlés folyamatban…':'Törlés';
       b.title=busy?'Várd meg a törlés eredményét.':loading?'A kép védelmének ellenőrzése…':capability?.protected?'Védett: jóváhagyott kanonikus referencia.':!target?'Jelölj ki pontosan egy képet.':'Végleges törlés: az eredeti fájl, előnézetek és minden szereplő-hozzárendelés törlődik. Nincs megerősítő ablak.';
@@ -35,7 +35,7 @@ export function installPermanentDeleteUI({$,$$,api,toast,render}){
       await render();toast(result.onedrive?'A kép, előnézetei és hozzárendelései végleg törölve a helyi tárhelyről. A OneDrive felhős szinkronja külön fut.':'A kép, előnézetei és minden szereplő-hozzárendelése végleg törölve.');
     }catch(e){toast(e.message,true);}finally{busy=false;await choose();}
   }
-  function selection(items){gallery=[...items];if(!viewer)void choose();}
+  function selection(items){gallery=[...items];const button=$('#library-permanent-delete');if(button)button.onclick=erase;if(!viewer)void choose();}
   function media(m){
     viewer=m;
     if(m.kind==='image'){

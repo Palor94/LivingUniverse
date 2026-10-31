@@ -7,7 +7,8 @@ Az implementáció és a böngészős próba csak eldobható tesztadatokon futot
 ## Kezelés
 
 A **Törlés** gomb mindig látható a desktop alkalmazás felső sávjában, görgetés
-közben is. A médiatárban pontosan egy kijelölt képre működik. A megnyitott kép
+közben is. A Media Library saját felső kijelölési eszköztárában, a Clear selection
+mellett is van Törlés gomb. A médiatárban pontosan egy kijelölt képre működik. A megnyitott kép
 felső, görgetéskor is elérhető eszköztárán külön Törlés gomb jelenik meg.
 Többes kijelölésnél, videónál és jóváhagyott referenciánál a művelet letiltott.
 
