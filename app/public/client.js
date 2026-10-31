@@ -1,4 +1,4 @@
-import {installPermanentDeleteUI} from './permanent-media-delete.js';
+import {installPermanentDeleteUI} from './permanent-media-delete.js?v=bulk-20261031-1';
 import {installGhostProfile} from './ghost-profile.js';
 import {installMediaAnalysisUI} from './media-analysis.js';
 import {mountLocationCanvas} from './location-canvas.js';

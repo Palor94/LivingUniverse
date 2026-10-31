@@ -41,3 +41,26 @@ a hash-manifesztet és a sikeres éles ellenőrzés eredményét. Ezek nincsenek
 Kódvisszalépéskor a meglévő szolgáltatást le kell állítani és csak a manifesztben
 felsorolt fájlokat visszaállítani. Adatbázis-visszaállítást nem végzünk automatikusan,
 mert az azóta történt felhasználói változtatásokat is visszaléptetné.
+
+## Többes kijelölés bővítése
+
+A felhasználó utólag több kijelölt kép egykattintásos törlését kérte,
+kifejezetten tesztfuttatás nélkül. A felület a kattintáskori kijelölt képeken
+halad végig sorban, a meglévő egyképes backendművelettel. A kanonikus referenciák
+kimaradnak; külön számlálót kap a siker, a védett kihagyás és a hiba. A videókra
+nem terjed ki. Egy sikertelen kép nem állítja le a többi kijelölt kép feldolgozását.
+
+A futó példányon csak három frontendfájl frissült: `permanent-media-delete.js`,
+a `client.js` modulimportja és az `index.html` klienslinkje. A két link új verziót
+kapott a böngésző régi modulcache-ének elkerülésére. A backend, az adatbázis és
+a médiafájlok nem módosultak; nem kellett szolgáltatást újraindítani.
+
+Mentés: `before-bulk-delete-2026-10-31T06-29-24-836Z` a desktop-katalógus helyi
+`backups` könyvtárában. Tartalma a három korábbi forrásfájl és a régi/telepített
+hash-manifeszt. A telepítés előtti forrásváltozás-védelem megmaradt; ez nem
+funkcionális teszt vagy próbatörlés. A felhasználó kérésére ehhez a bővítéshez
+nem futott automatizált vagy böngészős teszt, illetve éles törlés sem történt.
+A fenti korábbi teszteredmények az egyképes előzményre vonatkoznak.
+
+Visszaállítás: kizárólag a mentett három frontendfájlt kell visszamásolni, majd
+a böngészőt teljesen frissíteni; ehhez adatbázis-visszaállítás nem szükséges.

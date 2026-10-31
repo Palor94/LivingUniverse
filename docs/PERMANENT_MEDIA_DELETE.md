@@ -2,15 +2,27 @@
 
 2026-10-31. Fejlesztési ág: `codex/permanent-media-delete`. A funkció
 frontend- és backendváltoztatás; nem MCP-/ChatGPT-plugin-törlési művelet.
-Az implementáció és a böngészős próba csak eldobható tesztadatokon futott.
+Az eredeti egyképes funkció tesztjei és böngészős próbája csak eldobható
+tesztadatokon futottak. A többes kijelölés későbbi módosításához a felhasználó
+kérésére nem futtattunk teszteket.
 
 ## Kezelés
 
 A **Törlés** gomb mindig látható a desktop alkalmazás felső sávjában, görgetés
 közben is. A Media Library saját felső kijelölési eszköztárában, a Clear selection
-mellett is van Törlés gomb. A médiatárban pontosan egy kijelölt képre működik. A megnyitott kép
+mellett is van Törlés gomb. A médiatárban egy vagy több kijelölt képre működik. A megnyitott kép
 felső, görgetéskor is elérhető eszköztárán külön Törlés gomb jelenik meg.
-Többes kijelölésnél, videónál és jóváhagyott referenciánál a művelet letiltott.
+Videókra nem működik. A jóváhagyott referenciák többes kijelölésnél kimaradnak;
+ha csak ilyen képek vannak kijelölve, a gomb letiltott.
+
+Több kép esetén a kattintáskori kijelölt képek rögzített listáján haladunk végig,
+egyesével a meglévő védett szerveroldali művelettel. Csak az aktuális oldalon
+kijelölt képek tartoznak bele; közben újonnan kijelölt kép nem kerül a sorba.
+A gomb mutatja az előrehaladást, és futás közben nem indítható újra.
+A végén külön számláló jelzi a teljesen törölt, védettként kihagyott és sikertelen
+képeket. A hibák nem állítják le a további kijelölt képek feldolgozását.
+A sikertelen tételeket nem tekintjük töröltnek; a szerver teljes nyugtája szükséges
+minden egyes képhez. Az aktuális felület betöltését verziózott modullink biztosítja.
 
 Egy kattintás azonnal indítja a végleges törlést, további megerősítő ablak nélkül.
 A gomb súgója jelzi, hogy eredeti fájlt, előnézeteket és minden hozzárendelést
@@ -110,7 +122,11 @@ Három eldobható szintetikus BMP-t hoz létre; a harmadik kanonikus védelem al
 áll. Az első kép egykattintásos törlését és a megmaradt referencia védelmét
 ezen a példányon ellenőriztük, éles adatok nélkül.
 
-Ellenőrzés: a végső teljes regressziós futás 202/202 sikeres tesztet tartalmaz,
+Az eredeti egyképes változat ellenőrzése: a teljes regressziós futás 202/202 sikeres tesztet tartalmazott,
 köztük 12 új végleges-törlési tesztet. A böngészős próba igazolta az egyetlen
 kattintást, a megerősítő ablak hiányát, az eltűnő tesztképet, a megmaradó
 referencia védelmét és a felső gomb elérhetőségét a galériában/képnézetben.
+
+A 2026-10-31-i többes kijelölési bővítésre ezek a korábbi eredmények nem
+vonatkoznak: a felhasználó kifejezett kérésére nem futott új automatizált vagy
+böngészős teszt, és éles médiát sem töröltünk fejlesztési ellenőrzésként.

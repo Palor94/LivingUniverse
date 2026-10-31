@@ -242,7 +242,8 @@ Lásd [használat, migráció és visszaállítás](docs/MEDIA_ANALYSIS.md), val
 
 ### Végleges képtörlés
 
-A felső desktop eszköztár Törlés gombja pontosan egy kijelölt képet töröl
-megerősítő ablak nélkül. A kanonikus referenciák védettek; a művelet az eredeti
+A felső desktop és a Media Library eszköztár Törlés gombja egy vagy több kijelölt
+képet töröl megerősítő ablak nélkül. A képek sorban törlődnek; a kanonikus
+referenciák kimaradnak. A művelet az eredeti
 fájlt, előnézeteket és minden szereplő-hozzárendelést érinti. Részleges hibát
 nem jelez teljes sikernek. [Működés és korlátok](docs/PERMANENT_MEDIA_DELETE.md).
