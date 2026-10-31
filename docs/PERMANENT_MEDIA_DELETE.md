@@ -74,6 +74,13 @@ A fájlútvonalakat szerveroldali rekordokból állítjuk össze, nem a kliens k
 közösen hivatkozott fájlútvonal és befejezetlen fájlmozgatás. Csak egyenként
 ellenőrzött szabályos fájlt törlünk; nincs rekurzív könyvtártörlés.
 
+A fájlmozgatási napló lezárt állapotai: `complete`, `relinked_external`,
+`folder_renamed`, `layout_migrated`, `layout_path_updated_missing`. Az utolsó
+a korábban is hiányzó fájl útvonalának lezárt katalógusfrissítése, nem félbemaradt
+fájlmásolás. Ezek az előzmények nem tiltják a törlést. A többi, beleértve az
+ismeretlen, `interrupted`, `needs_review` és `source_retained` állapotokat,
+továbbra is rendezést igényel. A javítás nem írja át a napló történetét.
+
 Minden ismert fájl és adatbázis-kapcsolat ellenőrzése megelőzi az első unlinket.
 Az SQL-takarítást előbb visszagörgetett savepointban próbáljuk ki; egy új,
 ismeretlen idegenkulcs-kapcsolat így még fájltörlés előtt megállítja a műveletet.

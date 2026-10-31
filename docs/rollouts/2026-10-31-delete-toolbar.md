@@ -64,3 +64,25 @@ A fenti korábbi teszteredmények az egyképes előzményre vonatkoznak.
 
 Visszaállítás: kizárólag a mentett három frontendfájlt kell visszamásolni, majd
 a böngészőt teljesen frissíteni; ehhez adatbázis-visszaállítás nem szükséges.
+
+## Lezárt fájlmozgatási előzmények téves tiltása
+
+A következő felhasználói hibajelzés oka a `status<>'complete'` feltétel volt:
+ez a sikeres újracsatolást, mappanév-szinkront és OneDrive-struktúraváltást is
+félbemaradásnak tekintette. A csak olvasott éles naplóban 1390 `complete`,
+373 `folder_renamed`, 1510 `layout_migrated`, 1055 `layout_path_updated_missing`
+és 231 `relinked_external` sor volt; valódi félbemaradt állapot nem szerepelt.
+A migrációs forrás megerősítette, hogy a hiányzó fájl útvonalfrissítése is
+lezárt katalógusművelet. A törlőmodul ezeket az ismert lezárt állapotokat fogadja
+el; minden más, ismeretlen vagy félbemaradt állapot továbbra is tilt.
+
+Egyetlen backendfájl célzott frissítése és szolgáltatás-újraindítás történt.
+A naplót nem módosítottuk, nem készült migráció és nem futott próbatörlés vagy
+automatizált teszt. Az újraindulás és adatmegőrzés csak olvasott telepítési
+ellenőrzése külön szerepel a helyi mentési csomagban.
+
+Mentés: `before-delete-move-status-2026-10-31T06-33-15-665Z`. Tartalmazza a régi
+modult, a telepített modult, a futás közbeni és leállított SQLite-mentést,
+a forráshasheket és az érintetlenül megőrzendő táblák lenyomatait. Kódvisszalépés
+esetén csak a mentett `app/permanent-media-delete.mjs` fájlt kell visszaállítani
+és a szolgáltatást újraindítani; az adatbázist nem kell visszaléptetni.

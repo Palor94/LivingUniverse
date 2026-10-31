@@ -44,7 +44,10 @@ export function installPermanentMediaDelete({db,root,dataDir,one,all,run,transac
   function plan(m){
     const parts=m.relative_path.split(/[\\/]/u);
     if(parts.some(p=>p.startsWith('.'))&&!(parts[0]==='.living-universe-trash'&&parts[1]===m.id)||['app','mcp','tests','docs','backups','node_modules'].includes(parts[0].toLowerCase()))throw error('UNSAFE_PATH','Alkalmazásfájl nem törölhető médiaként.');
-    if(one("SELECT 1 FROM file_moves WHERE media_id=? AND status<>'complete' LIMIT 1",m.id))throw error('MOVE_REVIEW_REQUIRED','A képhez befejezetlen fájlművelet tartozik. Előbb rendezd a fájlmozgatási előzményt.');
+    // Relinking, folder renames and the verified storage-layout migration use
+    // distinct terminal states. Missing-path migration is a finished catalogue
+    // update, not an interrupted copy. Keep unknown or unfinished states blocked.
+    if(one("SELECT 1 FROM file_moves WHERE media_id=? AND status NOT IN ('complete','relinked_external','folder_renamed','layout_migrated','layout_path_updated_missing') LIMIT 1",m.id))throw error('MOVE_REVIEW_REQUIRED','A képhez befejezetlen fájlművelet tartozik. Előbb rendezd a fájlmozgatási előzményt.');
     const normalized=p=>p.replaceAll('\\','/').toLocaleLowerCase('en');
     if(all('SELECT id,relative_path FROM media WHERE id<>?',m.id).some(o=>normalized(o.relative_path)===normalized(m.relative_path)))throw error('SHARED_PATH','Másik médiarekord is ugyanerre a fájlútvonalra mutat.');
     const artifacts=[];
