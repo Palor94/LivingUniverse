@@ -16,9 +16,9 @@ export function installSorting(ctx){
   let page=[],scope='',queueUrl='',queue=[],queueScope='',anchor=null,status='',saving=false,needsRefresh=false;
   const selected=new Set();
   const labels={location:'Location reference',unassigned:'Unassigned',pending:'Assigned · not finished',multiple:'Multiple characters · not finished',complete:'Categorization complete'};
-  function reset(){selected.clear();anchor=null;page=[];queueUrl='';scope='';queue=[];queueScope='';status='';}
+  function reset(){selected.clear();anchor=null;page=[];queueUrl='';scope='';queue=[];queueScope='';status='';ctx.onSelectionChange?.([]);}
   function setPage(items,url,nextScope){if(scope!==nextScope){selected.clear();anchor=null;queue=[];queueScope='';}scope=nextScope;page=items;queueUrl=url;const visible=new Set(page.map(m=>m.id));for(const id of selected)if(!visible.has(id))selected.delete(id);}
-  function updateSelection(){for(const tile of $$('.media-tile')){const checked=selected.has(tile.dataset.item);tile.classList.toggle('selected',checked);$('.media-select',tile).checked=checked;}
+  function updateSelection(){ctx.onSelectionChange?.(page.filter(m=>selected.has(m.id)));for(const tile of $$('.media-tile')){const checked=selected.has(tile.dataset.item);tile.classList.toggle('selected',checked);$('.media-select',tile).checked=checked;}
     if($('#selection-count'))$('#selection-count').textContent=`${selected.size} selected on this page`;
     for(const b of $$('[data-bulk-action]')){b.disabled=!selected.size;b.title=selected.size?'Applies to selected media on this page':'Select at least one picture or video first';}
   }

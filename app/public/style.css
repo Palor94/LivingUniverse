@@ -73,3 +73,10 @@
 .analysis-preview {float:right;max-width:30%;max-height:160px;border-radius:8px;margin:12px 0 12px 20px;object-fit:contain}
 .analysis-proposals {clear:both}
 @media(max-width:640px){.analysis-preview {float:none;max-width:100%;max-height:180px;margin:12px 0}}
+
+/* Persistent, explicitly destructive controls for one selected image. */
+.topbar #permanent-delete {flex:none;white-space:nowrap;margin-left:12px}
+.viewer-sort-nav:has(#viewer-permanent-delete) {position:sticky;top:0;z-index:5;background:var(--panel,#191a1e);flex-wrap:wrap}
+#permanent-delete:disabled,#viewer-permanent-delete:disabled {opacity:.45;cursor:not-allowed}
+
+.topbar:has(#permanent-delete) {position:sticky;top:0;z-index:10;background:var(--bg,#0f1116)}

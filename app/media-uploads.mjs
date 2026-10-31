@@ -25,7 +25,7 @@ export function installMediaUploads({one,all,run,transaction,dataDir,session,vie
   let active=false;
   const now=()=>new Date(clock()).toISOString();
   function row(id){if(typeof id!=='string'||!uuid.test(id))fail('INVALID_ID','Use the returned upload UUID.');const u=one('SELECT * FROM media_uploads WHERE id=?',id);if(!u)fail('NOT_FOUND','Upload not found.',404);session(u.import_id);return u;}
-  function writable(u){session(u.import_id,true);if(u.status==='expired'||Date.parse(u.expires_at)<=clock())fail('UPLOAD_EXPIRED','This upload expired. Begin a new import; committed files remain available.',410);}
+  function writable(u){session(u.import_id,true);if(u.status==='erased')fail('MEDIA_ERASED','This image was permanently deleted; use a new import for new media.',410);if(u.status==='expired'||Date.parse(u.expires_at)<=clock())fail('UPLOAD_EXPIRED','This upload expired. Begin a new import; committed files remain available.',410);}
   function inspect(id){const u=row(id),s=viewImport(u.import_id);return {upload_id:u.id,import_id:u.import_id,slot_key:u.slot_key,status:u.status==='committed'?'committed':u.status==='cancelled'?'cancelled':Date.parse(u.expires_at)<=clock()?'expired':u.status,size_bytes:u.size,received_bytes:u.received_bytes,sha256:u.sha256,chunk_bytes:UPLOAD_CHUNK_BYTES,expires_at:u.expires_at,error_code:u.error_code,receipt:s.items.find(i=>i.slot_key===u.slot_key&&i.status==='committed')||null,canon_approved:false};}
   async function directory(u){const base=await ordinaryDirectory(path.join(dataDir,'upload-staging'));return ordinaryDirectory(path.join(base,u.id));}
   async function chunkFile(u,offset){return path.join(await directory(u),offset+'.part');}
@@ -93,6 +93,7 @@ export function installMediaUploads({one,all,run,transaction,dataDir,session,vie
   async function finalize(args){
     shape(args,['upload_id']);const u=row(args.upload_id);
     return locked(async()=>{
+      if(u.status==='erased')fail('MEDIA_ERASED','This image was permanently deleted; this upload cannot restore it.',410);
       if(u.status==='committed')return inspect(u.id);
       writable(u);if(u.received_bytes!==u.size)fail('UPLOAD_INCOMPLETE','Upload is incomplete. Resume at received_bytes before finalizing.',409);
       try{
@@ -106,6 +107,6 @@ export function installMediaUploads({one,all,run,transaction,dataDir,session,vie
   }
   // Logical exports intentionally exclude temporary image bytes. A restored
   // pending upload must not claim that its old staging offsets are resumable.
-  function afterRestore(){run("UPDATE media_uploads SET status='expired',error_code='RESTORED_WITHOUT_STAGING' WHERE status NOT IN ('committed','cancelled')");}
+  function afterRestore(){run("UPDATE media_uploads SET status='expired',error_code='RESTORED_WITHOUT_STAGING' WHERE status NOT IN ('committed','cancelled','erased')");}
   return {begin,chunk,finalize,inspect,cleanup,cancelImport,afterRestore,isBusy:()=>active};
 }

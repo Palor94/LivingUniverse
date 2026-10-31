@@ -1,3 +1,4 @@
+import {installPermanentDeleteUI} from './permanent-media-delete.js';
 import {installGhostProfile} from './ghost-profile.js';
 import {installMediaAnalysisUI} from './media-analysis.js';
 import {mountLocationCanvas} from './location-canvas.js';
@@ -19,6 +20,7 @@ const basename = p => p.split(/[\\/]/).pop();
 let state={characters:[],folders:[],stats:{media:0,inbox:0,images:0,videos:0}};
 let locationCanvas=null;
 const ghostProfile=installGhostProfile({$,esc,api,action,toast});
+const permanentDeleteUI=installPermanentDeleteUI({$,$$,api,toast,render});
 const analysisUI=installMediaAnalysisUI({$,$$,esc,api,action,toast,openDialog,refresh});
 let view=location.hash==='#locations'?'location-catalogue':'characters',activeCharacter=null,query='',folder='',kind='image',offset=0,profileTab='profile';
 const extras=installEnhancements({getActiveCharacter:()=>view==='profile'?activeCharacter:null,openCharacter:async cid=>{$('#dialog').close();await navigate('profile',cid);},$,$$,esc,api,action,toast,openDialog,refresh,render,mediaDialog,getState:()=>state,getView:()=>view,getKind:()=>kind,setKind:async value=>{kind=value;offset=0;if(view==='profile')await renderProfile();else await renderLibrary();}});
@@ -27,7 +29,7 @@ const suggestionsUI=installSuggestionsUI({$,$$,esc,api,action,toast,openDialog,r
 const places=installLocationsUI({getView:()=>view,$,$$,esc,api,openDialog,toast,refresh,render,mediaDialog,selectTag:id=>tagging.selectTag(id),reload:async reset=>{if(reset)offset=0;await (view==='profile'?renderProfile():renderLibrary());}});
 const eventTimeline=installEventTimeline({$,$$,esc,api,action,toast,openDialog,getState:()=>state,openCharacter:cid=>navigate('profile',cid)});
 const characterGeneration=installCharacterGeneration({$,$$,esc,api,mediaDialog,onSaved:async cid=>{if(view!=='profile'||activeCharacter!==cid)return;query='';folder='';kind='image';offset=0;profileTab='media';sorting.reset();tagging.reset();places.reset();await refresh();await renderProfile();toast('A generált kép elmentve a profil médiái közé. A legújabb generált kép van elöl.');}});
-const sorting=installSorting({analysisDialog:ids=>analysisUI.prepare(ids),afterFinish:mid=>duplicateReview.returnAfterSave(mid),locationDialog:ids=>places.bulk(ids),structuredTags:ids=>tagging.bulk(ids),$,$$,esc,api,action,toast,openDialog,refresh,render,mediaDialog,getState:()=>state,getView:()=>view,reload:()=>view==='profile'?renderProfile():renderLibrary(),resetPage:()=>{offset=0;}});
+const sorting=installSorting({onSelectionChange:items=>permanentDeleteUI.selection(items),analysisDialog:ids=>analysisUI.prepare(ids),afterFinish:mid=>duplicateReview.returnAfterSave(mid),locationDialog:ids=>places.bulk(ids),structuredTags:ids=>tagging.bulk(ids),$,$$,esc,api,action,toast,openDialog,refresh,render,mediaDialog,getState:()=>state,getView:()=>view,reload:()=>view==='profile'?renderProfile():renderLibrary(),resetPage:()=>{offset=0;}});
 const folderReview=installReconciliationUI({$,$$,esc,api,action,toast,openDialog,render,refresh,foldersDialog,mediaDialog});
 const duplicateReview=installDuplicatesUI({$,$$,esc,api,action,toast,openDialog,mediaDialog,refresh,getState:()=>state});
 const characterAlphabet='a á b c cs d dz dzs e é f g gy h i í j k l ly m n ny o ó ö ő p q r s sz t ty u ú ü ű v w x y z zs'.split(' ');
@@ -144,7 +146,7 @@ async function mediaDialog(mid){
   $('#media-form').onsubmit=action(async e=>{e.preventDefault();await api('/api/media/'+mid,await mediaFormPayload(e.target,true),'PUT');await render();await mediaDialog(mid);toast('Assignments and notes saved');});
   $('#media-form')._afterMediaSave=updated=>{Object.assign(m,updated);refreshMediaReviewControls($('#dialog'),m);};
   $('#review-form').onsubmit=action(async e=>{e.preventDefault();await api('/api/media/'+mid+'/review',Object.fromEntries(new FormData(e.target)));await mediaDialog(mid);toast('Review saved. Canon unchanged.');});
-  $('#reference-button').onclick=()=>referenceDialog(m);$('#cover-button').onclick=()=>extras.cropDialog(m);$('#compare-button').onclick=action(()=>compareDialog(m));bindImages();extras.media(m);folderReview.media(m);await tagging.viewer(m);await places.viewer(m);inlineCharacterCreation();suggestionsUI.viewer(m);await sorting.viewer(m);duplicateReview.viewer(m);analysisUI.viewer(m);
+  $('#reference-button').onclick=()=>referenceDialog(m);$('#cover-button').onclick=()=>extras.cropDialog(m);$('#compare-button').onclick=action(()=>compareDialog(m));bindImages();extras.media(m);folderReview.media(m);await tagging.viewer(m);await places.viewer(m);inlineCharacterCreation();suggestionsUI.viewer(m);await sorting.viewer(m);duplicateReview.viewer(m);analysisUI.viewer(m);permanentDeleteUI.media(m);
 }
 function inlineCharacterCreation(){
   const form=$('#media-form'),list=$('.checks',form);
@@ -190,6 +192,7 @@ $('#restore').onclick=()=>$('#restore-file').click();
 $('#restore-file').onchange=action(async e=>{const f=e.target.files[0];if(!f)return;try{const backup=JSON.parse(await f.text());await api('/api/restore',backup);await navigate('characters');toast('Catalogue restored. Media locations are resolved within this resource folder.');}finally{e.target.value='';}});
 $('#dialog').addEventListener('close',()=>{for(const v of $$('#dialog video'))v.pause();});
 window.addEventListener('unhandledrejection',e=>{toast(e.reason?.message||'Something went wrong. Please retry.',true);e.preventDefault();});
+permanentDeleteUI.controls();
 analysisUI.controls();
 extras.controls();
 sorting.controls();

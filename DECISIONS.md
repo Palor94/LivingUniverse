@@ -378,3 +378,22 @@ writes require Origin + dedicated CSRF; no new mobile or MCP write surface.
 See docs/MEDIA_ANALYSIS.md and docs/AI_PROVIDER_COMPARISON.md. Real-provider
 integration, private external uploads and spending need a separate explicit
 choice and reviewed data/cost preview; no deployment is implied.
+
+
+## 2026-10-31: Explicit one-click permanent desktop image deletion
+
+At the user's explicit request, add an always-visible desktop Törlés control
+for exactly one selected image, without a confirmation dialog. This is a
+separate operation from recoverable Remove. Delete the original and identified
+private derivatives, then atomically remove the media row and all assignments.
+Protect references in every canon revision; revalidate pending canonical saves
+at their final SQL transaction. Keep unrelated characters/media/vocabulary and
+completed generation provenance. Mark old import/upload receipts erased so
+replaying them cannot resurrect the media.
+
+Use bounded server-derived paths, no junctions or recursive deletion, dedicated
+Origin/CSRF checks and a durable application_settings journal. Failures report
+incomplete/partial status; retries require an explicit action, never startup
+erasure. OneDrive cloud completion is not inferred from local unlink. No new
+schema, MCP/mobile destructive authority or live-data test. See
+docs/PERMANENT_MEDIA_DELETE.md.

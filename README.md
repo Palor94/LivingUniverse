@@ -238,3 +238,11 @@ ellenőrzési előnézet, egyesével/tömegesen elfogadás/elvetés és visszavo
 Ez folyamatpróba: **nincs valódi képfelismerés vagy külső szolgáltató bekötve**.
 Lásd [használat, migráció és visszaállítás](docs/MEDIA_ANALYSIS.md), valamint
 [a következő adapterfázis szolgáltatói összehasonlítását](docs/AI_PROVIDER_COMPARISON.md).
+
+
+### Végleges képtörlés
+
+A felső desktop eszköztár Törlés gombja pontosan egy kijelölt képet töröl
+megerősítő ablak nélkül. A kanonikus referenciák védettek; a művelet az eredeti
+fájlt, előnézeteket és minden szereplő-hozzárendelést érinti. Részleges hibát
+nem jelez teljes sikernek. [Működés és korlátok](docs/PERMANENT_MEDIA_DELETE.md).

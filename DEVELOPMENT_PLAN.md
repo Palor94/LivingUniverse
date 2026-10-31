@@ -115,3 +115,12 @@ cost/data-transfer scope, then implement one adapter and evaluate on fixed
 synthetic/public images. No real recognition, automatic new-place creation,
 private external upload, paid request, merge or production rollout happened
 in this development phase.
+
+
+## 2026-10-31: Permanent image deletion
+
+Implemented on codex/permanent-media-delete: sticky desktop and viewer Törlés
+controls, single-image hard deletion, canonical-reference protection, original
+and derivative cleanup, transactional relationship removal, safe retries and
+truthful partial errors. No new migration or production rollout. See
+docs/PERMANENT_MEDIA_DELETE.md for scope, filesystem limits and tests.
