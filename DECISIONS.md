@@ -1,5 +1,18 @@
 # Decisions
 
+## 2026-10-31: Isolated Linux compatibility preparation
+
+Develop outside OneDrive on linux-compatibility, preserving the running Windows
+checkout and all writers. Use explicit existing catalogue/media configuration,
+an identity marker to reject missing mounts before scans, and a separate
+preview/backup/transaction for platform path conversion. Preserve IDs, canon,
+relationships and immutable history. Decode bounded derivatives in a separate
+scoped process; originals remain unchanged. Native credential/tunnel/service
+code is tested with synthetic files and fake transports, never live credentials.
+Only explicitly selected credential-free backups may omit the Windows DPAPI
+component. The direct-ai snapshot and schema remain separate. A source-only lab
+and passing Windows portable-backend tests do not claim actual Linux validation.
+
 ## 2026-10-29: Original-image delivery to connected assistants
 
 The user requested actual image bytes instead of thumbnails. Shared read tools now return unchanged original bytes with format, dimensions and hash; canon-bound reads still verify the immutable fingerprint. Preserve the 20 MiB/40 MP source limits. The documented 10 MiB Secure MCP Tunnel envelope requires 6 MiB inline plus hash-bound read chunks for larger images. Private Tailscale image downloads serve originals; no public file endpoint, new credentials, canon/profile changes or paid calls. Reuse image content in the versioned widget without duplicating base64 in metadata. Do not imply native generator handoff from MCP transport success. See docs/ORIGINAL_IMAGES.md.

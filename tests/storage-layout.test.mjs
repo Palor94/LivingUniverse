@@ -12,7 +12,7 @@ import {databaseIdentity} from '../app/character-edit.mjs';
 import {createWriteClient} from '../mcp/writes.mjs';
 import {createBackup,verifySnapshot} from '../ops/backup/backup.mjs';
 
-const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=','base64');
+const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC','base64');
 const sha=b=>createHash('sha256').update(b).digest('hex');
 async function fixture(fn){const temp=await fs.mkdtemp(path.join(os.tmpdir(),'lu-layout-test-')),root=path.join(temp,'media'),dataDir=path.join(temp,'data');await fs.mkdir(path.join(root,'00_SYSTEM','config'),{recursive:true});await fs.writeFile(path.join(root,'00_SYSTEM','config','storage-layout.json'),JSON.stringify({layout_version:1}));
  const database=path.join(dataDir,'universe.sqlite'),config={enabled:true,token:randomBytes(32).toString('hex'),origin:'https://fixture.example.ts.net',login:'fixture@example.test',approval_mode:'trusted',database_id:databaseIdentity(database)};

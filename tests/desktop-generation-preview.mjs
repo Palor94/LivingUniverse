@@ -6,7 +6,7 @@ import {randomUUID,randomBytes,createHash} from 'node:crypto';
 import {createApp} from '../app/server.mjs';
 import {databaseIdentity} from '../app/character-edit.mjs';
 const temp=await fs.mkdtemp(path.join(os.tmpdir(),'lu-desktop-generation-preview-')),root=path.join(temp,'media'),dataDir=path.join(temp,'data');await fs.mkdir(root);await fs.mkdir(dataDir);
-const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=','base64'),sha=createHash('sha256').update(png).digest('hex');
+const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC','base64'),sha=createHash('sha256').update(png).digest('hex');
 const config={enabled:true,token:randomBytes(32).toString('hex'),origin:'https://preview.example.ts.net',login:'synthetic@example.test',approval_mode:'trusted',database_id:databaseIdentity(path.join(dataDir,'universe.sqlite'))};
 const app=await createApp({root,dataDir,mobile:{enabled:false},mcpWrites:config,imageGeneration:{providers:{sogni:{enabled:true,model:'krea-identity-edit'}}},generationTestOptions:{env:{SOGNI_API_KEY:'synthetic-not-a-key'},availability:async()=> 'local',generate:async()=>({bytes:png,request_id:'synthetic_sogni_result',usage:null,revised_prompt:null})}});
 const cid=randomUUID(),revision=randomUUID(),refs=[],created=new Date().toISOString();

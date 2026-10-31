@@ -1,0 +1,32 @@
+[Unit]
+Description=Living Universe optional private outbound MCP tunnel
+After=living-universe.service network-online.target
+Requires=living-universe.service
+
+[Service]
+Type=simple
+User=living-universe
+Group=living-universe
+WorkingDirectory=/opt/living-universe
+Environment=LU_RUNTIME_HOME=/var/lib/living-universe
+Environment=LU_MCP_CONFIG=/etc/living-universe/mcp-config.json
+Environment=LU_IMAGE_DECODER=portable
+Environment=LU_MCP_TUNNEL_CLIENT=/opt/living-universe-tunnel/tunnel-client
+Environment=LU_MCP_PROFILE_DIRECTORY=/etc/living-universe/tunnel-profiles
+Environment=LU_MCP_TUNNEL_LOCK=/run/living-universe-tunnel/client.lock
+LoadCredential=CONTROL_PLANE_API_KEY:/etc/living-universe/tunnel.key
+ExecStart=/usr/bin/node /opt/living-universe/mcp/start-tunnel.mjs --unattended
+Restart=always
+RestartSec=60
+TimeoutStopSec=30
+KillMode=control-group
+RuntimeDirectory=living-universe-tunnel
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/living-universe-tunnel /var/lib/living-universe
+
+[Install]
+WantedBy=multi-user.target

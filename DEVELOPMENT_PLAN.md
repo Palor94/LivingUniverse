@@ -1,5 +1,16 @@
 # Development plan
 
+## Linux compatibility branch, 2026-10-31
+
+Implemented in an isolated worktree: explicit fail-closed startup/configuration,
+media-root identity marker, previewed offline path conversion, portable bounded
+image decoding, same-device crop staging, source/data backup portability and
+credential scopes. The Windows portable-backend regression passed 207/207.
+Linux service/tunnel templates and a source-only Docker lab are prepared, not
+installed. Actual Linux/systemd/mount/native-client validation remains pending.
+The direct-ai port is a separate worktree/branch with its own schema and tests;
+no snapshot merge or production/provider activation occurs here. See docs/LINUX_LAB.md.
+
 ## Media-library phases requested by the user
 
 Phase 1 implemented: page-scoped checkbox/Ctrl/Shift selection, additive bulk character assignment, additive tags with explicit tag removal, explicit categorization completion, status filtering, and a fixed filtered sequence with save-and-next/previous. No physical file operations or canonical changes occur in these bulk actions. Completion is persisted in one additive table and included in exports. See README for use and migration rollback.

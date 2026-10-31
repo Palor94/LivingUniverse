@@ -1,0 +1,7 @@
+{
+  "database": "/var/lib/living-universe/universe.sqlite",
+  "mediaRoot": "/srv/living-universe/media",
+  "mediaRootId": "REPLACE_WITH_PRIVATE_STORAGE_ID",
+  "allowAdminNotes": false,
+  "writeConfig": "/var/lib/living-universe/mcp-writes.json"
+}

@@ -43,7 +43,7 @@ test('original reference viewer reads PNG content once, rejects SVG and clears m
   const elements=Object.fromEntries(['reference','status','details'].map(id=>[id,{hidden:true,removeAttribute(name){delete this[name];}}]));
   const listeners={},parent={postMessage(){}};const window={parent,addEventListener:(name,fn)=>listeners[name]=fn},document={getElementById:id=>elements[id]};
   vm.runInNewContext(`(${mountReferencePreview.toString()})();`,{window,document});
-  const data='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=';
+  const data='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC';
   const render=params=>listeners.message({source:parent,data:{jsonrpc:'2.0',method:'ui/notifications/tool-result',params}});
   const result={content:[{type:'image',mimeType:'image/png',data}],structuredContent:{image_info:{representation:'original',delivery:'inline',sha256:'verified-hash'}},_meta:{referencePreview:{mimeType:'image/png',role:'face',revision_id:'revision',representation:'original'}}};
   render(result);assert.equal(elements.reference.src,'data:image/png;base64,'+data);assert.match(elements.status.textContent,/original/);assert.match(elements.details.textContent,/verified-hash/);

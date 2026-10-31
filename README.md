@@ -1,5 +1,11 @@
 # Living Universe
 
+Linux compatibility development: see [the isolated Linux lab](docs/LINUX_LAB.md).
+This branch adds pinned sharp/pnpm dependencies; install with
+`pnpm install --frozen-lockfile --ignore-scripts`. `pnpm test` runs only synthetic
+tests in a fresh credential-free environment. `pnpm start` requires an explicit
+existing-catalogue configuration. These changes have not been deployed to Windows.
+
 2026-10-31 source checkpoint: see [PRE_CLOUD_MIGRATION.md](docs/PRE_CLOUD_MIGRATION.md) for pinned development-source snapshots, blank reconstruction templates, test results and Windows/Linux limitations. No server migration has been performed.
 
 ## Mentés és helyreállítás

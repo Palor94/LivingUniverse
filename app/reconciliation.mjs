@@ -1,3 +1,4 @@
+import {portablePath,resolveMediaPath} from './media-paths.mjs';
 import {scanPathAllowed,catalogueFolder,storageEntries} from './storage-layout.mjs';
 import {createMissingCleanup} from './missing-cleanup.mjs';
 import {promises as fs,readFileSync} from 'node:fs';
@@ -13,25 +14,25 @@ export function installReconciliation({db,root,dataDir,types,ignored,all,one,run
   const cleanup=createMissingCleanup({db,root,dataDir,all,one,fail,removeCatalogue,isBusy:()=>relinking||cleaning||isBusy(),setBusy:value=>{cleaning=value;}});
   const same=(a,b)=>Number(a.size)===Number(b.size)&&a.modified_at===b.modified_at;
   function observation(mid,state,s,error=null){run('INSERT INTO media_scan_state VALUES(?,?,?,?,?,?) ON CONFLICT(media_id) DO UPDATE SET state=excluded.state,observed_size=excluded.observed_size,observed_mtime=excluded.observed_mtime,checked_at=excluded.checked_at,error=excluded.error',mid,state,s?.size??null,s?.modified_at??null,now(),error);}
-  async function checkedFile(relative){const full=path.resolve(root,relative);if(!full.startsWith(root+path.sep))throw fail('File must stay inside the resource folder.',403);let real;try{real=await fs.realpath(full);}catch{throw fail('This file is unavailable. Rescan after OneDrive makes it available.',409);}const realRoot=await fs.realpath(root);if(!real.startsWith(realRoot+path.sep))throw fail('File points outside the resource folder.',403);const s=await fs.stat(real);if(!s.isFile())throw fail('Expected a media file.');return {file:real,size:s.size,modified_at:s.mtime.toISOString()};}
+  async function checkedFile(relative){const full=resolveMediaPath(root,relative);if(!full.startsWith(root+path.sep))throw fail('File must stay inside the resource folder.',403);let real;try{real=await fs.realpath(full);}catch{throw fail('This file is unavailable. Rescan after OneDrive makes it available.',409);}const realRoot=await fs.realpath(root);if(!real.startsWith(realRoot+path.sep))throw fail('File points outside the resource folder.',403);const s=await fs.stat(real);if(!s.isFile())throw fail('Expected a media file.');return {file:real,size:s.size,modified_at:s.mtime.toISOString()};}
   async function scan(){
     const found=new Map(),errors=[],unavailable=[];
     async function walk(dir){let entries;try{entries=await storageEntries(dir);}catch(e){const rel=path.relative(root,dir);unavailable.push(rel);errors.push({path:rel,message:e.code||'Unavailable folder'});return;}
       for(const e of entries){if(e.name.startsWith('.')||ignored.has(e.name))continue;const full=path.join(dir,e.name),rel=path.relative(root,full);if(!scanPathAllowed(root,rel))continue;if(e.isSymbolicLink()){unavailable.push(rel);continue;}if(e.isDirectory()){await walk(full);continue;}const mime=types[path.extname(e.name).toLowerCase()];if(!mime||!e.isFile())continue;
-        try{const s=await fs.stat(full);found.set(rel,{relative_path:rel,folder:catalogueFolder(root,rel),kind:mime.startsWith('video')?'video':'image',size:s.size,modified_at:s.mtime.toISOString()});}catch(e){unavailable.push(rel);errors.push({path:rel,message:e.code||'Unavailable file'});}
+        try{const s=await fs.stat(full);found.set(portablePath(rel),{relative_path:rel,folder:catalogueFolder(root,rel),kind:mime.startsWith('video')?'video':'image',size:s.size,modified_at:s.mtime.toISOString()});}catch(e){unavailable.push(rel);errors.push({path:rel,message:e.code||'Unavailable file'});}
       }
     }
     await walk(root);
-    const existing=all('SELECT * FROM active_media'),known=new Set(all('SELECT relative_path FROM media').map(m=>m.relative_path));
+    const existing=all('SELECT * FROM active_media'),known=new Set(all('SELECT relative_path FROM media').map(m=>portablePath(m.relative_path)));
     const summary={new:0,unchanged:0,modified:0,missing:0,unavailable:0,potentially_moved:0};const missing=[];
     transaction(()=>{
       run('DELETE FROM scan_candidates');
-      for(const m of existing){const current=found.get(m.relative_path);if(current){const state=same(m,current)?'unchanged':'modified';summary[state]++;observation(m.id,state,current);if(state==='modified')run('UPDATE media SET size=?,modified_at=? WHERE id=?',current.size,current.modified_at,m.id);}
+      for(const m of existing){const current=found.get(portablePath(m.relative_path));if(current){const state=same(m,current)?'unchanged':'modified';summary[state]++;observation(m.id,state,current);if(state==='modified')run('UPDATE media SET size=?,modified_at=? WHERE id=?',current.size,current.modified_at,m.id);}
         else{const blocked=unavailable.some(p=>!p||m.relative_path===p||m.relative_path.startsWith(p+path.sep));const state=blocked?'unavailable':'missing';summary[state]++;observation(m.id,state,null,blocked?'Folder or file could not be inspected':'Path was absent in this scan; it may be temporarily unavailable');if(!blocked)missing.push(m);}
       }
       // Size + modification time provide candidates, never proof of identity.
       const byMetadata=new Map();for(const m of missing){const key=JSON.stringify([m.kind,m.size,m.modified_at]);if(!byMetadata.has(key))byMetadata.set(key,[]);byMetadata.get(key).push(m.id);}
-      for(const m of found.values()){if(known.has(m.relative_path))continue;const candidates=byMetadata.get(JSON.stringify([m.kind,m.size,m.modified_at]))||[];
+      for(const m of found.values()){if(known.has(portablePath(m.relative_path)))continue;const candidates=byMetadata.get(JSON.stringify([m.kind,m.size,m.modified_at]))||[];
         if(candidates.length){run('INSERT INTO scan_candidates VALUES(?,?,?,?,?,?)',m.relative_path,m.folder,m.kind,m.size,m.modified_at,JSON.stringify(candidates));summary.potentially_moved++;}
         else{const mid=randomUUID();run('INSERT INTO media VALUES(?,?,?,?,?,?,?)',mid,m.relative_path,m.folder,m.kind,m.size,m.modified_at,now());observation(mid,'new',m);summary.new++;}
       }

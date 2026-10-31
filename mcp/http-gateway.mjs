@@ -1,3 +1,4 @@
+import {mcpConfigPath} from '../app/runtime-config.mjs';
 import http from 'node:http';
 import {PassThrough} from 'node:stream';
 import {readFile} from 'node:fs/promises';
@@ -82,7 +83,7 @@ export function createGateway({config,dispatch,authorization=null,clock=()=>Date
 }
 export async function startGateway({configFile=process.env.LU_GROK_CONFIG,mcpConfigFile=process.env.LU_MCP_CONFIG}={}){
   const local=process.env.LOCALAPPDATA||'';
-  const mcpFile=mcpConfigFile||path.join(local,'LivingUniverse','mcp-config.json'),mcp=JSON.parse(await readFile(mcpFile,'utf8'));
+  const mcpFile=mcpConfigFile||mcpConfigPath(),mcp=JSON.parse(await readFile(mcpFile,'utf8'));
   const file=configFile||path.join(path.dirname(mcp.database),'grok-gateway.json');
   const config=JSON.parse(await readFile(file,'utf8'));if(config.enabled!==true)throw Error('Gateway disabled.');
   const catalogue=await createCatalogue({database:mcp.database,mediaRoot:mcp.mediaRoot,allowAdminNotes:false});

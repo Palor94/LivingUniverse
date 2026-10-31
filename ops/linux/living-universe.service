@@ -1,0 +1,29 @@
+[Unit]
+Description=Living Universe private catalogue
+After=local-fs.target
+RequiresMountsFor=/var/lib/living-universe /srv/living-universe/media
+
+[Service]
+Type=simple
+User=living-universe
+Group=living-universe
+WorkingDirectory=/opt/living-universe
+Environment=LU_MCP_CONFIG=/etc/living-universe/mcp-config.json
+Environment=LU_RUNTIME_HOME=/var/lib/living-universe
+Environment=LU_IMAGE_DECODER=portable
+ExecStart=/usr/bin/node /opt/living-universe/app/start-existing.mjs
+Restart=on-failure
+RestartSec=60
+TimeoutStopSec=240
+KillMode=control-group
+UMask=0077
+StateDirectory=living-universe
+RuntimeDirectory=living-universe
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/living-universe /srv/living-universe/media
+
+[Install]
+WantedBy=multi-user.target

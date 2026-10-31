@@ -1,3 +1,4 @@
+import {mcpConfigPath} from '../app/runtime-config.mjs';
 import {profileTemplateReadTool} from './profile-template.mjs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -71,7 +72,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   let catalogue;
   try{
     const args=process.argv.slice(2);if(args.length&&!(args.length===2&&args[0]==='--config'))throw new CatalogueError('CONFIG_INVALID','Use the local --config option only.');
-    const file=args[1]||path.join(process.env.LOCALAPPDATA||'', 'LivingUniverse','mcp-config.json');
+    const file=args[1]||mcpConfigPath();
     const config=JSON.parse(await readFile(file,'utf8'));if(!path.isAbsolute(config.database)||!path.isAbsolute(config.mediaRoot))throw Error();
     const oneDrive=process.env.OneDrive;if(oneDrive){const relative=path.relative(path.resolve(oneDrive),path.resolve(config.database));if(!relative||(!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative)))throw new CatalogueError('CONFIG_INVALID','The live catalogue must remain outside OneDrive.');}
     catalogue=await createCatalogue({database:config.database,mediaRoot:config.mediaRoot,allowAdminNotes:config.allowAdminNotes===true});

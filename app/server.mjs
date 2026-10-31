@@ -3,6 +3,10 @@ import {createRenameRoutes} from './character-rename-routes.mjs';
 import {migrateCharacterRace,raceValue,suggestMaleName,nameCandidates} from './character-creation.mjs';
 import {installCharacterPolicy} from './character-policy.mjs';
 import {resourceRoot,characterFolder,characterParent} from './storage-layout.mjs';
+import {defaultDataDir,verifyMediaRoot} from './runtime-config.mjs';
+import {resolveMediaPath} from './media-paths.mjs';
+import {assertNativeCataloguePaths} from './path-migration.mjs';
+import {serviceCredentialEnvironment} from './service-credentials.mjs';
 import {forgetRemovedReferences} from './reference-retention.mjs';
 import {installGhostProfiles} from './ghost-profile.mjs';
 import {installLocationCanvas} from './location-canvas.mjs';
@@ -51,9 +55,11 @@ const str = (value, max=30000) => String(value ?? '').slice(0,max);
 
 export async function createApp(options={}) {
   const root = path.resolve(options.root || defaultRoot);
-  const dataDir = options.dataDir || process.env.LIVING_UNIVERSE_DATA || path.join(process.env.LOCALAPPDATA || path.join(os.homedir(),'.local','share'),'LivingUniverse');
+  const dataDir = options.dataDir || defaultDataDir();
+  await verifyMediaRoot(root,options.mediaRootId);
   await fs.mkdir(dataDir,{recursive:true});
   const db = new DatabaseSync(path.join(dataDir,'universe.sqlite'));
+  try{assertNativeCataloguePaths(db);}catch(error){db.close();throw error;}
   let storyMigrationBackup,characterCropMigrationBackup;
   try{characterCropMigrationBackup=await backupBeforeCharacterCrops(db,dataDir);storyMigrationBackup=await backupBeforeStoryMigration(db,dataDir);}catch(e){db.close();throw e;}
   db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;
@@ -94,12 +100,13 @@ export async function createApp(options={}) {
   let scanning=false;
   let lastScan=null;
   async function scan() {
+    if(options.mediaRootId!==undefined)await verifyMediaRoot(root,options.mediaRootId);
     if(scanning||moving.size||reconciliation.isRelinking())throw fail('A scan or file move is already running. Please wait.',409);
     scanning=true;
     try{lastScan=await reconciliation.scan();return lastScan;}finally{scanning=false;}
   }
   async function safeFile(m) {
-    const full=path.resolve(root,m.relative_path);
+    const full=resolveMediaPath(root,m.relative_path);
     if(!full.startsWith(root+path.sep))throw fail('Invalid media path',403);
     let real;try{real=await fs.realpath(full);}catch{throw fail('This file is missing or unavailable in OneDrive. Make it available on this device, then retry.',404);}
     const realRoot=await fs.realpath(root);
@@ -160,7 +167,7 @@ export async function createApp(options={}) {
   let imageConfig=options.imageGeneration;
   if(imageConfig===undefined){try{imageConfig=JSON.parse(await fs.readFile(path.join(dataDir,'image-generation.json'),'utf8'));}catch{imageConfig={};}}
   const imageMigrationBackup=await backupBeforeImageGeneration(db,dataDir);
-  const imageGeneration=installImageGeneration({db,root,dataDir,one,all,run,transaction,mediaImports,characterPolicy,writeConfig:mcpWriteConfig,config:imageConfig,env:await imageCredentialEnvironment(dataDir),isBusy:()=>mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),...(options.generationTestOptions||{})});
+  const imageGeneration=installImageGeneration({db,root,dataDir,one,all,run,transaction,mediaImports,characterPolicy,writeConfig:mcpWriteConfig,config:imageConfig,env:await imageCredentialEnvironment(dataDir,await serviceCredentialEnvironment(['OPENAI_API_KEY','XAI_API_KEY','SOGNI_API_KEY'])),isBusy:()=>mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),...(options.generationTestOptions||{})});
   const permanentDelete=installPermanentMediaDelete({db,root,dataDir,one,all,run,transaction,moving,isBusy:()=>scanning||folderSync.isBusy()||reconciliation.isRelinking()||mediaImports.isBusy()||imageGeneration.isBusy(),...(options.permanentDeleteTestOptions||{})});
   const desktopGeneration=installDesktopGeneration({imageGeneration,one,all});
   const characterRename=installCompleteCharacterRename({db,all,one,run,transaction,root,dataDir,characterPolicy,isBusy:()=>folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking()||mediaImports.isBusy()||imageGeneration.isBusy()});
@@ -431,6 +438,7 @@ export async function createApp(options={}) {
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+  if(process.platform!=='win32')throw Error('Use node app/start-existing.mjs with an explicit existing catalogue configuration.');
   const app=await createApp();const port=Number(process.env.PORT)||4317;
   app.server.listen(port,'127.0.0.1',()=>console.log(`Living Universe is ready: http://127.0.0.1:${port}\nYour private catalogue: ${app.dataDir}\nOriginal media stays in place. Press Ctrl+C to stop.`));
   app.server.on('error',async e=>{console.error(e.code==='EADDRINUSE'?'Living Universe may already be running. Open http://127.0.0.1:'+port:e.message);process.exitCode=1;await app.close();});

@@ -12,6 +12,11 @@
 !/docs/VISUAL_IDENTITY.md
 !/docs/ASSISTED_SORTING.md
 !/package.json
+!/pnpm-lock.yaml
+!/pnpm-workspace.yaml
+!/.node-version
+!/.dockerignore
+!/.gitattributes
 !/Start Living Universe.cmd
 !/Enable Mobile Access.cmd
 !/docs/MOBILE_ACCESS.md
@@ -33,6 +38,8 @@
 !/ops/backup/*.mjs
 !/ops/backup/*.ps1
 !/ops/backup/components.json
+!/ops/linux/
+!/ops/testing/
 /app/**/node_modules/
 /app/**/__pycache__/
 

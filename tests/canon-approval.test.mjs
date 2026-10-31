@@ -20,7 +20,7 @@ async function fixture(t){
   const request=async(route,data)=>{const response=await fetch(base+route,{method:data?'POST':'GET',headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});return {status:response.status,data:await response.json()};};
   const call=async(...args)=>{const response=await request(...args);assert.equal(response.status,200,JSON.stringify(response));return response.data;};
   const cid=randomUUID(),mid=randomUUID(),now=new Date().toISOString();
-  const original=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=','base64');
+  const original=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC','base64');
   await fs.writeFile(path.join(root,'fixture.png'),original);
   app.db.prepare('INSERT INTO characters(id,name,created_at) VALUES(?,?,?)').run(cid,'Canon fixture',now);
   app.db.prepare('INSERT INTO media VALUES(?,?,?,?,?,?,?)').run(mid,'fixture.png','','image',original.length,now,now);

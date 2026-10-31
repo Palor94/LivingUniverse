@@ -1,6 +1,7 @@
 import {referenceCrop} from '../app/reference-crop.mjs';
 import {spawn} from 'node:child_process';
 import {readFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
 
 export const MAX_IMAGE_BYTES=196608,MAX_SOURCE_BYTES=20*1024*1024,MAX_EDGE=768;
 export const MAX_REFERENCE_BYTES=3*1024*1024,MAX_REFERENCE_EDGE=2048;
@@ -16,10 +17,13 @@ export const referenceImage=(bytes,crop=null)=>decodeImage(bytes,true,crop);
 async function decodeImage(bytes,reference,crop=null){
   const maxBytes=reference?MAX_REFERENCE_BYTES:MAX_IMAGE_BYTES,maxEdge=reference?MAX_REFERENCE_EDGE:MAX_EDGE;
   const d=dimensions(bytes);if(!d.width||!d.height||d.width*d.height>40000000||bytes.length>MAX_SOURCE_BYTES)throw Error('Image exceeds safe limits.');
-  if(process.platform!=='win32')throw Error('Thumbnail conversion requires the configured Windows image decoder.');
+  crop=referenceCrop(crop);
+  const backend=process.env.LU_IMAGE_DECODER||(process.platform==='win32'?'windows':'portable');
+  if(backend==='portable')return portableDecode(bytes,reference,crop);
+  if(backend!=='windows'||process.platform!=='win32')throw Error('Configured image decoder unavailable.');
   const script=await readFile(new URL('./thumbnail.ps1',import.meta.url),'utf8');
   const result=await new Promise((resolve,reject)=>{
-    const child=spawn('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{windowsHide:true,stdio:['pipe','pipe','pipe']});
+    const child=spawn('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{env:decoderEnvironment(),windowsHide:true,stdio:['pipe','pipe','pipe']});
     const chunks=[];let size=0,done=false;const finish=(err,value)=>{if(done)return;done=true;clearTimeout(timer);err?reject(err):resolve(value);};
     const timer=setTimeout(()=>{child.kill();finish(Error('Thumbnail conversion timed out.'));},15000);
     child.on('error',()=>finish(Error('Thumbnail converter unavailable.')));child.stdin.on('error',()=>{});child.stderr.resume();
@@ -30,5 +34,25 @@ async function decodeImage(bytes,reference,crop=null){
   if(!/^[A-Za-z0-9+/]+={0,2}$/.test(result))throw Error('Invalid thumbnail.');
   const output=Buffer.from(result,'base64'),d2=dimensions(output);
   if(output.length>maxBytes||d2.width>maxEdge||d2.height>maxEdge||output[0]!==255||output[1]!==216)throw Error('Image exceeds output bound.');
+  return {type:'image',mimeType:'image/jpeg',data:output.toString('base64')};
+}
+
+export function decoderEnvironment(env=process.env){
+  return Object.fromEntries(Object.entries(env).filter(([key])=>['PATH','SYSTEMROOT','WINDIR','TEMP','TMP','LANG','LC_ALL','PSMODULEPATH'].includes(key.toUpperCase())));
+}
+async function portableDecode(bytes,reference,crop){
+  const maxBytes=reference?MAX_REFERENCE_BYTES:MAX_IMAGE_BYTES,maxEdge=reference?MAX_REFERENCE_EDGE:MAX_EDGE;
+  const output=await new Promise((resolve,reject)=>{
+    const child=spawn(process.execPath,['--max-old-space-size=256',fileURLToPath(new URL('./image-worker.mjs',import.meta.url)),reference?'reference':'thumbnail',JSON.stringify(crop)],{env:decoderEnvironment(),windowsHide:true,stdio:['pipe','pipe','pipe']});
+    const chunks=[];let size=0,done=false;
+    const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);error?reject(error):resolve(value);};
+    const timer=setTimeout(()=>{child.kill();finish(Error('Image conversion timed out.'));},15000);
+    child.once('error',()=>finish(Error('Image converter unavailable.')));child.stdin.on('error',()=>{});child.stderr.resume();
+    child.stdout.on('data',chunk=>{size+=chunk.length;if(size>maxBytes){child.kill();finish(Error('Image exceeds output bound.'));}else chunks.push(chunk);});
+    child.once('close',code=>finish(code?Error('Image conversion unavailable.'):null,Buffer.concat(chunks)));
+    child.stdin.end(bytes);
+  });
+  const d=dimensions(output);
+  if(!output.length||output.length>maxBytes||d.width>maxEdge||d.height>maxEdge||output[0]!==255||output[1]!==216)throw Error('Image exceeds output bound.');
   return {type:'image',mimeType:'image/jpeg',data:output.toString('base64')};
 }

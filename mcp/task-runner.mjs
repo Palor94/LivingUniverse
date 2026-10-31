@@ -1,3 +1,4 @@
+import {runtimeHome} from '../app/runtime-config.mjs';
 import {mkdirSync,writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {launch} from './start-tunnel.mjs';
@@ -5,7 +6,7 @@ import {setTimeout} from 'node:timers/promises';
 import {supervise} from './supervisor.mjs';
 
 // Diagnostic tail only: no HTTP payload logging, bounded to 64 KiB.
-const dir=path.join(process.env.LOCALAPPDATA,'LivingUniverse','mcp-runtime');
+const dir=path.join(runtimeHome(),'mcp-runtime');
 mkdirSync(dir,{recursive:true});
 let tail='';
 function record(value){

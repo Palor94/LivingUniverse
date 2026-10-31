@@ -1,6 +1,7 @@
+import {samePhysicalPath,resolveMediaPath} from './media-paths.mjs';
 import {promises as fs,constants,readFileSync} from 'node:fs';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {pixelCrop} from './public/crop-selection.js';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,sha=/^[a-f0-9]{64}$/;
 const extensions={'.jpg':'jpeg','.jpeg':'jpeg','.png':'png','.webp':'webp'};
@@ -33,7 +34,7 @@ export function installImageCrops({db,root,dataDir,one,all,run,transaction,asset
   const originals=path.join(dataDir,'image-originals'),staging=path.join(dataDir,'image-edit-staging');
   function protectedImage(mid){return !!one("SELECT 1 FROM canon c,json_each(c.references_json) r WHERE json_extract(r.value,'$.media_id')=? LIMIT 1",mid);}
   function available(mid){const m=asset(mid);if(m.kind!=='image'||!extensions[path.extname(m.relative_path).toLowerCase()])throw fail('Cropping supports JPEG, PNG and WebP pictures. Animated pictures are not flattened.');if(one('SELECT 1 FROM media_hidden WHERE media_id=?',mid))throw fail('Restore this item from Removed items before cropping it.',409);return m;}
-  async function source(m){const file=await safeFile(m),expected=path.resolve(root,m.relative_path),same=(a,b)=>(process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b);if(!same(file,expected)||(await fs.lstat(expected)).isSymbolicLink())throw fail('Cropping through symbolic links is not allowed.',403);const stat=await fs.stat(file);if(!stat.isFile()||stat.size>64*1024*1024)throw fail('This picture is too large for the crop editor (64 MB maximum).');return {file,stat};}
+  async function source(m){const file=await safeFile(m),expected=resolveMediaPath(root,m.relative_path),same=(a,b)=>(process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b);if(!same(file,expected)||(await fs.lstat(expected)).isSymbolicLink())throw fail('Cropping through symbolic links is not allowed.',403);const stat=await fs.stat(file);if(!stat.isFile()||stat.size>64*1024*1024)throw fail('This picture is too large for the crop editor (64 MB maximum).');return {file,stat};}
   async function privateFile(folder,name){await fs.mkdir(folder,{recursive:true});const base=await fs.realpath(dataDir),real=await fs.realpath(folder);if(!real.startsWith(base+path.sep)||(await fs.lstat(folder)).isSymbolicLink())throw fail('The recovery storage directory is unsafe.',403);return path.join(real,name);}
   function state(mid){const edit=one("SELECT id,status,created_at FROM media_image_edits WHERE media_id=? AND status IN ('applied','needs_review') ORDER BY rowid DESC LIMIT 1",mid);return {protected:protectedImage(mid),latest_edit:edit||null};}
   function metadata(mid,stat){run('UPDATE media SET size=?,modified_at=? WHERE id=?',stat.size,stat.mtime.toISOString(),mid);run('DELETE FROM media_fingerprints WHERE media_id=?',mid);}
@@ -68,11 +69,12 @@ export function installImageCrops({db,root,dataDir,one,all,run,transaction,asset
         const backup=await privateFile(originals,body.edit_id+'.original');await fs.copyFile(file,backup,constants.COPYFILE_EXCL);if(await fingerprint(backup)!==originalHash)throw fail('Original backup verification failed. Nothing was replaced.',409);
         run("INSERT INTO media_image_edits VALUES(?,?,'preparing',?,?,?,?,?,?,NULL)",body.edit_id,mid,originalHash,hash(bytes),JSON.stringify(r),stat.size,stat.mtime.toISOString(),new Date().toISOString());edit=one('SELECT * FROM media_image_edits WHERE id=?',body.edit_id);
       }
-      journal=edit.id;temp=await privateFile(staging,edit.id+(restoring?'-restore':'')+'.image');await fs.writeFile(temp,bytes,{flag:'wx'});if(await fingerprint(temp)!==hash(bytes))throw fail('Crop staging verification failed.',409);
+      // Stage on the destination filesystem so atomic replacement also works
+      // when private recovery storage is mounted on a different device.
+      journal=edit.id;temp=path.join(path.dirname(file),'.living-universe-crop-'+randomUUID()+'.tmp');await fs.writeFile(temp,bytes,{flag:'wx',mode:0o600});if(await fingerprint(temp)!==hash(bytes))throw fail('Crop staging verification failed.',409);
       const current=available(mid),check=await source(current);if(check.file!==file||await fingerprint(file)!==originalHash||protectedImage(mid))throw fail('The source or approved reference status changed. Nothing was replaced.',409);
       if(restoring)run("UPDATE media_image_edits SET status='restoring' WHERE id=?",edit.id);
-      // The verified backup precedes the atomic replacement. EXDEV/locked OneDrive
-      // files fail without truncating the current original; the journal remains.
+      // The verified private backup precedes the same-filesystem atomic replacement.
       await fs.rename(temp,file);temp=null;replaced=true;const saved=await fs.stat(file);
       transaction(()=>{metadata(mid,saved);run('UPDATE media_image_edits SET status=?,restored_at=? WHERE id=?',restoring?'restored':'applied',restoring?new Date().toISOString():null,edit.id);});
       json({...receipt(one('SELECT * FROM media_image_edits WHERE id=?',edit.id)),source_sha256:hash(bytes)});return true;

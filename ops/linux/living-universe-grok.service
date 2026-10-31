@@ -1,0 +1,27 @@
+[Unit]
+Description=Living Universe optional OAuth MCP gateway
+After=living-universe.service network-online.target
+Requires=living-universe.service
+
+[Service]
+Type=simple
+User=living-universe
+Group=living-universe
+WorkingDirectory=/opt/living-universe
+Environment=LU_MCP_CONFIG=/etc/living-universe/mcp-config.json
+Environment=LU_GROK_CONFIG=/var/lib/living-universe/grok-gateway.json
+Environment=LU_RUNTIME_HOME=/var/lib/living-universe
+Environment=LU_IMAGE_DECODER=portable
+ExecStart=/usr/bin/node /opt/living-universe/mcp/http-gateway.mjs
+Restart=on-failure
+RestartSec=60
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/living-universe
+
+[Install]
+WantedBy=multi-user.target
