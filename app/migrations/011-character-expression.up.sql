@@ -1,0 +1,2 @@
+ALTER TABLE characters ADD COLUMN sexuality TEXT NOT NULL DEFAULT '';
+ALTER TABLE characters ADD COLUMN speech_style TEXT NOT NULL DEFAULT '';

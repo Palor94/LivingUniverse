@@ -1,0 +1,10 @@
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+if(process.platform!=='win32')throw Error('Use SOGNI_API_KEY and the local image-generation.json on this platform.');
+const ps=path.join(process.env.SystemRoot||'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe');
+console.log('Opening the separate Living Universe - Sogni key window.');
+const child=spawn(ps,['-NoProfile','-STA','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',fileURLToPath(new URL('./sogni-key.ps1',import.meta.url)),'-Mode','Setup'],{env:{...process.env,PSModulePath:path.join(path.dirname(ps),'Modules')},windowsHide:false,stdio:['ignore','pipe','pipe']});
+child.stdout.pipe(process.stdout);child.stderr.pipe(process.stderr);
+child.on('error',()=>{console.error('Sogni setup could not open.');process.exitCode=1;});
+child.on('close',code=>{process.exitCode=code??1;});

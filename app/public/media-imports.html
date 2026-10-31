@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="hu"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Feltöltések kezelése · Living Universe</title><link rel="stylesheet" href="/mobile.css">
+<main class="app"><h1>Feltöltések kezelése</h1>
+<p>A megszakítás felszabadítja a függő feltöltés keretét és törli az ideiglenes képdarabokat. A már elmentett képek, karakterkapcsolatok és jóváhagyott referenciák megmaradnak.</p>
+<p>A megszakított import később nem folytatható. Új képekhez kérj új importot az asszisztenstől.</p>
+<p id="capacity">Kapacitás betöltése…</p>
+<label>Állapot <select id="filter"><option value="open">Nyitott</option><option value="expired">Lejárt</option><option value="cancelled">Megszakított</option><option value="all">Összes</option></select></label>
+<button id="refresh">Frissítés</button><p role="status" id="status"></p>
+<section id="imports" aria-label="Importok"></section>
+<p><button id="previous" disabled>Előző</button> <button id="next" disabled>Következő</button></p>
+<p><a href="/">Vissza a katalógushoz</a></p></main>
+<script type="module" src="/media-imports.js"></script></html>

@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "repository": "Palor94/LivingUniverse",
+  "default_branch": "main",
+  "entry_point": "RECOVERY.md",
+  "components": [
+    {"id":"application","source":["app/","package.json","Start Living Universe.cmd"],"restore":"source/","data":"catalogue/universe.sqlite"},
+    {"id":"connector","source":["mcp/","docs/MCP_INTEGRATION.md","docs/MCP_RECOVERY.md","docs/GROK_INTEGRATION.md"],"restore":"source/","private":"private/runtime.dpapi"},
+    {"id":"catalogue","private":true,"artifacts":["catalogue/universe.sqlite","catalogue/catalogue.json","catalogue/schema.sql"],"restore":"Existing SQLite snapshot; never overwrite a running database"},
+    {"id":"world-layout","private":true,"artifacts":["state/location-canvas.json","state/location-canvas-suggestions.json","state/location-canvas.previous.json"]},
+    {"id":"local-assets","private":true,"artifacts":["local-assets/"],"description":"Original crop recovery, pending imports/uploads and generation recovery outside OneDrive media"},
+    {"id":"platform","private":true,"artifacts":["platform/","private/runtime.dpapi"],"description":"Tunnel binaries/licenses, encrypted task definitions and local Git-history bundle"},
+    {"id":"media","private":true,"artifacts":["media/manifest.json"],"originals":"Existing OneDrive media root; no originals copied by default"},
+    {"id":"operations","source":["ops/","RECOVERY.md","Backup Living Universe.cmd","Verify Living Universe Backup.cmd"],"description":"Versioned backup and isolated restore tools"}
+  ]
+}
