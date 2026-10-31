@@ -16,6 +16,7 @@ export function installPermanentMediaDelete({db,root,dataDir,one,all,run,transac
   const csrf=randomBytes(32).toString('hex');let active=false;
   const receipt=id=>{const r=one('SELECT value FROM application_settings WHERE key=?',key(id));return r?JSON.parse(r.value):null;};
   const store=(id,value)=>run('INSERT INTO application_settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',key(id),JSON.stringify(value));
+  const hasTable=table=>!!one("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",table);
   function checked(id){
     if(typeof id!=='string'||!uuid.test(id))throw error('INVALID_ID','Érvénytelen médiaazonosító.',400);
     const m=one('SELECT * FROM media WHERE id=?',id);if(!m)throw error('NOT_FOUND','A kép nem található.',404);
@@ -63,6 +64,9 @@ export function installPermanentMediaDelete({db,root,dataDir,one,all,run,transac
     add('media',m.relative_path);return artifacts.sort((a,b)=>Number(a.area==='media')-Number(b.area==='media')||(a.relative<b.relative?-1:a.relative>b.relative?1:0));
   }
   function cleanDatabase(id){
+    // Deletion also ships to installations predating the optional note/analysis
+    // phases. Installing this control must not implicitly migrate those phases.
+    if(hasTable('media_analysis_items')){
     const cacheKeys=all('SELECT cache_key FROM media_analysis_items WHERE media_id=? AND cache_key IS NOT NULL',id).map(r=>r.cache_key);
     run('DELETE FROM media_analysis_tag_links WHERE media_id=?',id);run('DELETE FROM media_analysis_place_links WHERE media_id=?',id);
     // Preserve unrelated actions in decisions that reviewed several images.
@@ -75,9 +79,10 @@ export function installPermanentMediaDelete({db,root,dataDir,one,all,run,transac
     run('DELETE FROM media_analysis_proposals WHERE item_id IN (SELECT id FROM media_analysis_items WHERE media_id=?)',id);
     run('DELETE FROM media_analysis_items WHERE media_id=?',id);
     for(const cacheKey of cacheKeys)if(!one('SELECT 1 FROM media_analysis_items WHERE cache_key=? LIMIT 1',cacheKey))run('DELETE FROM media_analysis_cache WHERE cache_key=?',cacheKey);
+    }
     for(const row of all('SELECT id,evidence_json FROM sorting_suggestions WHERE media_id<>?',id))if((JSON.parse(row.evidence_json).references||[]).some(r=>r.media_id===id)){run('DELETE FROM suggestion_feedback WHERE suggestion_id=?',row.id);run('DELETE FROM sorting_suggestions WHERE id=?',row.id);}
     run('DELETE FROM suggestion_feedback WHERE suggestion_id IN (SELECT id FROM sorting_suggestions WHERE media_id=?)',id);
-    for(const table of ['sorting_suggestions','note_tag_proposal_changes','note_tag_proposals','note_tag_links','media_analysis_place_links','media_tags','media_locations','media_location_links','depictions','media_notes','reviews','media_hidden','media_scan_state','media_fingerprints','media_categorization','media_roles','character_cover_frames','media_image_edits','file_moves','imported_media_blobs'])run('DELETE FROM '+table+' WHERE media_id=?',id);
+    for(const table of ['sorting_suggestions','note_tag_proposal_changes','note_tag_proposals','note_tag_links','media_analysis_place_links','media_tags','media_locations','media_location_links','depictions','media_notes','reviews','media_hidden','media_scan_state','media_fingerprints','media_categorization','media_roles','character_cover_frames','media_image_edits','file_moves','imported_media_blobs']){if(/^(?:note_tag_|media_analysis_)/u.test(table)&&!hasTable(table))continue;run('DELETE FROM '+table+' WHERE media_id=?',id);}
     run('UPDATE characters SET cover_id=NULL WHERE cover_id=?',id);
     run("UPDATE character_ui SET cover_crop=NULL WHERE json_valid(cover_crop) AND json_extract(cover_crop,'$.media_id')=?",id);
     for(const row of all('SELECT relative_path,candidate_ids FROM scan_candidates')){const ids=JSON.parse(row.candidate_ids).filter(v=>v!==id);if(ids.length)run('UPDATE scan_candidates SET candidate_ids=? WHERE relative_path=?',JSON.stringify(ids),row.relative_path);else run('DELETE FROM scan_candidates WHERE relative_path=?',row.relative_path);}
