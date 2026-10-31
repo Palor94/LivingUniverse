@@ -1,0 +1,13 @@
+# Sorting Window character creation
+
+The inline Create new character form offers a Suggest name button beside its free-text name input. It fills the input without creating a character or changing gender. Create & select character remains the explicit save action; the media assignment is saved separately with the existing sorting controls.
+
+The server chooses from 1,392 male first-name/family-name combinations. Every request reads current character names from the database, including merged records. Comparison removes Unicode combining accents, folds case, trims leading/trailing whitespace and collapses repeated whitespace. The form keeps a session-local suggestion history. After showing every available candidate, another round avoids the current input where possible. Exhaustion and errors leave the input editable. A manual edit made during a pending request takes precedence.
+
+Race defaults to Human and offers the eleven requested grouped categories in English. Stable API values are human, orc, goblin, troll, minotaur, centaur, satyr_faun, werewolf, lizardfolk_dragonborn, dwarf, ogre and bearfolk_bullfolk. Race can be viewed and changed in the desktop character profile; changes autosave and use the existing conflict checks. It is returned by the desktop API and MCP character details, and included in catalogue exports. Other creation paths inherit Human from the database default.
+
+Migration 022 adds a constrained non-null column with a Human default. Existing rows retain all other values. Before altering an existing populated catalogue, startup creates and verifies an online SQLite backup in the local catalogue's backups directory. Old exports without race restore as Human; old clients omitting race on update preserve the saved race. The down migration requires a backup and reverting race-aware code first.
+
+Limits: suggestions use a finite local vocabulary, not an AI provider; they are checked at suggestion time and do not reserve a name against concurrent creation. Manual names remain allowed. The Human legacy default is a compatibility value, not a claim inferred from character images or biographies. Race editing is exposed in the desktop profile; the separate mobile editor has no new race control.
+
+Verification: focused tests cover normalization, session reuse, exhaustion, manual-edit/error handling, migration backup, all categories, validation, conflict protection, restart, MCP reads and old/new restores. Browser verification covers repeated suggestions, explicit character creation with Orcs, retained sorting notes, assignment/completion and changing the saved race to Dwarves before reopening the profile.
