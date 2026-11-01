@@ -28,18 +28,18 @@ async function read(file,limit,{privateFile=true}={}){
  }finally{await handle.close();}
 }
 const lines=bytes=>bytes.toString('utf8').split(/\r?\n/u).map(s=>s.trim()).filter(s=>s&&!s.startsWith('#'));
-async function age(args,input,identity){
+async function age(args,input,identityFd){
  return new Promise((resolve,reject)=>{
   // The fixed system binary and empty service environment cannot load provider keys or plugins.
-  const child=spawn('/usr/bin/age',args,{env:{PATH:'/usr/bin:/bin',LANG:'C.UTF-8'},stdio:identity?['pipe','pipe','pipe','pipe']:['pipe','pipe','pipe']});
+  const child=spawn('/usr/bin/age',args,{env:{PATH:'/usr/bin:/bin',LANG:'C.UTF-8'},stdio:Number.isInteger(identityFd)?['pipe','pipe','pipe',identityFd]:['pipe','pipe','pipe']});
   const chunks=[];let size=0,failed=false;
   const stop=()=>{failed=true;child.kill('SIGKILL');};const timer=setTimeout(stop,30000);
   child.stdout.on('data',chunk=>{size+=chunk.length;if(size>payloadLimit)stop();else chunks.push(chunk);});
   child.stderr.on('data',()=>{}); // Never expose age diagnostics containing private content.
-  child.stdin.on('error',()=>{});if(identity)child.stdio[3].on('error',()=>{});
+  child.stdin.on('error',()=>{});
   child.once('error',()=>{clearTimeout(timer);reject(fail('age unavailable; install the distribution age package.'));});
   child.once('close',code=>{clearTimeout(timer);if(code!==0||failed){for(const chunk of chunks)chunk.fill(0);reject(fail('Encryption/decryption failed; no recovered files activated.'));}else resolve(Buffer.concat(chunks));});
-  if(identity)child.stdio[3].end(identity);child.stdin.end(input);
+  child.stdin.end(input);
  });
 }
 export async function protectPrivateRuntime({inventoryFile,recipientsFile,output}={}){
@@ -71,7 +71,10 @@ export async function restorePrivateRuntime({input,identityFile,target,expectedS
   const cipher=await read(input,payloadLimit);if(digest(cipher)!==expectedSha256)throw fail('Ciphertext checksum mismatch.');
   identity=await read(identityFile,16384);
   const keys=lines(identity);if(!keys.length||keys.length>8||keys.some(k=>!/^AGE-SECRET-KEY-1[023456789ACDEFGHJKLMNPQRSTUVWXYZ]{58}$/u.test(k)))throw fail('Only native unencrypted X25519 identities are supported; no interactive or plugin execution.');
-  plain=await age(['--decrypt','--identity','/dev/fd/3'],cipher,identity);
+  // age reopens /dev/fd/3; a Node 'pipe' is a socket and cannot be reopened there.
+  // Pass an already opened regular file, never a secret value or mutable path argument.
+  const identityHandle=await fs.open(absolute(identityFile),constants.O_RDONLY|constants.O_NOFOLLOW);
+  try{const held=await identityHandle.readFile();try{if(!held.equals(identity))throw fail('Identity changed before decryption.');}finally{held.fill(0);}plain=await age(['--decrypt','--identity','/dev/fd/3'],cipher,identityHandle.fd);}finally{await identityHandle.close();}
   const payload=JSON.parse(plain.toString('utf8'));if(payload.format!==1||payload.kind!=='living-universe-private-runtime'||!Array.isArray(payload.files)||!payload.files.length||payload.files.length>128)throw fail('Invalid private archive.');
   let total=0;const seen=new Set();
   for(const entry of payload.files){const name=logical(entry.path);if(seen.has(name))throw fail('Duplicate private entry.');seen.add(name);
