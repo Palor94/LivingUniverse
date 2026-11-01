@@ -9,6 +9,7 @@ import {fileURLToPath} from 'node:url';
 const fileLimit=1024*1024,totalLimit=8*1024*1024,payloadLimit=12*1024*1024;
 const fail=message=>Error('PRIVATE_RUNTIME: '+message);
 const digest=data=>createHash('sha256').update(data).digest('hex');
+function parse(bytes){try{return JSON.parse(bytes.toString('utf8'));}catch{throw fail('Invalid private JSON document.');}}
 function linux(){if(process.platform!=='linux')throw fail('This encrypted file workflow requires Linux.');}
 function absolute(file){if(typeof file!=='string'||!path.isAbsolute(file)||file.includes('\0'))throw fail('Explicit absolute paths required.');return path.resolve(file);}
 function logical(name){
@@ -47,7 +48,7 @@ export async function protectPrivateRuntime({inventoryFile,recipientsFile,output
  let payload,cipher;const sensitive=[];
  try{
   const inventoryBytes=await read(inventoryFile,65536);sensitive.push(inventoryBytes);
-  const inventory=JSON.parse(inventoryBytes.toString('utf8'));
+  const inventory=parse(inventoryBytes);
   if(inventory.format!==1||!Array.isArray(inventory.files)||!inventory.files.length||inventory.files.length>128)throw fail('Invalid explicit inventory.');
   const recipientBytes=await read(recipientsFile,16384,{privateFile:false});const recipients=lines(recipientBytes);
   if(!recipients.length||recipients.length>8||new Set(recipients).size!==recipients.length||recipients.some(r=>!/^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$/u.test(r)))throw fail('Use one to eight distinct native X25519 age recipients; plugins and interactive keys are unsupported.');
@@ -75,7 +76,7 @@ export async function restorePrivateRuntime({input,identityFile,target,expectedS
   // Pass an already opened regular file, never a secret value or mutable path argument.
   const identityHandle=await fs.open(absolute(identityFile),constants.O_RDONLY|constants.O_NOFOLLOW);
   try{const held=await identityHandle.readFile();try{if(!held.equals(identity))throw fail('Identity changed before decryption.');}finally{held.fill(0);}plain=await age(['--decrypt','--identity','/dev/fd/3'],cipher,identityHandle.fd);}finally{await identityHandle.close();}
-  const payload=JSON.parse(plain.toString('utf8'));if(payload.format!==1||payload.kind!=='living-universe-private-runtime'||!Array.isArray(payload.files)||!payload.files.length||payload.files.length>128)throw fail('Invalid private archive.');
+  const payload=parse(plain);if(payload.format!==1||payload.kind!=='living-universe-private-runtime'||!Array.isArray(payload.files)||!payload.files.length||payload.files.length>128)throw fail('Invalid private archive.');
   let total=0;const seen=new Set();
   for(const entry of payload.files){const name=logical(entry.path);if(seen.has(name))throw fail('Duplicate private entry.');seen.add(name);
    if(typeof entry.bytes!=='string'||entry.bytes.length>Math.ceil(fileLimit/3)*4||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(entry.bytes))throw fail('Invalid private file encoding.');
