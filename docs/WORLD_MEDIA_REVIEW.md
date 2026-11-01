@@ -7,6 +7,14 @@ Az alkalmazás `#ai-review` és `#ai-review-trial` hash-hivatkozása is használ
 
 ## Szereplők jelölése
 
+A P1/P2-összefoglaló külön rövid fizikai leírást is mutat. Meglévő, az adott
+alakhoz rendelt szöveges ismertetőjegyből dolgozik; hiányzó jellemzőt nem talál ki.
+A kijelölt alak **Rövid fizikai leírás** mezője kézzel kitölthető és javítható.
+Ez a képhez és alakazonosítóhoz mentett megjegyzés, nem karakterprofil vagy kánon.
+A mentés, visszavonás és katalógusexport ezt is megőrzi. Az eredeti elemzési kör
+nem gyűjtött rendszeresen fizikai jellemzőket; a hiányok automatikus kitöltése
+külön képelemzési feladat lenne.
+
 A képen vagy a jobb oldali alaklistában válassz p1/p2 jelölést, majd válaszd ki
 a meglévő karaktert. Az ismeretlen és a nem karakterként kezelt alak külön állapot.
 A névkereső szűkíti a karakterválasztót. A már létező képszintű kapcsolatok csak

@@ -36,9 +36,9 @@ export function defaultReview(raw){return {fields:{},participants:raw.scene_deta
 export function validateReviewDocument(raw,document,{characterExists=()=>true,planning=false}={}){
  object(document,['fields','participants','identity_reviewed']);if(!document.fields||typeof document.fields!=='object'||Array.isArray(document.fields)||!Array.isArray(document.participants)||document.participants.length>24||typeof document.identity_reviewed!=='boolean')bad();
  const original=new Map(reviewFields(raw,document).map(f=>[f.id,f])),ids=new Set(),participants=document.participants.map(p=>{
-  object(p,['id','region','character_id','identity_state','ignored','description']);if(typeof p.id!=='string'||!(/^(p[1-8]|u[1-9][0-9]?)$/u.test(p.id))||ids.has(p.id)||typeof p.ignored!=='boolean'||!['unreviewed','reviewed','unknown','not_character'].includes(p.identity_state)||!(p.character_id===null||typeof p.character_id==='string'&&characterExists(p.character_id)))bad();
+  object(p,['id','region','character_id','identity_state','ignored','description','physical_description']);if(typeof p.id!=='string'||!(/^(p[1-8]|u[1-9][0-9]?)$/u.test(p.id))||ids.has(p.id)||typeof p.ignored!=='boolean'||!['unreviewed','reviewed','unknown','not_character'].includes(p.identity_state)||!(p.character_id===null||typeof p.character_id==='string'&&characterExists(p.character_id)))bad();
   if(p.identity_state==='reviewed'&&!p.character_id||['unknown','not_character'].includes(p.identity_state)&&p.character_id!==null||p.ignored&&p.character_id!==null||!document.identity_reviewed&&p.identity_state==='reviewed')bad();
-  ids.add(p.id);return {...p,description:text(p.description,200),region:reviewRegion(p.region)};
+  ids.add(p.id);return {...p,description:text(p.description,200),region:reviewRegion(p.region),...(p.physical_description!==undefined?{physical_description:text(p.physical_description,300)}:{})};
  });
  for(const p of raw.scene_details.participants)if(!ids.has(p.id))bad();
  const fields={};if(Object.keys(document.fields).length>200)bad();
