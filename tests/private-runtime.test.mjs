@@ -38,6 +38,7 @@ test('wrong identities, changed ciphertext and untrusted hashes fail before any 
 });
 test('capture rejects unsafe paths, duplicate names, links, loose permissions and plugin recipients before encryption',options,async t=>{
  const f=await fixture(t);
+ await fs.writeFile(f.inventory,'synthetic-private-invalid-content');await assert.rejects(f.protect(),error=>{assert.equal(error.message,'PRIVATE_RUNTIME: Invalid private JSON document.');return true;});
  for(const files of [[{source:f.source,path:'credentials/../escape'}],[...f.entries,...f.entries],[{source:'relative',path:'config/a'}]]){
   await fs.writeFile(f.inventory,JSON.stringify({format:1,files}));await assert.rejects(f.protect());
  }
