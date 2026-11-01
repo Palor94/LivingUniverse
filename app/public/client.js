@@ -20,7 +20,7 @@ const $$ = (s,root=document)=>[...root.querySelectorAll(s)];
 const esc = v => String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const basename = p => p.split(/[\\/]/).pop();
 let state={characters:[],folders:[],stats:{media:0,inbox:0,images:0,videos:0}};
-const worldReviewUI=installWorldReviewUI({api,openDialog,mediaDialog,toast,getState:()=>state,esc});
+const worldReviewUI=installWorldReviewUI({api,openDialog,mediaDialog,toast,getState:()=>state,esc,createCharacter:hooks=>newCharacter('',hooks)});
 let locationCanvas=null;
 const ghostProfile=installGhostProfile({$,esc,api,action,toast});
 const permanentDeleteUI=installPermanentDeleteUI({$,$$,api,toast,render});
@@ -76,9 +76,10 @@ function renderCharacters(){
   for(const c of $$('[data-character]'))c.onclick=action(()=>navigate('profile',c.dataset.character));
 }
 async function renderTemplateCharacter(){await ghostProfile.renderTemplate($('#content'),()=>navigate('characters'));}
-function newCharacter(initial=''){
+function newCharacter(initial='',hooks={}){
   openDialog('Create a character',`<form id="new-character-form" class="form-grid"><label>Name or working title<input name="name" required maxlength="200" value="${esc(initial)}" placeholder="A name, or a description for now" autofocus></label><label>Nem / önmeghatározás<select name="gender"><option value="">Válassz…</option><option value="férfi">Férfi</option><option value="nem-bináris">Nem-bináris</option></select></label><p class="muted">You can change the name later without losing pictures, notes, or relationships. Biographies and appearance details stay blank until you add them.</p><div class="dialog-footer"><button class="primary">Create character</button></div></form>`);
-  $('#new-character-form').onsubmit=action(async e=>{e.preventDefault();const c=await api('/api/characters',{name:new FormData(e.target).get('name'),gender:new FormData(e.target).get('gender')});$('#dialog').close();await navigate('profile',c.id);toast('Character created');});
+  if(hooks.onCancel){$('#new-character-form .dialog-footer').insertAdjacentHTML('beforeend','<button type="button" id="new-character-review-cancel">Vissza a jelöléshez</button>');$('#new-character-review-cancel').onclick=hooks.onCancel;$('#close-dialog').onclick=hooks.onCancel;$('#dialog').oncancel=event=>{event.preventDefault();hooks.onCancel();};}
+  $('#new-character-form').onsubmit=action(async e=>{e.preventDefault();const c=await api('/api/characters',{name:new FormData(e.target).get('name'),gender:new FormData(e.target).get('gender')});if(hooks.onCreated){await refresh();await hooks.onCreated(c);}else{$('#dialog').close();await navigate('profile',c.id);}toast('Character created');});
 }
 async function scanMedia(e){const button=e?.currentTarget;if(button){button.disabled=true;button.textContent='Scanning metadata…';}toast('Reading file names and metadata. Originals stay in place.');try{const result=await api('/api/scan',{});await render();toast(`${result.new} new · ${result.modified} modified · ${result.missing} missing · ${result.potentially_moved} possible moves.`);await folderReview.report(result.modified?'modified':result.missing?'missing':'new');}finally{if(button?.isConnected){button.disabled=false;button.textContent='Find new media';}}}
 async function folderNamesDialog(){

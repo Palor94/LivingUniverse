@@ -55,8 +55,9 @@ export function validateReviewDocument(raw,document,{characterExists=()=>true,pl
    if(value.usable_for.includes('face_reference')&&!['clear','partial'].includes(value.face_visibility)||value.usable_for.some(u=>['body_reference','pose_reference'].includes(u))&&!['full','partial'].includes(value.body_coverage))bad();value={...value,limitations:text(value.limitations,500)};
   }else if(field.kind==='simulation'){
    object(value,['scope','narration_only']);if(!['scene_illustration','character_introduction','review_required'].includes(value.scope)||typeof value.narration_only!=='boolean'||raw.background.kind==='neutral'&&(value.scope!=='character_introduction'||!value.narration_only))bad();
-   // Folder purpose is authoritative independently of a reviewed suggestion.
-   if(planning&&value.scope==='character_introduction'&&edit.state==='accepted')bad();value={...value};
+   // Planning purpose is enforced independently by retrieval; reviewing a visual
+   // usage observation must not prevent saving a neutral illustrated plan.
+   value={...value};
   }else bad();
   if(edit.target_id!==undefined&&edit.target_id!==null&&typeof edit.target_id!=='string')bad();fields[id]={state:edit.state,value,ack_uncertain:edit.ack_uncertain,target_id:edit.target_id||null};
  }

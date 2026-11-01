@@ -12,6 +12,13 @@ a meglévő karaktert. Az ismeretlen és a nem karakterként kezelt alak külön
 A névkereső szűkíti a karakterválasztót. A már létező képszintű kapcsolatok csak
 jelöltek: nem automatikus arcfelismerés eredményei.
 
+A korábbi képszintű kapcsolatok a névválasztó első javaslatcsoportjába kerülnek.
+Egyetlen látható alak és egyetlen korábbi kapcsolat esetén a név alapból kitöltött,
+ellenőrizetlen javaslat. Több alakhoz nem osztunk ki neveket pusztán sorrendből.
+Az **Új karakter…** a meglévő karakterlétrehozó ablakot nyitja meg, annak
+házirendjével és mezőivel. Mentés után az új karakter az aktuális alaknál lesz
+kiválasztva; visszalépéskor a jelölő addigi munkája megmarad.
+
 A régió húzható, sarka átméretezhető, számszerűen is javítható. A **Kijelölt alak
 régiójának rajzolása** újrarajzolja ugyanannak az alaknak a téglalapját. Az **Új
 alak kijelölése** külön, stabil u-azonosítót ad a kézzel felvett figurának. Téves
@@ -43,8 +50,11 @@ célja továbbra is érvényes.
 
 ## Mentés és folytatás
 
-A két fül külön menthető. A **Mentés és következő** mindkettő aktuális állapotát
-menti, majd az aktuális találati oldal következő képére lép. A **Kihagyás**
+A két fül külön menthető. A felhasználó külön kérésére a **Mentés és következő**
+az aktuális kép összes függő címkejavaslatát, a bizonytalanokat is beleértve,
+elfogadja, valamint a kiválasztott karakter-hozzárendeléseket ellenőrzöttnek
+jelöli. A kézi javításokat és a korábban elvetett címkéket megőrzi; hiányzó nevet
+nem talál ki. Ezután az aktuális találati oldal következő képére lép. A **Kihagyás**
 nem fogadja el a megfigyeléseket. Nem mentett módosítás elhagyásakor figyelmeztetés
 jelenik meg. A legutóbbi mentés visszavonható; a visszavonás új dokumentumverzió.
 
