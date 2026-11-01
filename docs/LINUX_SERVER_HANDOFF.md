@@ -115,6 +115,13 @@ after read/write approval boundaries and real account connections are verified.
 Keep Windows and its consistent final backup available for the agreed rollback
 window. Never allow two divergent production writers to share one catalogue.
 
+The offline path planner preserves expired pending/approved MCP and image-plan
+records exactly, including their status and hash-bound payloads. Those grants
+cannot execute through the existing endpoints after their expiry and therefore
+do not block path conversion. Unexpired grants, missing/invalid expiry, incomplete
+file operations and running/generated/uncertain image outcomes still block it.
+An expired record is not rejected, approved, deleted or revived by migration.
+
 Rollback means stopping only the new target writers, preserving their changes
 for reconciliation, and returning clients to the last agreed consistent Windows
 state. It does not mean overwriting a newer database with an old snapshot.
