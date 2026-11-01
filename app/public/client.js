@@ -1,3 +1,4 @@
+import {installWorldReviewUI} from './world-review.js';
 import {raceOptions,bindNameSuggestion} from './character-options.js?v=instant-race-names-20261031-1';
 import {approveCharacterReference,approvedReferenceUrl} from './character-reference-crops.js';
 import {installPermanentDeleteUI} from './permanent-media-delete.js?v=bulk-20261031-1';
@@ -19,6 +20,7 @@ const $$ = (s,root=document)=>[...root.querySelectorAll(s)];
 const esc = v => String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const basename = p => p.split(/[\\/]/).pop();
 let state={characters:[],folders:[],stats:{media:0,inbox:0,images:0,videos:0}};
+const worldReviewUI=installWorldReviewUI({api,openDialog,mediaDialog,toast,getState:()=>state,esc,createCharacter:hooks=>newCharacter('',hooks)});
 let locationCanvas=null;
 const ghostProfile=installGhostProfile({$,esc,api,action,toast});
 const permanentDeleteUI=installPermanentDeleteUI({$,$$,api,toast,render});
@@ -74,9 +76,10 @@ function renderCharacters(){
   for(const c of $$('[data-character]'))c.onclick=action(()=>navigate('profile',c.dataset.character));
 }
 async function renderTemplateCharacter(){await ghostProfile.renderTemplate($('#content'),()=>navigate('characters'));}
-function newCharacter(initial=''){
+function newCharacter(initial='',hooks={}){
   openDialog('Create a character',`<form id="new-character-form" class="form-grid"><label>Name or working title<input name="name" required maxlength="200" value="${esc(initial)}" placeholder="A name, or a description for now" autofocus></label><label>Nem / önmeghatározás<select name="gender"><option value="">Válassz…</option><option value="férfi">Férfi</option><option value="nem-bináris">Nem-bináris</option></select></label><p class="muted">You can change the name later without losing pictures, notes, or relationships. Biographies and appearance details stay blank until you add them.</p><div class="dialog-footer"><button class="primary">Create character</button></div></form>`);
-  $('#new-character-form').onsubmit=action(async e=>{e.preventDefault();const c=await api('/api/characters',{name:new FormData(e.target).get('name'),gender:new FormData(e.target).get('gender')});$('#dialog').close();await navigate('profile',c.id);toast('Character created');});
+  if(hooks.onCancel){$('#new-character-form .dialog-footer').insertAdjacentHTML('beforeend','<button type="button" id="new-character-review-cancel">Vissza a jelöléshez</button>');$('#new-character-review-cancel').onclick=hooks.onCancel;$('#close-dialog').onclick=hooks.onCancel;$('#dialog').oncancel=event=>{event.preventDefault();hooks.onCancel();};}
+  $('#new-character-form').onsubmit=action(async e=>{e.preventDefault();const c=await api('/api/characters',{name:new FormData(e.target).get('name'),gender:new FormData(e.target).get('gender')});if(hooks.onCreated){await refresh();await hooks.onCreated(c);}else{$('#dialog').close();await navigate('profile',c.id);}toast('Character created');});
 }
 async function scanMedia(e){const button=e?.currentTarget;if(button){button.disabled=true;button.textContent='Scanning metadata…';}toast('Reading file names and metadata. Originals stay in place.');try{const result=await api('/api/scan',{});await render();toast(`${result.new} new · ${result.modified} modified · ${result.missing} missing · ${result.potentially_moved} possible moves.`);await folderReview.report(result.modified?'modified':result.missing?'missing':'new');}finally{if(button?.isConnected){button.disabled=false;button.textContent='Find new media';}}}
 async function folderNamesDialog(){
@@ -96,7 +99,7 @@ async function foldersDialog(){
   for(const b of $$('[data-assign-folder]'))b.onclick=action(async()=>{const i=Number(b.dataset.assignFolder),cid=$(`[data-existing="${i}"]`).value,name=$(`[data-name="${i}"]`).value.trim();if(!cid&&!name)throw Error('Enter a character name, or select an existing character.');await folderReview.preview([{folder:state.folders[i].folder,character_id:cid||null,name:cid?'':name}]);});
 }
 function mediaCard(m){return `<button class="media-card" data-media="${m.id}"><div class="media-preview">${m.kind==='image'?`<img src="/media/${m.id}" alt="${esc(basename(m.relative_path))}" loading="lazy">`:`<video src="/media/${m.id}" preload="none" muted aria-label="Video preview"></video><span class="badge">▶ VIDEO</span>`}${m.canonicalFor.length?'<span class="badge">◇ APPROVED REFERENCE</span>':''}</div><div class="media-caption" title="${esc(m.relative_path)}">${esc(basename(m.relative_path))}<small>${esc(m.characters.map(c=>c.name).join(' · ')||'Needs sorting')}</small><small class="media-source-folder">${esc(m.folder||'Resource root')}</small></div></button>`;}
-function bindMedia(){for(const b of $$('[data-media]'))b.onclick=action(()=>mediaDialog(b.dataset.media));bindImages();extras.listing();sorting.listing();tagging.listing().catch(e=>toast(e.message,true));places.listing().catch(e=>toast(e.message,true));}
+function bindMedia(){worldReviewUI.listing();for(const b of $$('[data-media]'))b.onclick=action(()=>mediaDialog(b.dataset.media));bindImages();extras.listing();sorting.listing();tagging.listing().catch(e=>toast(e.message,true));places.listing().catch(e=>toast(e.message,true));}
 function filters(){return `<div class="toolbar"><input id="media-search" aria-label="Search file names, tags and notes" placeholder="Search file names, tags or notes…" value="${esc(query)}"><select id="kind-filter" aria-label="Media type"><option value="">Pictures & videos</option><option value="image" ${kind==='image'?'selected':''}>Pictures</option><option value="video" ${kind==='video'?'selected':''}>Videos</option></select><select id="folder-filter" aria-label="Source folder"><option value="">All source folders</option>${state.folders.map(f=>`<option value="${esc(f.folder||'__root__')}" ${folder===(f.folder||'__root__')?'selected':''}>${esc(f.folder||'Loose files')}</option>`).join('')}</select></div>`;}
 function mediaViewContext(){return JSON.stringify([view,activeCharacter,profileTab]);}
 function mediaContext(){return JSON.stringify([view,activeCharacter,profileTab,query,kind,folder,offset,sorting.getStatus(),tagging.getFilter(),places.getFilter()]);}
@@ -146,7 +149,7 @@ async function mediaDialog(mid){
   $('#media-form').onsubmit=action(async e=>{e.preventDefault();await api('/api/media/'+mid,await mediaFormPayload(e.target,true),'PUT');await render();await mediaDialog(mid);toast('Assignments and notes saved');});
   $('#media-form')._afterMediaSave=updated=>{Object.assign(m,updated);refreshMediaReviewControls($('#dialog'),m);};
   $('#review-form').onsubmit=action(async e=>{e.preventDefault();await api('/api/media/'+mid+'/review',Object.fromEntries(new FormData(e.target)));await mediaDialog(mid);toast('Review saved. Canon unchanged.');});
-  $('#reference-button').onclick=()=>referenceDialog(m);$('#cover-button').onclick=()=>extras.cropDialog(m);$('#compare-button').onclick=action(()=>compareDialog(m));bindImages();extras.media(m);folderReview.media(m);await tagging.viewer(m);await places.viewer(m);inlineCharacterCreation();suggestionsUI.viewer(m);await sorting.viewer(m);duplicateReview.viewer(m);permanentDeleteUI.media(m);
+  $('#reference-button').onclick=()=>referenceDialog(m);$('#cover-button').onclick=()=>extras.cropDialog(m);$('#compare-button').onclick=action(()=>compareDialog(m));bindImages();extras.media(m);folderReview.media(m);await tagging.viewer(m);await places.viewer(m);inlineCharacterCreation();suggestionsUI.viewer(m);await sorting.viewer(m);duplicateReview.viewer(m);worldReviewUI.viewer(m).catch(e=>toast(e.message,true));permanentDeleteUI.media(m);
 }
 function inlineCharacterCreation(){
   const form=$('#media-form'),list=$('.checks',form);
@@ -208,3 +211,5 @@ await render();
 $('.sidebar-bottom').insertAdjacentHTML('afterbegin','<button id="location-editor-tool">Helyszínek</button>');$('#location-editor-tool').onclick=action(async()=>{openDialog('Helyszínek','<div id="location-editor-host"></div>');const editor=installLocationEditor({host:$('#location-editor-host'),api,onSaved:refresh});await editor.open();});
 
 
+
+worldReviewUI.controls();

@@ -1,3 +1,4 @@
+import {installWorldReview,backupBeforeWorldReview,worldReviewTables} from './world-review.mjs';
 import {installCompleteCharacterRename} from './complete-character-rename.mjs';
 import {createRenameRoutes} from './character-rename-routes.mjs';
 import {migrateCharacterRace,raceValue,suggestMaleName,nameCandidates} from './character-creation.mjs';
@@ -136,6 +137,8 @@ export async function createApp(options={}) {
   const storyEvents=installStoryEvents({db,transaction});
   const characterPolicy=installCharacterPolicy({db,dataDir,config:options.characterPolicy,one});
   const ghostProfiles=installGhostProfiles({one,run,transaction,characterPolicy});
+  const worldReviewMigrationBackup=await backupBeforeWorldReview(db,dataDir);
+  const worldReview=installWorldReview({db,root,isBusy:()=>folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),availability:options.worldReviewAvailability});
   const locationCanvas=installLocationCanvas({dataDir,editor:locations.editor,transaction});
   let mcpWriteConfig=options.mcpWrites;
   try{
@@ -201,6 +204,7 @@ export async function createApp(options={}) {
       if(imageGeneration.isBusy()&&['POST','PUT','PATCH','DELETE'].includes(req.method)&&p!=='/api/mcp-generation'&&!desktopGenerationRoute&&!scopedRead)throw fail('An approved image generation is running. Retry shortly.',409);
       if(permanentDelete.isBusy()&&['POST','PUT','PATCH','DELETE'].includes(req.method))throw fail('A végleges törlés folyamatban van. Várd meg a végét.',409);
       if(await permanentDelete.handle({p,body,req,json}))return;
+      if(await worldReview.handle({p,body,req,url,json}))return;
       if(await locationCanvas.handle({p,body,req,json}))return;
       if(await desktopGeneration.handle({p,body,req,json}))return;
       if(p==='/api/mcp-generation'){
@@ -395,14 +399,14 @@ export async function createApp(options={}) {
         character(body.character_id);if(typeof body.folder!=='string')throw fail('Choose a folder');run('INSERT OR IGNORE INTO depictions SELECT id,? FROM media WHERE folder=?',body.character_id,body.folder);return json({ok:true});
       }
       if(p==='/api/export'&&req.method==='GET'){
-        const tables=['characters','media','depictions','media_notes','reviews','canon','relationships','sorted_folders','file_moves',...Object.keys(extraTables)];const snapshot=transaction(()=>Object.fromEntries(tables.map(t=>[t,all('SELECT * FROM '+t)])));
-        res.setHeader('Content-Disposition','attachment; filename="living-universe-backup.json"');return json({schema_version:1,exported_at:now(),...snapshot});
+        const tables=['characters','media','depictions','media_notes','reviews','canon','relationships','sorted_folders','file_moves',...Object.keys(extraTables),...Object.keys(worldReviewTables)];const snapshot=transaction(()=>Object.fromEntries(tables.map(t=>[t,all('SELECT * FROM '+t)])));
+        res.setHeader('Content-Disposition','attachment; filename="living-universe-backup.json"');return json({schema_version:1,world_review_schema_version:1,exported_at:now(),...snapshot});
       }
       if(p==='/api/restore'&&req.method==='POST'){
         if(body.schema_version!==1)throw fail('Unsupported backup version');
         if(one('SELECT COUNT(*) n FROM characters').n||one('SELECT COUNT(*) n FROM media').n)throw fail('Restore requires an empty catalogue. Use a separate data directory to avoid overwriting your work.');
         const tables={characters:['id','name','aliases','biography','personality','appearance','notes','cover_id','created_at','sexuality','speech_style','race'],media:['id','relative_path','folder','kind','size','modified_at','created_at'],depictions:['media_id','character_id'],media_notes:['media_id','tags','notes'],reviews:['id','media_id','character_id','decision','rating','notes','created_at'],canon:['id','character_id','parent_id','appearance','references_json','reason','created_at'],relationships:['id','source_id','target_id','description']};
-        transaction(()=>{taxonomy.prepareRestore(body);for(const [t,cols] of Object.entries(tables)){if(!Array.isArray(body[t]))throw fail('Incomplete backup');for(const row of body[t]){if(t==='media'&&(path.isAbsolute(row.relative_path)||path.relative(root,path.resolve(root,row.relative_path)).startsWith('..')))throw fail('Invalid media path in backup');run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>c==='race'?raceValue(row[c]):row[c]??(['sexuality','speech_style'].includes(c)?'':null)));}}if(body.sorted_folders!==undefined){if(!Array.isArray(body.sorted_folders))throw fail('Invalid folder assignments in backup');for(const r of body.sorted_folders)run('INSERT INTO sorted_folders VALUES(?,?)',r.folder,r.character_id);}if(body.file_moves!==undefined){if(!Array.isArray(body.file_moves))throw fail('Invalid move history');for(const r of body.file_moves)run('INSERT INTO file_moves VALUES(?,?,?,?,?,?,?)',r.id,r.media_id,r.from_path,r.to_path,r.status,r.sha256,r.created_at);}for(const [t,cols] of Object.entries(extraTables)){if(body[t]===undefined)continue;if(!Array.isArray(body[t]))throw fail('Invalid additional backup records');for(const row of body[t])run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??null));}characterCrops.validateRestore();storyEvents.validateRestore();mediaImports.uploads.afterRestore();});return json({ok:true});
+        transaction(()=>{taxonomy.prepareRestore(body);for(const [t,cols] of Object.entries(tables)){if(!Array.isArray(body[t]))throw fail('Incomplete backup');for(const row of body[t]){if(t==='media'&&(path.isAbsolute(row.relative_path)||path.relative(root,path.resolve(root,row.relative_path)).startsWith('..')))throw fail('Invalid media path in backup');run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>c==='race'?raceValue(row[c]):row[c]??(['sexuality','speech_style'].includes(c)?'':null)));}}if(body.sorted_folders!==undefined){if(!Array.isArray(body.sorted_folders))throw fail('Invalid folder assignments in backup');for(const r of body.sorted_folders)run('INSERT INTO sorted_folders VALUES(?,?)',r.folder,r.character_id);}if(body.file_moves!==undefined){if(!Array.isArray(body.file_moves))throw fail('Invalid move history');for(const r of body.file_moves)run('INSERT INTO file_moves VALUES(?,?,?,?,?,?,?)',r.id,r.media_id,r.from_path,r.to_path,r.status,r.sha256,r.created_at);}for(const [t,cols] of Object.entries(extraTables)){if(body[t]===undefined)continue;if(!Array.isArray(body[t]))throw fail('Invalid additional backup records');for(const row of body[t])run(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`,...cols.map(c=>row[c]??null));}characterCrops.validateRestore();storyEvents.validateRestore();worldReview.restore(body);mediaImports.uploads.afterRestore();});return json({ok:true});
       }
       const fm=p.match(/^\/media\/([^/]+)$/);
       if(fm&&['GET','HEAD'].includes(req.method)){
@@ -413,7 +417,7 @@ export async function createApp(options={}) {
         const headers={'Content-Type':types[path.extname(full).toLowerCase()]||'application/octet-stream','Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':m.kind==='image'?'private, no-cache':'private, max-age=60','ETag':etag,'X-Content-Type-Options':'nosniff'};if(status===206)headers['Content-Range']=`bytes ${start}-${end}/${s.size}`;
         res.writeHead(status,headers);if(req.method==='HEAD')return res.end();const stream=createReadStream(full,{start,end});stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);return;
       }
-      if(req.method==='GET'&&['/character-rename.html','/character-rename.js','/character-rename.css','/','/style.css','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/client.js','/character-options.js','/enhancements.js','/picture-crop.js','/character-reference-crops.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/location-editor.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-canvas-model.js','/location-canvas.css','/permanent-media-delete.js'].includes(p)){
+      if(req.method==='GET'&&['/world-review.js','/world-review.css','/character-rename.html','/character-rename.js','/character-rename.css','/','/style.css','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/client.js','/character-options.js','/enhancements.js','/picture-crop.js','/character-reference-crops.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/location-editor.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-canvas-model.js','/location-canvas.css','/permanent-media-delete.js'].includes(p)){
         const file=path.join(appDir,'public',p==='/'?'index.html':p.slice(1));const data=await fs.readFile(file);res.writeHead(200,{'Content-Type':p.endsWith('.css')?'text/css':p.endsWith('.js')?'text/javascript':'text/html; charset=utf-8','Content-Security-Policy':`default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' ${characterCrops.adminOrigin()||''}; frame-ancestors 'none'`,'X-Content-Type-Options':'nosniff'});return res.end(data);
       }
       throw fail('Not found',404);
@@ -434,7 +438,7 @@ export async function createApp(options={}) {
   }catch(e){console.error('Mobile access disabled: '+e.message);}
   if(mobileServer&&mcpWriteConfig?.enabled===true&&mobileConfig.login.toLowerCase()===mcpWriteConfig.login&&mobileConfig.origin===mcpWriteConfig.origin)characterCrops.setAdminOrigin(mobileConfig.origin);
   const closeServer=s=>new Promise(resolve=>{if(!s?.listening)return resolve();s.close(()=>resolve());s.closeIdleConnections();});
-  return {server,mobileServer,characterRename,characterCropMigrationBackup,storyMigrationBackup,imageMigrationBackup,mediaUploadMigrationBackup,mobilePort:mobileConfig?.port??4318,db,root,dataDir,folderSync,imageGeneration,close:async()=>{await imageGeneration.settle();await Promise.all([closeServer(server),closeServer(mobileServer)]);db.close();}};
+  return {worldReview,worldReviewMigrationBackup,server,mobileServer,characterRename,characterCropMigrationBackup,storyMigrationBackup,imageMigrationBackup,mediaUploadMigrationBackup,mobilePort:mobileConfig?.port??4318,db,root,dataDir,folderSync,imageGeneration,close:async()=>{await imageGeneration.settle();await Promise.all([closeServer(server),closeServer(mobileServer)]);db.close();}};
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

@@ -77,3 +77,10 @@ Az `omit` explicit, credential nélküli adat/forrás/asset mentést jelent. Ez 
 ## A tényleges Linux-validáció jegyzőkönyve
 
 A csomag generálásakor a Linux-futtatás állapota `pending`. A célgépen rögzítsd: CPU/OS, Node/SQLite/sharp/libvips verzió, futtatási parancs, pass/fail/skip, integritás/FK eredmény, hálózattiltás és 0 valódi providerhívás. A konténeres siker nem bizonyítja a systemd bootot, a valódi mountkiesést, a külön eszközös EXDEV-t, a natív tunnelklienst vagy a tényleges Tailscale/ChatGPT/Grok fiókengedélyt. Ezek a következő külön laborpróbák.
+
+## 2026-11-01 source refresh
+
+The current package integrates the six post-checkpoint main commits and schema 024.
+See [Post-labeling source checkpoint](POST_LABELING_LINUX_CHECKPOINT.md).
+LAB-MANIFEST.json records both the actual source revision and integrated main.
+Build packages from a clean committed Git checkout; actual Linux validation remains pending.
