@@ -123,3 +123,10 @@ grok-gateway.json
 *.m4v
 *.avi
 *.mkv
+
+# Only the audited Linux CI workflow is source-controlled.
+!/.github/
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/linux-lab.yml

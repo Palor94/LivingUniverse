@@ -12,7 +12,7 @@ import {fileURLToPath} from 'node:url';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
 const sourceRoot=path.resolve(here,'../..');
-const rootSources=['.gitattributes','.env.example','.gitignore','AGENTS.md','README.md','PROJECT_VISION.md','DECISIONS.md','DEVELOPMENT_PLAN.md','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','.node-version','.dockerignore','Start Living Universe.cmd','Enable Mobile Access.cmd','Connect Sogni.cmd','RECOVERY.md','Backup Living Universe.cmd','Verify Living Universe Backup.cmd'];
+const rootSources=['.github/workflows/linux-lab.yml','.gitattributes','.env.example','.gitignore','AGENTS.md','README.md','PROJECT_VISION.md','DECISIONS.md','DEVELOPMENT_PLAN.md','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','.node-version','.dockerignore','Start Living Universe.cmd','Enable Mobile Access.cmd','Connect Sogni.cmd','RECOVERY.md','Backup Living Universe.cmd','Verify Living Universe Backup.cmd'];
 const assetDirectories=['image-originals','imports','import-staging','import-thumbnails','upload-staging','image-edit-staging','generation-results'];
 const stateFiles=['location-canvas.json','location-canvas.previous.json','location-canvas-suggestions.json'];
 const now=()=>new Date().toISOString();
