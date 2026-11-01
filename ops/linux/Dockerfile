@@ -1,4 +1,5 @@
 FROM node:24.22.1-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends age && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/living-universe
 RUN npm install --global pnpm@11.25.0 --ignore-scripts
 COPY --chown=node:node package.json pnpm-lock.yaml ./

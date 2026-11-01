@@ -14,7 +14,7 @@ A kimenetnek új, nem létező, a checkouton kívüli könyvtárnak kell lennie.
 
 ## Linux-futtatás Dockerrel
 
-Külön Linux-gép/VM és Docker szükséges. A Windows gépre ehhez nem telepítettünk WSL-t vagy Dockert. A forráscsomag könyvtárában:
+Külön Linux-gép/VM és Docker szükséges. A helyi Windows gépen külön, szintetikus WSL2-labor is használható; a Docker Engine csak annak Linux-vendégében fut. A forráscsomag könyvtárában:
 
 ```sh
 sh ops/linux/run-lab.sh
@@ -96,3 +96,7 @@ A build csomagletöltést végez; az alkalmazástesztek network none konténerbe
 Ez GitHub Actions compute-keretet használ a privát repository tulajdonosánál,
 nem AI-modellhívást. Valós Linux-kernel/dependency teszt, de nem WSL reboot,
 systemd boot, éles tunnel vagy médiamigrációs bizonyíték.
+
+## Linux privát mentés
+
+Az explicit age-kulcsos, inaktív helyreállítás és a systemd credential-provisionálás menete: [LINUX_PRIVATE_RUNTIME.md](LINUX_PRIVATE_RUNTIME.md). A DPAPI-fájlok nem hordozható Linux-hitelesítések.
