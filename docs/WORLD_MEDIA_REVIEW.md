@@ -78,6 +78,12 @@ megváltozott dokumentumot az elvárt verzió ellenőrzése védi a felülírás
 
 ## Tárolás, export és törlés
 
+A normál jelöltkeresés az ellenőrizetlen gépi javaslatokat is használhatja;
+az összes kép kézi elfogadása nem előfeltétel. A külön `accepted_only` keresés
+generálási tervnél is megköveteli a felhasználási címke elfogadását. A
+„Mentés és következő” ezt az adott kép többi címkéjével együtt jóváhagyja;
+a még meg nem nyitott tervek ettől nem lesznek ember által ellenőrzöttek.
+
 A 024-es, önálló sémabővítés `world_review_*` táblái az alkalmazás saját
 adatbázisában tárolják az importált nyers eredményt, a deduplikált futásleírást,
 az aktuális kézi dokumentumot, a minimális visszavonási adatokat és a válogatást.

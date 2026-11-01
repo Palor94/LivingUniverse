@@ -19,6 +19,7 @@ export function retrieveReviewedWorldMedia(db,criteria={}, {activeMediaIds=null}
   if(activeMediaIds!==null&&!activeMediaIds.has(row.media_id))continue;
   const raw=JSON.parse(row.raw_json),doc=JSON.parse(row.document_json),planning=describeMediaPurpose(row.source_path,raw).kind==='generation_plan',allFields=effectiveReviewFields(raw,doc),fields=allFields.filter(f=>f.state!=='rejected'&&(!accepted||f.state==='accepted')),simulation=allFields.find(f=>f.id==='simulation');
   if(purpose==='generation_plan'?!planning:planning)continue;
+  if(planning&&accepted&&simulation.state!=='accepted')continue;
   if(purpose==='scene_illustration'&&(simulation.state==='rejected'||simulation.value.scope!=='scene_illustration'||simulation.value.narration_only||accepted&&simulation.state!=='accepted'))continue;
   if(purpose==='character_reference'&&accepted&&!fields.some(f=>f.group==='reference'))continue;
   const characters=db.prepare('SELECT c.id,c.name FROM characters c JOIN depictions d ON d.character_id=c.id WHERE d.media_id=?').all(row.media_id);
