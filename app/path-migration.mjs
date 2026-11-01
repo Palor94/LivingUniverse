@@ -6,7 +6,7 @@ const specs=[['media','id',['relative_path','folder']],['media_hidden','media_id
 const tables=db=>new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r=>r.name));
 export function planPathMigration(db,{platform=process.platform}={}){
   if(!['linux','darwin','win32'].includes(platform))throw Error('Unsupported destination platform.');
-  const available=tables(db),changes=[],blockers=[],snapshots=[];
+  const available=tables(db),changes=[],blockers=[],snapshots=[],at=Date.now();
   for(const [table,key,columns]of specs){
     if(!available.has(table))continue;
     const rows=db.prepare(`SELECT * FROM ${table} ORDER BY ${key}`).all();snapshots.push([table,rows]);
@@ -36,7 +36,15 @@ export function planPathMigration(db,{platform=process.platform}={}){
     ['image_generation_runs',"status IN ('pending','approved','running','generated','uncertain')"],
     ['media_image_edits',"status IN ('preparing','restoring','needs_review')"]
   ])if(available.has(table)){
-    const n=db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE ${where}`).get().n;
+    const n=db.prepare(`SELECT * FROM ${table} WHERE ${where}`).all().filter(row=>{
+      // Existing decision/execution endpoints reject expired pending/approved
+      // grants. Preserve their immutable evidence and status without treating
+      // those dead capabilities as active work. Missing/invalid expiry fails
+      // closed; uncertain/running/generated outcomes still require reconciliation.
+      if(!['mcp_changes','mcp_reference_changes','image_generation_runs'].includes(table)||!['pending','approved'].includes(row.status))return true;
+      const expiry=typeof row.expires_at==='string'?Date.parse(row.expires_at):NaN;
+      return !Number.isFinite(expiry)||expiry>at;
+    }).length;
     if(n)blockers.push({table,count:n,code:'RECONCILE_BEFORE_PATH_MIGRATION'});
     snapshots.push([table,db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]);
   }
