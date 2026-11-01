@@ -1,0 +1,10 @@
+DROP TRIGGER IF EXISTS world_review_forget_deleted;
+DROP TRIGGER IF EXISTS world_review_forget_hidden;
+DROP TABLE IF EXISTS world_review_facts;
+DROP TABLE IF EXISTS world_review_trial;
+DROP TABLE IF EXISTS world_review_tombstones;
+DROP TABLE IF EXISTS world_review_changes;
+DROP TABLE IF EXISTS world_review_documents;
+DROP TABLE IF EXISTS world_review_sources;
+DROP TABLE IF EXISTS world_review_manifests;
+DROP TABLE IF EXISTS world_review_schema;
