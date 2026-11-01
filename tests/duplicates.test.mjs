@@ -47,10 +47,14 @@ test('optional hashing caches work, skips online originals, preserves identity, 
     assert.equal((await call('/api/removed')).items.find(m=>m.id===ids['copy.png']).physical,1);
     await call('/api/media/'+ids['copy.png']+'/restore-item',{});
     assert.equal(await fs.readFile(path.join(root,'copy.png'),'utf8'),'same image bytes');
-    await call('/api/duplicates/analyze',{ids:[ids['copy.png']]});
+    // Rename/restore can change POSIX ctime even when the bytes and mtime survive.
+    const restoredAnalysis=await call('/api/duplicates/analyze',{ids:[ids['copy.png']]});
+    const restoredProof=restoredAnalysis.results.find(r=>r.id===ids['copy.png']).visual;
+    const oldProof=result.results.find(r=>r.id===ids['copy.png']).visual;
+    if(restoredProof.signature!==oldProof.signature)assert.equal((await request('/api/duplicates/visual',{id:ids['copy.png'],...oldProof,hash:'0000000000000000',version:visualVersion,width:100,height:200})).status,409);
     assert.equal((await call('/api/duplicates/groups')).total,1);
     const exact=await call('/api/export');const stamps=exact.media_fingerprints.map(m=>m.checked_at);
-    for(const r of result.results.filter(r=>r.visual)){const hash=r.id===ids['near.png']?'0000000000000001':'0000000000000000';await call('/api/duplicates/visual',{id:r.id,...r.visual,hash,version:visualVersion,width:100,height:200});}
+    for(const r of result.results.filter(r=>r.visual)){const hash=r.id===ids['near.png']?'0000000000000001':'0000000000000000';await call('/api/duplicates/visual',{id:r.id,...(r.id===ids['copy.png']?restoredProof:r.visual),hash,version:visualVersion,width:100,height:200});}
     const cached=await call('/api/duplicates/analyze',{ids:list});assert.equal(cached.results.filter(r=>r.status==='cached').length,3);assert.deepEqual((await call('/api/export')).media_fingerprints.map(m=>m.checked_at),stamps);
     assert.equal((await call('/api/duplicates/groups?mode=similar&threshold=0')).total,0);assert.equal((await call('/api/duplicates/groups?mode=similar&threshold=1')).total,2);
     assert.equal((await request('/api/duplicates/analyze',{ids:['unknown-id']})).status,404);assert.equal((await request('/api/duplicates/analyze',{ids:list,allow_download:'yes'})).status,400);

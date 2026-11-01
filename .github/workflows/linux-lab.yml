@@ -33,7 +33,7 @@ jobs:
           - variant: current-main-linux
             ref: ${{ github.sha }}
           - variant: separate-direct-ai
-            ref: 416ca4b841e0503a376db9b4e2a29ed0ae37d038
+            ref: 926f3e6165853c5f864d0a4bca7b68f934feec8a
     steps:
       - name: Checkout source only
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
