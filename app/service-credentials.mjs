@@ -7,16 +7,17 @@ const unavailable=()=>Error('Configured service credential unavailable. No secre
 async function systemdCredential(file,env,st){
   const directory=env.CREDENTIALS_DIRECTORY;
   if(!directory||!path.isAbsolute(directory)||path.dirname(file)!==path.resolve(directory)||!/^\/run\/credentials\/[^/]+$/u.test(path.resolve(directory)))return false;
-  if(st.uid!==0||st.gid!==process.getgid()||(st.mode&0o337)!==0)return false;
-  // systemd may expose root-owned 0440 files to the unit's primary group.
-  // Only a protected root-owned /run/credentials/<unit> hierarchy qualifies.
+  if(st.uid!==0||(st.mode&0o337)!==0)return false;
+  // systemd uses an ACL for the unit UID on root-owned 0440 files.
+  // Only its read-only mount under a protected root-owned hierarchy qualifies.
   for(let current=path.resolve(directory);;current=path.dirname(current)){
     const info=await fs.lstat(current);
     if(!info.isDirectory()||info.isSymbolicLink()||info.uid!==0||(info.mode&0o022)!==0)return false;
     if(current===path.resolve(directory)&&(info.mode&0o007)!==0)return false;
     if(current===path.dirname(current))break;
   }
-  return true;
+  const mounts=await fs.readFile('/proc/self/mountinfo','utf8');
+  return mounts.split('\n').some(line=>{const fields=line.split(' ');return fields[4]?.replace(/\\([0-7]{3})/gu,(_,octal)=>String.fromCharCode(parseInt(octal,8)))===path.resolve(directory)&&fields[5]?.split(',').includes('ro');});
 }
 
 // Operator-owned files/systemd credentials only; never model-supplied tool input.
