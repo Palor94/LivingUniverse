@@ -25,6 +25,12 @@ test('credential files reject missing, relative, malformed, oversized, symlink a
   if(process.platform!=='win32'){await fs.chmod(file,0o644);await assert.rejects(serviceCredentialEnvironment(['OPENAI_API_KEY'],{env:{OPENAI_API_KEY_FILE:file}}));await fs.chmod(file,0o600);await fs.symlink(file,path.join(dir,'link'));await assert.rejects(serviceCredentialEnvironment(['OPENAI_API_KEY'],{env:{OPENAI_API_KEY_FILE:path.join(dir,'link')}}));}
   await assert.rejects(serviceCredentialEnvironment(['ARBITRARY_PRIVATE_FILE'],{env:{}}));
 });
+
+test('a credential-directory variable never relaxes group-read permissions on ordinary operator files', {skip:process.platform==='win32'},async t=>{
+  const dir=await temporary(t),file=path.join(dir,'OPENAI_API_KEY');await fs.writeFile(file,'synthetic-group-readable-key',{mode:0o640});
+  await assert.rejects(serviceCredentialEnvironment(['OPENAI_API_KEY'],{env:{CREDENTIALS_DIRECTORY:dir}}),/credential unavailable/);
+  await fs.chmod(file,0o600);assert.equal((await serviceCredentialEnvironment(['OPENAI_API_KEY'],{env:{CREDENTIALS_DIRECTORY:dir}})).OPENAI_API_KEY,'synthetic-group-readable-key');
+});
 async function tunnelFixture(t){
   const dir=await temporary(t),client=path.join(dir,'native-client-fixture'),profiles=path.join(dir,'profiles'),lock=path.join(dir,'client.lock');await fs.mkdir(profiles);await fs.writeFile(client,'synthetic executable marker');await fs.writeFile(path.join(profiles,'living-universe.yaml'),'synthetic profile');
   const env={LU_MCP_TUNNEL_CLIENT:client,LU_MCP_PROFILE_DIRECTORY:profiles,LU_MCP_TUNNEL_LOCK:lock,LU_RUNTIME_HOME:dir,CONTROL_PLANE_API_KEY:'synthetic-tunnel-secret',OPENAI_API_KEY:'forbidden-provider-key',XAI_API_KEY:'forbidden-provider-key',SOGNI_API_KEY:'forbidden-provider-key',NODE_OPTIONS:'forbidden-preload',LU_MCP_CONFIG:'private-unrelated-path'};
