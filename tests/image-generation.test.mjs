@@ -11,6 +11,7 @@ import {createWriteClient} from '../mcp/writes.mjs';
 import {createCatalogue} from '../mcp/catalogue.mjs';
 import {createDispatcher} from '../mcp/http-gateway.mjs';
 import {generateProviderImage,GenerationError} from '../app/image-providers.mjs';
+import {planPathMigration,applyPathMigration} from '../app/path-migration.mjs';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNoaGgAAAMEAYEezv+mAAAAAElFTkSuQmCC','base64');
 const sha=b=>createHash('sha256').update(b).digest('hex');
@@ -51,6 +52,30 @@ test('reference-conditioned run: private approval, exact multi-character manifes
     const withdrawn=await f.privateCall(plan.run_id,'withdraw',{manifest_hash:plan.manifest_hash});assert.equal(withdrawn.status,200);assert.equal(withdrawn.value.output.active,false);assert.equal(withdrawn.value.status,'withdrawn');assert.equal(f.app.db.prepare('SELECT COUNT(*) n FROM image_generation_outputs').get().n,1);assert.deepEqual(f.app.db.prepare('SELECT * FROM canon').all(),canon);
     const snapshot=await (await fetch(f.base+'/api/export')).json(),restored=await createApp({root:f.root,dataDir:path.join(f.dataDir,'restore')});try{await new Promise(r=>restored.server.listen(0,'127.0.0.1',r));const response=await fetch('http://127.0.0.1:'+restored.server.address().port+'/api/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(snapshot)});assert.equal(response.status,200,await response.clone().text());for(const table of ['image_generation_runs','image_generation_outputs','image_generation_events'])assert.deepEqual(restored.db.prepare('SELECT * FROM '+table).all(),f.app.db.prepare('SELECT * FROM '+table).all());}finally{await restored.close();}
   }finally{release();reader?.close();await f.close();}
+});
+
+test('uncertain generation remains inert across explicitly reviewed path migration and application restart',async()=>{
+  const f=await fixture();let restarted;
+  try{
+    const plan=await f.prepare('uncertain_migration_fixture',{provider:'sogni'});
+    f.app.db.prepare("UPDATE image_generation_runs SET status='uncertain',error_code='PROVIDER_REVIEW_REQUIRED' WHERE id=?").run(plan.run_id);
+    const at=new Date().toISOString();
+    f.app.db.prepare('INSERT INTO media VALUES(?,?,?,?,?,?,?)').run(randomUUID(),'folder\\extra.png','folder','image',png.length,at,at);
+    const run=f.app.db.prepare('SELECT * FROM image_generation_runs WHERE id=?').get(plan.run_id),canon=f.app.db.prepare('SELECT * FROM canon ORDER BY rowid').all();
+    assert.ok(planPathMigration(f.app.db,{platform:'linux'}).blockers.some(b=>b.table==='image_generation_runs'));
+    const migration=planPathMigration(f.app.db,{platform:'linux',preserveUncertain:true});
+    assert.deepEqual(migration.blockers,[]);assert.equal(migration.changes.length,1);
+    applyPathMigration(f.app.db,migration);
+    assert.deepEqual(f.app.db.prepare('SELECT * FROM image_generation_runs WHERE id=?').get(plan.run_id),run);
+    assert.deepEqual(f.app.db.prepare('SELECT * FROM canon ORDER BY rowid').all(),canon);
+    assert.equal((await f.app.imageGeneration.execute(plan.run_id)).status,'uncertain');
+    await assert.rejects(f.app.imageGeneration.decide(plan.run_id,{decision:'approve',manifest_hash:plan.manifest_hash,acknowledge_external_upload_and_cost:true},f.config.login),{code:'INVALID_STATE'});
+    assert.equal(f.calls(),0);
+    await f.app.close();restarted=await createApp(f.options);
+    assert.equal((await restarted.imageGeneration.execute(plan.run_id)).status,'uncertain');
+    assert.deepEqual(restarted.db.prepare('SELECT * FROM image_generation_runs WHERE id=?').get(plan.run_id),run);
+    assert.equal(f.calls(),0);
+  }finally{if(restarted)await restarted.close();await f.close();}
 });
 
 test('Sogni shares private approval, durable job history, stable character links and canon protection',async()=>{

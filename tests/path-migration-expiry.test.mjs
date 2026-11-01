@@ -50,3 +50,21 @@ test('unexpired and malformed approvals and uncertain outcomes still block path 
   }finally{db.close();}
  }
 });
+
+test('explicit terminal-outcome preservation is hash-bound and retains uncertain evidence without unlocking other work',()=>{
+ const db=fixture();try{
+  db.prepare('INSERT INTO image_generation_runs VALUES(?,?,?,?)').run('synthetic-uncertain','uncertain','2000-01-01T00:00:00.000Z','immutable unknown-outcome receipt');
+  const before=db.prepare('SELECT * FROM image_generation_runs').all();
+  assert.equal(planPathMigration(db,{platform:'linux'}).blockers.length,1);
+  const plan=planPathMigration(db,{platform:'linux',preserveUncertain:true});
+  assert.deepEqual(plan.blockers,[]);
+  assert.equal(plan.preserved_uncertain_outcomes.length,1);
+  assert.throws(()=>applyPathMigration(db,{...plan,preserve_terminal_uncertain:false}),/Stale/);
+  db.prepare('INSERT INTO mcp_changes VALUES(?,?,?,?)').run('still-live','approved','2999-01-01T00:00:00.000Z','not approved by migration');
+  assert.equal(planPathMigration(db,{platform:'linux',preserveUncertain:true}).blockers.length,1);
+  db.prepare('DELETE FROM mcp_changes WHERE id=?').run('still-live');
+  applyPathMigration(db,plan);
+  assert.deepEqual(db.prepare('SELECT * FROM image_generation_runs').all(),before);
+  assert.equal(db.prepare('SELECT relative_path FROM media').get().relative_path,'folder/image.png');
+ }finally{db.close();}
+});

@@ -122,6 +122,15 @@ do not block path conversion. Unexpired grants, missing/invalid expiry, incomple
 file operations and running/generated/uncertain image outcomes still block it.
 An expired record is not rejected, approved, deleted or revived by migration.
 
+When the owner chooses to carry unresolved generation history rather than settle
+it during migration, `paths.mjs preview --preserve-uncertain yes` explicitly binds
+the terminal `uncertain` run IDs into the hashed preview. Apply accepts only that
+reviewed choice and preserves the rows, statuses and receipts byte-for-byte. The
+existing generation endpoints cannot approve or execute an uncertain run, even
+after restart. This does not settle provider costs or enable retries, and does
+not bypass active approvals, running/generated outputs or direct-ai job guards.
+Without this explicit preview option, uncertain outcomes remain blockers.
+
 Rollback means stopping only the new target writers, preserving their changes
 for reconciliation, and returning clients to the last agreed consistent Windows
 state. It does not mean overwriting a newer database with an old snapshot.

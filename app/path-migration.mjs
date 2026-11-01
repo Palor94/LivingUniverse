@@ -4,9 +4,10 @@ import {portablePath,relativeParts} from './media-paths.mjs';
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const specs=[['media','id',['relative_path','folder']],['media_hidden','media_id',['original_path']],['sorted_folders','folder',['folder']],['locations','id',['folder']],['scan_candidates','relative_path',['relative_path','folder']]];
 const tables=db=>new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r=>r.name));
-export function planPathMigration(db,{platform=process.platform}={}){
+export function planPathMigration(db,{platform=process.platform,preserveUncertain=false}={}){
   if(!['linux','darwin','win32'].includes(platform))throw Error('Unsupported destination platform.');
-  const available=tables(db),changes=[],blockers=[],snapshots=[],at=Date.now();
+  if(typeof preserveUncertain!=='boolean')throw Error('Explicit terminal-outcome preservation choice required.');
+  const available=tables(db),changes=[],blockers=[],snapshots=[],preservedUncertain=[],at=Date.now();
   for(const [table,key,columns]of specs){
     if(!available.has(table))continue;
     const rows=db.prepare(`SELECT * FROM ${table} ORDER BY ${key}`).all();snapshots.push([table,rows]);
@@ -37,6 +38,10 @@ export function planPathMigration(db,{platform=process.platform}={}){
     ['media_image_edits',"status IN ('preparing','restoring','needs_review')"]
   ])if(available.has(table)){
     const n=db.prepare(`SELECT * FROM ${table} WHERE ${where}`).all().filter(row=>{
+      // An operator may explicitly retain terminal uncertain runs as evidence.
+      // execute() and decide() cannot resume these runs, even after restart.
+      // No status, payload, provider receipt or approval is rewritten here.
+      if(table==='image_generation_runs'&&row.status==='uncertain'&&preserveUncertain){preservedUncertain.push({id:row.id,status:row.status,manifest_hash:row.manifest_hash??null});return false;}
       // Existing decision/execution endpoints reject expired pending/approved
       // grants. Preserve their immutable evidence and status without treating
       // those dead capabilities as active work. Missing/invalid expiry fails
@@ -52,13 +57,13 @@ export function planPathMigration(db,{platform=process.platform}={}){
     const plans=db.prepare("SELECT * FROM application_settings WHERE key LIKE 'rename:v1:plan:%' ORDER BY key").all();snapshots.push(['rename_plans',plans]);
     if(plans.some(p=>['pending','approved'].includes(JSON.parse(p.value).status)))blockers.push({table:'application_settings',code:'RECONCILE_RENAME_APPROVALS'});
   }
-  const plan={kind:'catalogue-path-migration',version:1,platform,source_hash:hash(snapshots),changes,blockers};
+  const plan={kind:'catalogue-path-migration',version:1,platform,preserve_terminal_uncertain:preserveUncertain,preserved_uncertain_outcomes:preservedUncertain,source_hash:hash(snapshots),changes,blockers};
   return {...plan,plan_hash:hash(plan)};
 }
 export function applyPathMigration(db,expectedPlan){
   db.exec('BEGIN IMMEDIATE');
   try{
-    const current=planPathMigration(db,{platform:expectedPlan.platform});
+    const current=planPathMigration(db,{platform:expectedPlan.platform,preserveUncertain:expectedPlan.preserve_terminal_uncertain===true});
     if(current.plan_hash!==expectedPlan.plan_hash)throw Error('Stale path migration plan.');
     if(current.blockers.length)throw Error('Path migration blocked; reconcile conflicts first.');
     for(const change of current.changes){
