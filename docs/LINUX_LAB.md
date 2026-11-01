@@ -84,3 +84,15 @@ The current package integrates the six post-checkpoint main commits and schema 0
 See [Post-labeling source checkpoint](POST_LABELING_LINUX_CHECKPOINT.md).
 LAB-MANIFEST.json records both the actual source revision and integrated main.
 Build packages from a clean committed Git checkout; actual Linux validation remains pending.
+
+## Linux CI
+
+A .github/workflows/linux-lab.yml a linux-compatibility ágon Ubuntu 24.04
+futtatón hajtja végre a hálózat nélküli Docker-próbát. A fő és direct-ai
+változat külön, legfeljebb 15 perces, egymás utáni job. A checkout egyetlen
+forráscommitot kér, nem őriz Git-credentialt, és csak contents:read jogosultsága van.
+Nincs provider-secret, production mount, hostport, cache- vagy artifact-feltöltés.
+A build csomagletöltést végez; az alkalmazástesztek network none konténerben futnak.
+Ez GitHub Actions compute-keretet használ a privát repository tulajdonosánál,
+nem AI-modellhívást. Valós Linux-kernel/dependency teszt, de nem WSL reboot,
+systemd boot, éles tunnel vagy médiamigrációs bizonyíték.
