@@ -23,6 +23,11 @@ jelöltek: nem automatikus arcfelismerés eredményei.
 A korábbi képszintű kapcsolatok a névválasztó első javaslatcsoportjába kerülnek.
 Egyetlen látható alak és egyetlen korábbi kapcsolat esetén a név alapból kitöltött,
 ellenőrizetlen javaslat. Több alakhoz nem osztunk ki neveket pusztán sorrendből.
+Két alak és két korábbi név esetén az egyik név kézi kiválasztása automatikusan
+a másik nevet adja a másik alakhoz. Ez P1-ről és P2-ről indulva is működik;
+a választás javításakor a párja követi, így nem marad két azonos korábbi név.
+Korábbi listán kívüli, külön kézzel választott karaktert és explicit ismeretlen
+jelölést nem cserél le. Mentésig ez szerkesztési javaslat marad.
 Az **Új karakter…** a meglévő karakterlétrehozó ablakot nyitja meg, annak
 házirendjével és mezőivel. Mentés után az új karakter az aktuális alaknál lesz
 kiválasztva; visszalépéskor a jelölő addigi munkája megmarad.
