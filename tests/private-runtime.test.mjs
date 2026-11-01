@@ -59,7 +59,7 @@ test('authenticated but malformed private archives cannot traverse, duplicate or
 test('Linux catalogue backup includes selected age ciphertext; ordinary restore leaves credentials separate and inactive',options,async t=>{
  const f=await fixture(t),root=path.join(f.base,'code'),media=path.join(f.base,'media'),live=path.join(f.base,'live');for(const dir of [root,media,live])await fs.mkdir(dir);
  const database=path.join(live,'universe.sqlite'),db=new DatabaseSync(database);db.exec("CREATE TABLE characters(id TEXT PRIMARY KEY); CREATE TABLE media(id TEXT PRIMARY KEY,relative_path TEXT,kind TEXT,size INTEGER); INSERT INTO characters VALUES('synthetic-stable-id')");db.close();
- await assert.rejects(createBackup({root,mediaRoot:media,database,destination:path.join(f.base,'out'),stageParent:path.join(f.base,'staging')}),/separately configured/);
+ await assert.rejects(createBackup({root,mediaRoot:media,database,destination:path.join(f.base,'out'),stageParent:path.join(f.base,'staging')}),/configured encrypted credential/);
  const backup=await createBackup({root,mediaRoot:media,database,destination:path.join(f.base,'out'),stageParent:path.join(f.base,'staging'),privateInventory:f.inventory,ageRecipients:f.recipients});
  assert.equal(backup.credentials_included,true);assert.equal(backup.private_runtime.encrypted_files,1);await verifySnapshot(backup.snapshot);
  const restored=path.join(f.base,'catalogue-restored');await restoreSnapshot(backup.snapshot,restored);assert.equal(JSON.parse(await fs.readFile(path.join(restored,'RESTORE-RECEIPT.json'))).credentials_restored,false);
