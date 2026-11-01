@@ -52,6 +52,12 @@ jobs:
         run: |
           set -euo pipefail
           sh ops/linux/run-lab.sh 2>&1 | tee "$RUNNER_TEMP/lu-linux-lab.log"
+      - name: Native systemd, filesystem and restore acceptance
+        if: matrix.variant == 'current-main-linux'
+        shell: bash
+        env:
+          LU_DISPOSABLE_LINUX_LAB: synthetic-only
+        run: bash ops/linux/native-lab.sh
       - name: Summarize test result
         if: always()
         shell: bash
