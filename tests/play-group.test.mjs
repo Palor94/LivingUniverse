@@ -65,5 +65,21 @@ test('group scene: two people at the same place answer in one turn; save point r
     assert.ok((await call('/api/play/relationships')).data.people.some(p=>p.id===a.id));
     const picked=(await call('/api/play/media/pick?'+new URLSearchParams({panel:'journal',characters:[a.id,b.id].join(','),mood:'intimate',progress:'0',daypart:'night'}))).data;assert.deepEqual(picked.items,[]);assert.equal(picked.want_level,'nudity');
     assert.equal((await call(`/api/play/journal/${ev.id}/media`,{})).data.media,null,'no picture of both: none rather than a wrong one');
+    // Intimate group scenes (owner 2026-11-15): only when intimacy is open with every one of them.
+    const setLevel=(cid,level)=>app.db.prepare('INSERT INTO world_relationship_levels VALUES(?,?,?,?) ON CONFLICT DO UPDATE SET level=excluded.level').run(cid,palor.id,level,'x');
+    await call('/api/play/travel',{node_id:'n-work'});
+    setLevel(a.id,1);
+    let h=(await call('/api/play/group-talk',{opener:true})).data;
+    assert.equal(h.lines.at(-1).beat,'talk','one of them is not there yet: at most flirting');assert.ok(requests.at(-1).system.includes('nincs benne intim'));
+    await call(`/api/play/conversations/${h.id}/end`,{});
+    setLevel(b.id,1);
+    h=(await call('/api/play/group-talk',{opener:true})).data;
+    assert.equal(h.lines.at(-1).beat,'sex','open with both: the scene may become sexual');
+    assert.ok(requests.at(-1).system.includes('szexuálissá is válhat')&&requests.at(-1).system.includes('pózváltás'));
+    assert.ok(requests.at(-1).user.includes('TITKOS-EXPLICIT'),'explicit profile fields go in');
+    h=(await call('/api/play/group-talk',{conversation_id:h.id,text:'Gyertek.'})).data;
+    await call(`/api/play/conversations/${h.id}/end`,{});
+    const iev=app.db.prepare("SELECT payload_json FROM world_events WHERE json_extract(payload_json,'$.play_conversation_id')=?").get(h.id);
+    assert.equal(JSON.parse(iev.payload_json).intimate,true,'its save point is intimate (news never carries it)');
   }finally{await app.close();}
 });

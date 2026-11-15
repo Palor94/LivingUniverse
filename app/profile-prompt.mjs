@@ -16,9 +16,12 @@ const OMIT={
   talk:new Set(),
   agent:new Set(['relationship_speech','attraction','sexuality','memory_traits',...MEMORY_SCALES]),
   group:new Set(['birth_date','residence','goals','conflicts','fears','coping','weekly_routine','habits','memory_traits','attraction','sexuality',
+    'security','attachment','reward','autonomy','recognition',...MEMORY_SCALES]),
+  // Intimate group scene (2026-11-15): the group set, but attraction and sexuality matter here.
+  group_intimate:new Set(['birth_date','residence','goals','conflicts','fears','coping','weekly_routine','habits','memory_traits',
     'security','attachment','reward','autonomy','recognition',...MEMORY_SCALES])
 };
-const CLIP={talk:700,agent:700,group:300};
+const CLIP={talk:700,agent:700,group:300,group_intimate:300};
 
 // [low, high] behaviour phrases; low ≤ 30 % of the scale, high ≥ 70 %.
 export const SCALE_TEXT={
