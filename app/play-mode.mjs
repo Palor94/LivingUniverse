@@ -1066,7 +1066,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(!replies.length)throw fail('Nobody answered. Try again.',502);
     const id=conv?.id||randomUUID(),t=iso();
     const gBeat=gBeats.includes(out?.beat)?out.beat:'talk',gChoices=cleanChoices(out?.choices),autoScene=playSettings().auto_scene!==false;
-    // The scene picture shows the company (everyday only; the first speaker in focus).
+    // The scene picture shows the company (the first speaker in focus); intimate ones only as far
+    // as every one of them allows.
     const firstSpeaker=replies[0].id,gScene=!autoScene?null:await sceneFor({cid:firstSpeaker,conv,beat:gBeat,context:history.slice(-6).map(l=>l.text).join(' ')+' '+text+' '+replies.map(r=>r.text).join(' '),here,company:ids});
     let lastLine=null;
     transaction(()=>{

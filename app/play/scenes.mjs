@@ -12,7 +12,10 @@ export function createPlayScenes({one,all,fail,w,director,intimacyStage,clock,tr
   // context: the recent conversation text; intimateWanted: an intimate scene is going on;
   // after: the picture shown just before (the next one continues the same shoot).
   async function sceneFor({cid,conv,beat,context,here,company=null}){
-    const pid=w.palor()?.id,stage=company?'none':intimacyStage(cid);
+    // A company (owner, 2026-11-15): intimate pictures too, but only as far as the most reserved
+    // of them allows (the same rule that opens an intimate group scene).
+    const ORDER={none:0,flirt:1,intimate:2};
+    const pid=w.palor()?.id,stage=company?company.map(x=>intimacyStage(x)).reduce((m,s)=>ORDER[s]<ORDER[m]?s:m,'intimate'):intimacyStage(cid);
     const prev=conv?one('SELECT sc.media_id,sc.beat,l.rowid r FROM play_line_scene sc JOIN play_lines l ON l.id=sc.line_id WHERE l.conversation_id=? ORDER BY l.rowid DESC LIMIT 1',conv.id):null;
     const since=prev?one("SELECT count(*) n FROM play_lines WHERE conversation_id=? AND speaker='character' AND rowid>?",conv.id,prev.r).n:0;
     if(prev&&prev.beat===beat&&since<3)return null;
