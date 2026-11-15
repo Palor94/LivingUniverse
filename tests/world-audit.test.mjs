@@ -190,6 +190,30 @@ test('a long talk keeps a running summary and uses it once old lines leave the w
   }finally{await w.close();}
 });
 
+test('a talk quotes his last replies as not to repeat and carries a scene state forward',async()=>{
+  let n=0;
+  const w=await world({respond:r=>isSummary(r)?{title:'X',summary:'Y',level_delta:0}:{...reply,reply:'Válasz '+(++n),scene:n===2?'':'Állapot '+n},at:'2026-11-12T10:00:00'});
+  try{
+    let conv=(await w.call('/api/play/talk',{character_id:w.a.id,channel:'in_person',text:'Szia!'})).data;
+    const memoOf=()=>JSON.parse(w.app.db.prepare('SELECT memo_json FROM play_conversations WHERE id=?').get(conv.id).memo_json||'null');
+    assert.deepEqual(memoOf(),{scene:'Állapot 1'});
+    assert.doesNotMatch(w.requests.at(-1).user,/UTOLSÓ VÁLASZAID/);
+    conv=(await w.call('/api/play/talk',{conversation_id:conv.id,text:'És?'})).data;
+    assert.match(w.requests.at(-1).user,/A JELENET MOST \(innen lépj tovább\): Állapot 1/);
+    // An empty scene keeps the previous one.
+    assert.deepEqual(memoOf(),{scene:'Állapot 1'});
+    conv=(await w.call('/api/play/talk',{conversation_id:conv.id,text:'Tovább?'})).data;
+    assert.match(w.requests.at(-1).user,/UTOLSÓ VÁLASZAID[^\n]*\n- Válasz 1\n- Válasz 2/);
+    assert.deepEqual(memoOf(),{scene:'Állapot 3'});
+    assert.match(w.requests.at(-1).system,/"scene"/);
+    // Suggestions: one reaction plus two diverging ones; the last suggestions and Palor's own
+    // lines come back as not to repeat; intimate examples stay out of an ordinary talk.
+    assert.match(w.requests.at(-1).system,/Az 1\. közvetlen reakció/);assert.doesNotMatch(w.requests.at(-1).system,/pózváltás/);
+    assert.match(w.requests.at(-1).user,/"choices" NE ismételje[^\n]*\n(- .*\n)*- Szia!\n- És\?\n/);
+    for(const ch of reply.choices||[])assert.ok(w.requests.at(-1).user.includes('- '+ch));
+  }finally{await w.close();}
+});
+
 test('a friendly character may invite Palor; Palor answers on the phone and he remembers it',async()=>{
   let cafeId=null;
   const w=await world({respond:r=>isGm(r)?{events:[]}:isAgent(r)?{intention:'Vár valakit.',location_id:cafeId,wants_to_meet:[],message_to_palor:null,invite_palor:{location_id:cafeId,slot:'este',text:'Gyere át este a kávézóba!'}}:reply,at:'2026-11-12T10:00:00'});

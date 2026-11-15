@@ -84,7 +84,7 @@ test('an answer cut at the token limit keeps its reply; a timed-out call counts 
   const w=await world({respond:()=>reply,clock:()=>new Date('2026-11-11T10:00:00')});
   try{
     w.provider.name='test';
-    w.provider.impl={complete:async r=>{assert.equal(r.maxTokens,600);return {text:'{"reply":"Szia, Palor, rég lát','usage':{input:100,cached:0,output:600},finish:'length'};}};
+    w.provider.impl={complete:async r=>{assert.equal(r.maxTokens,700);return {text:'{"reply":"Szia, Palor, rég lát','usage':{input:100,cached:0,output:700},finish:'length'};}};
     const cut=await w.call('/api/play/talk',{character_id:w.a.id,channel:'in_person',text:'Szia!'});
     assert.equal(cut.status,200);assert.equal(cut.data.lines.at(-1).text,'Szia, Palor, rég lát');assert.deepEqual(cut.data.choices,[]);
     const before=w.app.db.prepare('SELECT cost_usd FROM world_usage').get().cost_usd;
@@ -104,6 +104,13 @@ test('the Grok stream accepts a last event without a closing newline and reports
   const provider=createXaiProvider({key:'test-key-123',fetchImpl:async()=>({ok:true,status:200,body})});
   const out=await provider.complete({system:'s',user:'u',onDelta:()=>{}});
   assert.equal(out.text,'{"reply":"Szia');assert.equal(out.finish,'length');
+});
+
+test('grok-4.3 is asked to answer without hidden reasoning; the fast model gets no reasoning field',async()=>{
+  const sent=[];const fetchImpl=async(_u,o)=>{sent.push(JSON.parse(o.body));return {ok:true,status:200,json:async()=>({choices:[{message:{content:'{}'}}],usage:{}})};};
+  await createXaiProvider({key:'test-key-123',model:'grok-4.3',fetchImpl}).complete({system:'s',user:'u'});
+  await createXaiProvider({key:'test-key-123',fetchImpl}).complete({system:'s',user:'u'});
+  assert.equal(sent[0].reasoning_effort,'none');assert.equal('reasoning_effort' in sent[1],false);
 });
 
 test('media search treats % and _ literally; an empty media file is served without breaking the connection',async()=>{

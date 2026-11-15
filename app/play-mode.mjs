@@ -882,10 +882,22 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const where=channel==='phone'?'telefonon (üzenetváltás)':`itt: ${here?.path||here?.name||'ismeretlen hely'}${here?` (${KIND_LABEL[kindOf(here)]})`:''}`;
     // Long talk: ask the reply to refresh a short running summary every few turns (no extra call).
     const memo=(()=>{try{return JSON.parse(conv?.memo_json||'null');}catch{return null;}})();
-    const wantMemo=history.length>=MEMO_FROM&&(!memo||history.length-memo.lines>=6);
+    // memo_json also carries the scene state ({scene}) since 2026-11-15, so a memo without text
+    // is not yet a summary.
+    const wantMemo=history.length>=MEMO_FROM&&(!memo?.text||history.length-memo.lines>=6);
+    // Anti-repeat (2026-11-15): his own last replies, quoted back as phrases not to reuse; a long
+    // monotonous scene otherwise makes the model rotate the same few sentences.
+    const ownLast=history.filter(l=>l.speaker!=='palor').slice(-4).map(l=>'- '+clip(l.text,300));
+    // Scene state (2026-11-15): one line on where the scene stands, rewritten by every reply so the
+    // scene has an arc instead of standing still.
+    const sceneNow=typeof memo?.scene==='string'?memo.scene:'';
+    // Suggested lines (2026-11-15): last round's suggestions and Palor's own last lines are quoted
+    // back so the suggestions do not rotate either.
+    const prevChoices=(()=>{if(!conv)return [];try{return cleanChoices(JSON.parse(one("SELECT m.choices_json FROM play_lines l JOIN play_line_meta m ON m.line_id=l.id WHERE l.conversation_id=? AND l.speaker='character' ORDER BY l.rowid DESC LIMIT 1",conv.id)?.choices_json||'[]'));}catch{return [];}})();
+    const palorLast=history.filter(l=>l.speaker==='palor').slice(-3).map(l=>clip(l.text,200));
     // Place and time are not in the system message (2026-11-12): it stays the same through a
     // conversation, so the provider's prompt cache can reuse it; they come at the end instead.
-    const system=`Te ${c.name} vagy egy élő világban, és Palorral beszélsz (hol és mikor: az üzenet végén). Maradj a szerepben, a saját hangodon és beszédstílusodban, magyarul, röviden (1-4 mondat, mint egy valódi beszélgetésben; cselekvést *csillagok között* írhatsz). Csak a profilodból, a Palorhoz fűződő kapcsolatodból, a közös múltatokból, az emlékeidből és a mai napodból dolgozz; ne találj ki új tényt a múltról, rokonokról vagy Palorról. Csak azt tudod Palorról, ami a kapcsolatodban és az emlékeidben szerepel; a titkos érzéseit nem ismered. A beszélgetőtársad neve Palor: ha nevén szólítod, mindig Palornak hívd; ő nem azonos a profilodban vagy az emlékeidben említett más emberekkel (barátok, rokonok, kollégák). Mindenki felnőtt. Senki nem hal meg. ${CLOSENESS_RULES[stage!=='none'&&(intimate||stage==='intimate')&&hostileWith(cid)?'hostile':intimate?'intimate':stage]}${channel==='phone'?` Telefonon képet is küldhetsz magadról, ha Palor kér, vagy ha nagyon illik a beszélgetéshez (ritkán): "photo" = ${PHONE_MOODS[stage].map(x=>`"${x}"`).join(' / ')}${stage==='none'?' (hétköznapi kép)':''}; egyébként "none".`:''} ${channel==='in_person'?` "beat": hol tart most köztetek a jelenet a te válaszod után (${beats.join(' / ')}); csak akkor lépj tovább, ha a beszélgetésben tényleg odáig jutottatok, és te is akarod.`:''} "spark": hogyan hatott rád Palor utolsó mondata (-1 rosszul esett, 0 semleges, 1 jólesett). "choices": három rövid, különböző hangvételű mondat (kedves, flörtölős/játékos, merész vagy őszinte), amit Palor válaszolhatna neked most, Palor szájából, magyarul, legfeljebb 12 szó. Csak JSON: {"reply":"..."${moods.length>1?`,"mood":"${moods.join('|')}"`:''}${channel==='phone'?`,"photo":"none|${PHONE_MOODS[stage].join('|')}"`:`,"beat":"${beats.join('|')}"`},"spark":-1|0|1,"choices":["...","...","..."]${wantMemo?',"memo":"2-3 mondat: az egész eddigi beszélgetés lényege (ki mit mondott, mit beszéltetek meg)"':''}}`;
+    const system=`Te ${c.name} vagy egy élő világban, és Palorral beszélsz (hol és mikor: az üzenet végén). Maradj a szerepben, a saját hangodon és beszédstílusodban, magyarul, röviden (1-4 mondat, mint egy valódi beszélgetésben; cselekvést *csillagok között* írhatsz). Minden válaszod vigye előre a jelenetet valami újjal (új mozdulat, érzés, érzékelés, gondolat, kérdés, helyzetváltozás vagy tempóváltás); ne ismételd a saját korábbi mondataidat, fordulataidat és képeidet, és ne kezdd ugyanúgy, mint az előzőt. Csak a profilodból, a Palorhoz fűződő kapcsolatodból, a közös múltatokból, az emlékeidből és a mai napodból dolgozz; ne találj ki új tényt a múltról, rokonokról vagy Palorról. Csak azt tudod Palorról, ami a kapcsolatodban és az emlékeidben szerepel; a titkos érzéseit nem ismered. A beszélgetőtársad neve Palor: ha nevén szólítod, mindig Palornak hívd; ő nem azonos a profilodban vagy az emlékeidben említett más emberekkel (barátok, rokonok, kollégák). Mindenki felnőtt. Senki nem hal meg. ${CLOSENESS_RULES[stage!=='none'&&(intimate||stage==='intimate')&&hostileWith(cid)?'hostile':intimate?'intimate':stage]}${channel==='phone'?` Telefonon képet is küldhetsz magadról, ha Palor kér, vagy ha nagyon illik a beszélgetéshez (ritkán): "photo" = ${PHONE_MOODS[stage].map(x=>`"${x}"`).join(' / ')}${stage==='none'?' (hétköznapi kép)':''}; egyébként "none".`:''} ${channel==='in_person'?` "beat": hol tart most köztetek a jelenet a te válaszod után (${beats.join(' / ')}); csak akkor lépj tovább, ha a beszélgetésben tényleg odáig jutottatok, és te is akarod.`:''} "spark": hogyan hatott rád Palor utolsó mondata (-1 rosszul esett, 0 semleges, 1 jólesett). "choices": három rövid javaslat arra, mit mondhatna vagy tehetne Palor most, Palor szájából, magyarul, legfeljebb 18 szó; lehet mondat, *cselekvés csillagok között*, vagy a kettő együtt. Az 1. közvetlen reakció arra, amit te épp mondtál vagy tettél. A 2. és a 3. a jelenet mostani állására építve viszi előre a jelenetet, de két egymástól jól eltérő irányba (például ${intimate?'két különböző pózváltás, két különböző hangulatváltás – az egyik vadabb, indulatosabb, a másik érzékibb –, ':'két különböző hangulatváltás, '}két különböző fejlemény, vagy az egyik a helyzetből következik, a másik egy váratlan történeti csavar); ezek csak példák, főként saját, a helyzethez illő ötleteid legyenek. Ne ismételd a korábbi javaslatokat, és Palor korábbi mondatait se. Csak JSON: {"reply":"..."${moods.length>1?`,"mood":"${moods.join('|')}"`:''}${channel==='phone'?`,"photo":"none|${PHONE_MOODS[stage].join('|')}"`:`,"beat":"${beats.join('|')}"`},"spark":-1|0|1,"choices":["...","...","..."],"scene":"egy rövid mondat: hol tart most a jelenet a válaszod után, mi változott az előzőhöz képest"${wantMemo?',"memo":"2-3 mondat: az egész eddigi beszélgetés lényege (ki mit mondott, mit beszéltetek meg)"':''}}`;
     const last=one("SELECT id,summary_json,world_day FROM play_conversations WHERE character_id=? AND status='closed' AND rewound_at IS NULL ORDER BY closed_at DESC LIMIT 1",cid);
     let lastTalk='';try{const s=last?JSON.parse(last.summary_json||'{}'):null;if(s)lastTalk=`${last.world_day}: ${s.summary||s.title||''}`;}catch{}
     // Longer memory of Palor (2026-11-15): the shared history he keeps, and the few talks before
@@ -932,6 +944,9 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       ...(shared?['KÖZÖS MÚLTATOK PALORRAL (ahogy te emlékszel rá):\n'+clip(shared,1500)]:[]),
       ...(earlier.length?['KORÁBBI BESZÉLGETÉSEITEK:\n'+earlier.join('\n')]:[]),
       'LEGUTÓBB PALORRAL: '+(lastTalk?lastTalk+sinceText:'még nem beszélgettetek'),
+      ...(sceneNow?['A JELENET MOST (innen lépj tovább): '+clip(sceneNow,300)]:[]),
+      ...(ownLast.length>=2?['A TE UTOLSÓ VÁLASZAID – ezek mondatait, fordulatait és képeit most NE ismételd, mondj mást, másképp:\n'+ownLast.join('\n')]:[]),
+      ...(prevChoices.length||palorLast.length>=2?['A "choices" NE ismételje ezeket (előző javaslatok és Palor korábbi mondatai):\n'+[...prevChoices,...palorLast].map(x=>'- '+x).join('\n')]:[]),
       'HANGULATOD MA: '+mood.text+(placeRole&&ROLE_CONTEXT[placeRole]?' '+ROLE_CONTEXT[placeRole]:''),
       'EMLÉKEID:\n'+(memories.map(m=>'- '+clip(m,300)).join('\n')||'nincs'),
       'MA VELED TÖRTÉNT:\n'+(today.map(e=>`- ${e.title}: ${clip(e.summary,200)}`).join('\n')||'semmi különös'),
@@ -946,7 +961,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       opener?(channel==='phone'?'Palor most felhívott. Vedd fel, és szólalj meg te elsőként.':'Palor most lép oda hozzád, még nem szólt. Vedd észre, és szólalj meg te elsőként, ahhoz illően, amit éppen csinálsz.'):'Palor: '+text].join('\n\n');
     // 600 tokens: reply plus mood, beat, spark and three suggested lines, in Hungarian. If the
     // answer is still cut short, keep the reply that arrived and default the rest.
-    let out=await w.ask(system,user,600,replyWatcher(onReply));
+    // 700 since 2026-11-15: the scene-state line rides along too.
+    let out=await w.ask(system,user,700,replyWatcher(onReply));
     if(out?.__truncated)out={reply:partialJsonString(out.raw,'reply')||''};
     // Plain text only: no control characters or markup from the model.
     const reply=clip(String(out?.reply??'').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g,' ').replace(/<[^>]{1,200}>/g,''),1500);if(!reply)throw fail('The character did not answer. Try again.',502);
@@ -974,7 +990,11 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       if(date&&!date.met_at)run('UPDATE play_dates SET met_at=?,conversation_id=? WHERE appointment_id=?',t,id,date.appointment_id);
       if(missed)run('UPDATE play_dates SET missed_noted_at=? WHERE appointment_id=?',t,missed.appointment_id);
       if(threads.lapsed.length)w.noteLapsed(threads.lapsed.map(x=>x.id));
-      if(wantMemo&&typeof out?.memo==='string'&&out.memo.trim())run('UPDATE play_conversations SET memo_json=? WHERE id=?',JSON.stringify({text:clip(out.memo.replace(/[\u0000-\u001f\u007f]/g,' '),800),lines:history.length+(opener?1:2)}),id);
+      {const plain=s=>s.replace(/[\u0000-\u001f\u007f]/g,' ').trim();
+        const newMemo=wantMemo&&typeof out?.memo==='string'&&out.memo.trim()?{text:clip(plain(out.memo),800),lines:history.length+(opener?1:2)}:(memo?.text?{text:memo.text,lines:memo.lines}:{});
+        const newScene=typeof out?.scene==='string'&&plain(out.scene)?clip(plain(out.scene),300):sceneNow;
+        const next={...newMemo,...(newScene?{scene:newScene}:{})};
+        if(Object.keys(next).length&&JSON.stringify(next)!==(conv?.memo_json||''))run('UPDATE play_conversations SET memo_json=? WHERE id=?',JSON.stringify(next),id);}
       if(scene)run('INSERT INTO play_line_scene VALUES(?,?,?,?,?,?,?,?)',replyId,scene.media_id,scene.kind,scene.level,beat,scene.start_at??null,JSON.stringify(scene.display),t);
     });
     // Talking takes time (game clock, owner decision D1).

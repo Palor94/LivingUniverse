@@ -17,8 +17,11 @@ export const DEFAULT_PRICES={input:0.20,cached_input:0.05,output:0.50};
 export const TEXT_MODELS=Object.freeze({
   'grok-4-1-fast-non-reasoning':{label:'Grok 4.1 Fast – eddigi, a legolcsóbb',prices:DEFAULT_PRICES},
   'grok-4.20-non-reasoning':{label:'Grok 4.20 – gyors',prices:{input:1.25,cached_input:0.20,output:2.50}},
-  'grok-4.3':{label:'Grok 4.3',prices:{input:1.25,cached_input:0.20,output:2.50}},
-  'grok-4.7':{label:'Grok 4.7 – a legújabb',prices:{input:2.00,cached_input:0.50,output:6.00}}
+  // reasoning (2026-11-15): grok-4.3 thinks before answering by default (docs.x.ai: default
+  // effort "low", "none" supported). A talk needs a quick natural reply, not hidden thinking that
+  // is billed and delays the first word, so it is switched off for these models.
+  'grok-4.3':{label:'Grok 4.3',prices:{input:1.25,cached_input:0.20,output:2.50},reasoning:'none'},
+  'grok-4.7':{label:'Grok 4.7 – a legújabb',prices:{input:2.00,cached_input:0.50,output:6.00},reasoning:'none'}
 });
 export const pricesFor=(model,fallback=DEFAULT_PRICES)=>TEXT_MODELS[model]?.prices||fallback;
 
@@ -55,6 +58,7 @@ export function createXaiProvider({key,model=DEFAULT_MODEL,fetchImpl=fetch,timeo
         response=await fetchImpl('https://api.x.ai/v1/chat/completions',{method:'POST',signal:controller.signal,
           headers:{'Content-Type':'application/json',Authorization:'Bearer '+key},
           body:JSON.stringify({model,max_tokens:maxTokens,temperature:0.9,response_format:{type:'json_object'},
+            ...(TEXT_MODELS[model]?.reasoning?{reasoning_effort:TEXT_MODELS[model].reasoning}:{}),
             messages:[{role:'system',content:system},{role:'user',content:user}],...(onDelta?{stream:true,stream_options:{include_usage:true}}:{})})});
         if(!response.ok){const data=await response.json().catch(()=>null);throw Object.assign(new Error('Grok refused the request ('+response.status+'): '+String(data?.error?.message||data?.error||'').slice(0,200)),{code:response.status===401||response.status===403?'AI_KEY':'AI_FAILED'});}
         // finish: 'length' when the answer hit maxTokens (its JSON is then cut short).
