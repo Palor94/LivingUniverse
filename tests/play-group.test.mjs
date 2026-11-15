@@ -44,11 +44,11 @@ test('group scene: two people at the same place answer in one turn; save point r
     assert.ok(requests.at(-1).system.includes('nincs benne intim')&&!requests.at(-1).user.includes('TITKOS-EXPLICIT')&&!requests.at(-1).user.includes('PALOR-TITKOS'));
     g=(await call('/api/play/group-talk',{conversation_id:g.id,text:'Kávé?'})).data;assert.equal(g.lines.length,5);
     // Suggestion rules (2026-11-15): one reaction plus two diverging ones, Palor's own voice for
-    // the people here only (never his private flirting part), earlier suggestions not repeated.
+    // the people here only plus his flirting part, earlier suggestions not repeated.
     const last=requests.at(-1);
     assert.match(last.system,/Az 1\. közvetlen reakció/);assert.doesNotMatch(last.system,/pózváltás/);
     assert.ok(last.user.includes('PALOR BESZÉDMÓDJA')&&last.user.includes('HANG-ALADAR')&&last.user.includes('Na jó, de most komolyan'));
-    assert.ok(!last.user.includes('HANG-MAS')&&!last.user.includes('FLORT-TITKOS'));
+    assert.ok(!last.user.includes('HANG-MAS')&&last.user.includes('FLORT-TITKOS'));
     assert.match(last.user,/"choices" NE ismételje[^\n]*\n- Sziasztok!\n- Mi a helyzet\?\n- Kértek egy kávét\?/);
     assert.match(last.user,/AZ UTOLSÓ VÁLASZOK[^\n]*\n- Teszt Aladár: Szia, Palor!\n- Teszt Béla: Na, mi újság\?/);
     const ended=(await call(`/api/play/conversations/${g.id}/end`,{})).data;assert.equal(ended.status,'closed');

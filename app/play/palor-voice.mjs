@@ -1,9 +1,9 @@
 // Palor's voice for the suggested lines (2026-11-15). His Szellemprofil speech text is long
 // (general style, then one section per person he talks to, then flirting, intimacy…). A talk
-// prompt gets only what the character himself hears from Palor: the general style and the
-// section(s) about this character. Flirting, attraction and intimacy sections are never taken:
-// they hold Palor's private preferences, which other characters must not learn (profile
-// "presented_sexuality"). Nothing is invented; with no speech text the block is left out.
+// prompt gets the general style, the section(s) about the people in the scene, and his flirting
+// and attraction sections (owner, 2026-11-15: these may go in). The intimacy sections ("Intim
+// kommunikáció", "Intimitás után") go in only inside an intimate scene, like the explicit profile
+// fields. Nothing is invented; with no speech text the block is left out.
 
 // A heading: a short line of its own, no quotes, no sentence end, not a bullet.
 const isHeading=line=>{const t=line.trim();return t.length>0&&t.length<=60&&!/[“”"„.!?…]$/.test(t)&&!/[“”"„]/.test(t)&&!t.startsWith('*')&&!t.startsWith('-');};
@@ -21,7 +21,7 @@ function namesPerson(word,token){
   }
   return false;
 }
-const PRIVATE=/flört|vonzalom|vonzód|intim|szex|puhatolóz|attraction|flirt|sexual|intimacy/i;
+const FLIRT=/flört|vonzalom|puhatolóz/i,INTIMATE=/intim/i;
 
 function sections(text){
   const out=[];let cur={heading:'',lines:[]};
@@ -33,7 +33,7 @@ function sections(text){
   return out.map(s=>({heading:s.heading,body:s.lines.map(l=>l.trim()).filter(Boolean).join('\n')}));
 }
 
-export function palorVoice(text,characterName,{max=2200}={}){
+export function palorVoice(text,characterName,{intimate=false,max=intimate?4200:3400}={}){
   const src=String(text||'').trim();if(!src)return '';
   const tokens=String(characterName||'').split(/[\s-]+/).filter(t=>t.length>=3);
   const parts=sections(src),picked=[],used=new Set();
@@ -42,25 +42,27 @@ export function palorVoice(text,characterName,{max=2200}={}){
   if(gi>=0){let body=parts[gi].body;used.add(gi);
     for(let i=gi+1;i<parts.length&&parts[i].heading.endsWith(':');i++){body+='\n'+parts[i].heading+'\n'+parts[i].body;used.add(i);}
     if(body.trim())picked.push(body.slice(0,1100));}
-  let personal=0;
+  let personal=0;const topics=[];
   parts.forEach((s,i)=>{
-    if(!s.heading||PRIVATE.test(s.heading)||used.has(i))return;
-    // Lines he says aloud stay (the other person hears them anyway); a describing line that
-    // names his attraction or sexuality is his inner state and is left out.
-    if(s.heading.split(/[\s:,]+/).some(w=>tokens.some(t=>namesPerson(w,t)))){
-      const body=s.body.split('\n').filter(l=>/[“"„]/.test(l)||!PRIVATE.test(l)).join('\n');
-      if(body.trim()){picked.push(s.heading.replace(/:$/,'')+':\n'+body.slice(0,700));personal++;}}
+    if(!s.heading||used.has(i)||!s.body)return;
+    const head=s.heading.replace(/:$/,'');
+    if(INTIMATE.test(s.heading)){if(intimate)topics.push(head+':\n'+s.body.slice(0,700));return;}
+    if(s.heading.split(/[\s:,]+/).some(w=>tokens.some(t=>namesPerson(w,t)))){picked.push(head+':\n'+s.body.slice(0,700));personal++;return;}
+    if(FLIRT.test(s.heading))topics.push(head+':\n'+s.body.slice(0,700));
   });
   // Nobody named: his everyday talk instead.
   if(!personal){const daily=parts.find(s=>/hétköznapi/i.test(s.heading));if(daily?.body)picked.push(daily.heading+':\n'+daily.body.slice(0,500));}
   // The short per-person summary lines ("* Attila: Contempt, …").
   for(const line of src.split(/\r?\n/)){const m=line.match(/^\s*[*-]\s*([^:]{2,40}):\s*(.+)$/);
-    if(m&&!PRIVATE.test(m[2])&&m[1].split(/\s+/).some(w=>tokens.some(t=>namesPerson(w,t))))picked.push(m[1].trim()+': '+m[2].trim());}
+    if(m&&m[1].split(/\s+/).some(w=>tokens.some(t=>namesPerson(w,t))))picked.push(m[1].trim()+': '+m[2].trim());}
+  // Flirting / attraction (and intimacy in an intimate scene) after the personal parts, so a
+  // cut at the limit takes from these first.
+  picked.push(...topics);
   if(!picked.length)return '';
   const joined=picked.join('\n\n');return joined.length>max?joined.slice(0,max)+'…':joined;
 }
 
-export const PALOR_VOICE_HEAD='PALOR BESZÉDMÓDJA (csak ahhoz, hogy a "choices" Palor saját hangján szóljon; ez nem tudás Palor érzéseiről, ne hivatkozz rá, és a te válaszodat ne befolyásolja):\n';
+export const PALOR_VOICE_HEAD='PALOR BESZÉDMÓDJA (ahhoz, hogy a "choices" Palor saját hangján szóljon):\n';
 
 // The suggested lines (owner, 2026-11-15): one direct reaction, two that move the scene on in
 // clearly different directions. Pose and sexual-mood examples only inside an intimate scene.
