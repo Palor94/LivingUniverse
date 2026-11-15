@@ -26,6 +26,9 @@ test('group scene: two people at the same place answer in one turn; save point r
     for(const c of [a,b]){app.db.prepare('INSERT INTO application_settings(key,value) VALUES(?,?)').run('ghost:character:'+c.id,JSON.stringify({version:1,values:{goals:entry('Dolgozni.'),anatomy:entry('TITKOS-EXPLICIT')},history:[],proposals:[]}));
       await call('/api/world-engine/places',{character_id:c.id,location_id:work.id,role:'work'});}
     app.db.prepare('INSERT INTO relationships VALUES(?,?,?,?)').run('44444444-4444-4444-8444-444444444444',palor.id,a.id,'PALOR-TITKOS');
+    // Synthetic speech text for Palor: a general part, a section for Aladár, a private flirting part.
+    const speech=['Általános beszédstílus','Röviden, viccesen beszél.','Gyakori fordulatai:','“Na jó, de most komolyan…”','Aladárral','“Aladár, ezt most hagyjuk.” HANG-ALADAR','Cecillel','“Cecil, gyere.” HANG-MAS','Flörtölés és puhatolózás','“Titok.” FLORT-TITKOS'].join('\n');
+    app.db.prepare('INSERT INTO application_settings(key,value) VALUES(?,?)').run('ghost:character:'+palor.id,JSON.stringify({version:1,values:{speech:entry(speech)},history:[],proposals:[]}));
     const node=(id,name,parent_id,source_id)=>({id,name,parent_id,kind:'place',source_id,type_ids:[],placed:true,archived:false,order:0,note:'',x:null,y:null});
     await fs.writeFile(path.join(dataDir,'location-canvas.json'),JSON.stringify({schema:1,head:'r1',approved_head:'r1',revisions:[{id:'r1',parent_id:null,kind:'approved',state:{schema:1,types:[],nodes:[node('n-city','Város',null,null),node('n-work','Kórház','n-city',work.id)]}}]}));
     assert.equal((await call('/api/play/group-talk',{opener:true})).status,409,'Palor is not with them yet');
@@ -40,6 +43,14 @@ test('group scene: two people at the same place answer in one turn; save point r
     assert.equal(g.lines.at(-1).beat,'talk','a group scene never goes beyond flirt');
     assert.ok(requests.at(-1).system.includes('nincs benne intim')&&!requests.at(-1).user.includes('TITKOS-EXPLICIT')&&!requests.at(-1).user.includes('PALOR-TITKOS'));
     g=(await call('/api/play/group-talk',{conversation_id:g.id,text:'Kávé?'})).data;assert.equal(g.lines.length,5);
+    // Suggestion rules (2026-11-15): one reaction plus two diverging ones, Palor's own voice for
+    // the people here only (never his private flirting part), earlier suggestions not repeated.
+    const last=requests.at(-1);
+    assert.match(last.system,/Az 1\. közvetlen reakció/);assert.doesNotMatch(last.system,/pózváltás/);
+    assert.ok(last.user.includes('PALOR BESZÉDMÓDJA')&&last.user.includes('HANG-ALADAR')&&last.user.includes('Na jó, de most komolyan'));
+    assert.ok(!last.user.includes('HANG-MAS')&&!last.user.includes('FLORT-TITKOS'));
+    assert.match(last.user,/"choices" NE ismételje[^\n]*\n- Sziasztok!\n- Mi a helyzet\?\n- Kértek egy kávét\?/);
+    assert.match(last.user,/AZ UTOLSÓ VÁLASZOK[^\n]*\n- Teszt Aladár: Szia, Palor!\n- Teszt Béla: Na, mi újság\?/);
     const ended=(await call(`/api/play/conversations/${g.id}/end`,{})).data;assert.equal(ended.status,'closed');
     const mem=id=>app.db.prepare("SELECT text FROM character_memories WHERE character_id=? AND reason LIKE 'Világmotor%'").all(id).map(r=>r.text);
     assert.deepEqual(mem(a.id),['Palor jókedvű volt.']);assert.deepEqual(mem(b.id),['Palor kérdezett a munkáról.']);
