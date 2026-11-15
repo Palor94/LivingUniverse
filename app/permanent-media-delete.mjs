@@ -49,7 +49,8 @@ export function installPermanentMediaDelete({db,root,dataDir,one,all,run,transac
     // update, not an interrupted copy. Keep unknown or unfinished states blocked.
     if(one("SELECT 1 FROM file_moves WHERE media_id=? AND status NOT IN ('complete','relinked_external','folder_renamed','layout_migrated','layout_path_updated_missing') LIMIT 1",m.id))throw error('MOVE_REVIEW_REQUIRED','A képhez befejezetlen fájlművelet tartozik. Előbb rendezd a fájlmozgatási előzményt.');
     const normalized=p=>p.replaceAll('\\','/').toLocaleLowerCase('en');
-    if(all('SELECT id,relative_path FROM media WHERE id<>?',m.id).some(o=>normalized(o.relative_path)===normalized(m.relative_path)))throw error('SHARED_PATH','Másik médiarekord is ugyanerre a fájlútvonalra mutat.');
+    // Only rows of a similar length can be the same path (lower-casing rarely changes length).
+    if(all('SELECT id,relative_path FROM media WHERE id<>? AND length(relative_path) BETWEEN ? AND ?',m.id,m.relative_path.length-2,m.relative_path.length+2).some(o=>normalized(o.relative_path)===normalized(m.relative_path)))throw error('SHARED_PATH','Másik médiarekord is ugyanerre a fájlútvonalra mutat.');
     const artifacts=[];
     const add=(area,relative)=>{if(!artifacts.some(a=>a.area===area&&a.relative===relative))artifacts.push({area,relative});};
     const hashes=new Set(all('SELECT sha256 FROM imported_media_blobs WHERE media_id=? UNION SELECT sha256 FROM media_import_items WHERE media_id=?',m.id,m.id).map(r=>r.sha256));
@@ -86,6 +87,11 @@ export function installPermanentMediaDelete({db,root,dataDir,one,all,run,transac
     for(const row of all('SELECT id,evidence_json FROM sorting_suggestions WHERE media_id<>?',id))if((JSON.parse(row.evidence_json).references||[]).some(r=>r.media_id===id)){run('DELETE FROM suggestion_feedback WHERE suggestion_id=?',row.id);run('DELETE FROM sorting_suggestions WHERE id=?',row.id);}
     run('DELETE FROM suggestion_feedback WHERE suggestion_id IN (SELECT id FROM sorting_suggestions WHERE media_id=?)',id);
     for(const table of ['character_crop_approvals','character_reference_crops','sorting_suggestions','note_tag_proposal_changes','note_tag_proposals','note_tag_links','media_analysis_place_links','media_tags','media_locations','media_location_links','depictions','media_notes','reviews','media_hidden','media_scan_state','media_fingerprints','media_categorization','media_roles','character_cover_frames','media_image_edits','file_moves','imported_media_blobs']){if(/^(?:note_tag_|media_analysis_)/u.test(table)&&!hasTable(table))continue;run('DELETE FROM '+table+' WHERE media_id=?',id);}
+    // Play / media-director bookkeeping about this file (derived, never canon).
+    for(const table of ['media_signals','media_video_frames','media_signal_distinct','play_media_feedback','play_media_shown','play_media_sizes','play_line_media','play_line_scene','play_seen','workshop_media_flags','idea_box_notes','play_content','play_asset_sources','play_inserts','generation_feedback'])if(hasTable(table))run('DELETE FROM '+table+' WHERE media_id=?',id);
+    if(hasTable('play_event_media'))run('UPDATE play_event_media SET media_id=NULL WHERE media_id=?',id);
+    if(hasTable('media_provenance'))run("DELETE FROM media_provenance WHERE substr(cache_key,1,length(?)+1)=?||':'",id,id);
+    if(hasTable('play_generation_jobs'))run('UPDATE play_generation_jobs SET media_id=CASE WHEN media_id=? THEN NULL ELSE media_id END,placed_media_id=CASE WHEN placed_media_id=? THEN NULL ELSE placed_media_id END WHERE media_id=? OR placed_media_id=?',id,id,id,id);
     run('UPDATE characters SET cover_id=NULL WHERE cover_id=?',id);
     run("UPDATE character_ui SET cover_crop=NULL WHERE json_valid(cover_crop) AND json_extract(cover_crop,'$.media_id')=?",id);
     for(const row of all('SELECT relative_path,candidate_ids FROM scan_candidates')){const ids=JSON.parse(row.candidate_ids).filter(v=>v!==id);if(ids.length)run('UPDATE scan_candidates SET candidate_ids=? WHERE relative_path=?',JSON.stringify(ids),row.relative_path);else run('DELETE FROM scan_candidates WHERE relative_path=?',row.relative_path);}
@@ -132,7 +138,22 @@ export function installPermanentMediaDelete({db,root,dataDir,one,all,run,transac
       throw Object.assign(error(e.status?e.code:'DELETE_FAILED',e.status?e.message:'A törlés nem fejeződött be. A médiarekord megmaradt; ellenőrizd a fájl elérhetőségét és próbáld újra.',e.status||409),{partial});
     }finally{active=false;moving.delete(id);}
   }
-  return {details,erase,isBusy:()=>active,async handle({p,req,body,json}){
+  // Items erased from "Removed items" (marker erased_media:<id>) used to keep their catalogue
+  // row, links and tags after the file was gone. This removes those leftovers with the
+  // same database clean-up as a full permanent delete. Skipped, never forced: approved
+  // canon references, and any record whose file still (or again) exists on disk.
+  async function purgeErased(ids=null){
+    const rows=all("SELECT m.id,m.relative_path FROM application_settings s JOIN media m ON s.key='erased_media:'||m.id")
+      .filter(r=>!ids||ids.includes(r.id));
+    const result={removed:0,kept_protected:0,kept_file_present:0,kept_error:0};
+    for(const r of rows){
+      if(protectedBy(r.id).length){result.kept_protected++;continue;}
+      try{if((await inspect(root,r.relative_path)).identity){result.kept_file_present++;continue;}}catch{result.kept_error++;continue;}
+      try{transaction(()=>cleanDatabase(r.id));result.removed++;}catch{result.kept_error++;}
+    }
+    return result;
+  }
+  return {details,erase,purgeErased,isBusy:()=>active,async handle({p,req,body,json}){
     const match=p.match(/^\/api\/media\/([a-f0-9-]{36})\/permanent-delete$/iu);if(!match)return false;
     try{
       if(req.method==='GET'){json(details(match[1]));return true;}

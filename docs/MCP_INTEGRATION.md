@@ -5,14 +5,20 @@
 The shared read adapter now delivers selected high-quality references and optional original image bytes; see [original image limits and delivery](ORIGINAL_IMAGES.md). See
 [MCP_WRITES.md](MCP_WRITES.md) for the optional authenticated proposal/review/apply
 extension, activation, supported fields, tests, rollback and device limitations.
-The reader's SQLite connection stays read-only; writes are performed by the
-existing application only after independent human approval.
+The reader's SQLite connection stays read-only; writes use the existing
+application's authenticated proposal/apply service. Trusted text edits follow
+the local owner policy; visual-reference promotion keeps its separate approval.
 
 ## Local adapter
 
 Run Node.js 24+ with `node mcp/server.mjs`. The adapter is an independent, newline-delimited JSON-RPC MCP stdio server. In its default read-only mode it opens no network listener, never calls the application HTTP API and does not import/start the application server. The optional guarded write client calls only the authenticated local change service described above. Port 4317, its Host/Origin checks and the mobile/Tailscale editor remain unchanged.
 
-Without optional write configuration it exposes ten read-only tools: `list_characters`, `get_character`, `get_ghost_profile`, `search_media`, `get_media`, `get_media_image_chunk`, `get_approved_references`, `search_events`, `get_character_timeline`, `get_event`. Event access defaults to approved public knowledge; see [event retrieval and knowledge boundaries](STORY_EVENTS.md). Each declares read-only, non-destructive, idempotent, closed-world annotations. There are no mutation, SQL, arbitrary URL/path, backup, filesystem browsing or original-video-download tools. The adapter has no model/API dependency or package installation step.
+Without optional write configuration it exposes 16 read-only tools: `list_characters`, `get_character`, `get_ghost_profile`, `get_profile_template`, `search_media`, `get_media`, `get_media_image_chunk`, `get_approved_references`, `get_reference_coverage`, `search_events`, `get_character_timeline`, `get_event`, `get_scene_pack`, `list_character_memories`, `get_story_clock`, `get_next_scene_candidates`. Event access defaults to approved public knowledge; see [event retrieval and knowledge boundaries](STORY_EVENTS.md). Each declares read-only, non-destructive, idempotent, closed-world annotations. The base reader has no mutation, SQL, arbitrary URL/path, backup, filesystem browsing or original-video-download tools. The adapter has no model/API dependency or package installation step. Optional authenticated services add their tools dynamically; this installation exposed 67 tools on 2026-11-11. Use `tools/list` for the current set.
+
+For current source placement, Windows task repair and credential renewal, see
+[Source and startup](SOURCE_LAYOUT.md). A running tunnel or HTTP 200 from
+`/readyz` does not prove cloud connectivity: require a successful control-plane
+poll, for example `tunnel-client health --url-file <local health.url> --require-control-plane-poll`.
 
 Use `node mcp/configure.mjs --database "<existing local SQLite file>" --media-root "<existing configured resource directory>"` once. Configuration defaults to `%LOCALAPPDATA%\LivingUniverse\mcp-config.json`; an explicit `--config` can select another local configuration. Configuration refuses to overwrite an existing file or create a database. The requested default database location is `%LOCALAPPDATA%\LivingUniverse\universe.sqlite`; **this installation was explicitly configured to the running app’s `%LOCALAPPDATA%\LivingUniverse\desktop-catalogue\universe.sqlite` instead**, after the user confirmed the discrepancy. Never copy, merge, initialize, restore or silently fall back between those databases. Keep configuration, credentials and live SQLite/WAL/SHM outside OneDrive and Git.
 

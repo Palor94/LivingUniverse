@@ -1,4 +1,6 @@
-import {WORLD_ROOT,copy,normalizeCanvas,catalogueCanvas,canvasChildren,descendants,reparentCanvas,retireCanvas,canvasLayout,moveCanvasBranch,zoomCanvas} from './location-canvas-model.js';
+import {translateServerMessage} from './i18n.js';
+import {scanPictures,openMissingBackdrops,importBackgroundZip} from './place-tools.js';
+import {WORLD_ROOT,copy,normalizeCanvas,catalogueCanvas,canvasChildren,descendants,reparentCanvas,retireCanvas,canvasLayout,moveCanvasBranch,zoomCanvas,cleanupSuggestions,applyTidy,pickDuplicateKeeper,mergeDuplicates} from './location-canvas-model.js';
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 const button=(text,fn,cls)=>{const b=el('button',text,cls);b.type='button';b.onclick=fn;return b;};
 const label=(text,control)=>{const l=el('label',text);l.append(control);return l;};
@@ -17,7 +19,15 @@ export async function mountLocationCanvas({host}){
   const shell=el('section',undefined,'lc-shell'),heading=el('div',undefined,'lc-heading'),titles=el('div'),actions=el('div',undefined,'actions'),status=el('span',undefined,'lc-status');
   titles.append(el('div','A VILÁGOD HELYSZÍNEI','eyebrow'),el('h1','Locations'),el('p','Egy világ, egyre több hely. Nagyíts rá egy ágra, és építsd tovább.'));
   const saveButton=button('Piszkozat mentése',()=>attempt(()=>save('draft','Helyszínterv mentése.')),'primary'),approveButton=button('Terv áttekintése',review),historyButton=button('Előzmények',history),exportButton=button('Terv letöltése',download);
-  const importFile=el('input');importFile.type='file';importFile.accept='application/json';importFile.hidden=true;const importButton=button('Terv betöltése…',()=>importFile.click());actions.append(status,saveButton,approveButton,historyButton,exportButton,importButton,importFile);heading.append(titles,actions);
+  const importFile=el('input');importFile.type='file';importFile.accept='application/json';importFile.hidden=true;const importButton=button('Terv betöltése…',()=>importFile.click());
+  // Tidy-up: suggested parents applied to the unsaved plan; saving and approving stay with the owner.
+  const tidyButton=button('Rendrakási javaslatok',()=>attempt(tidy));
+  // Picture tools moved here from Play (2026-11-14).
+  const scanButton=button('🖼 Képek beolvasása',()=>attempt(()=>scanPictures(tell)));scanButton.title='Beolvassa a kézzel mentett képeket: helyszín-háttereket (Helyszín hátterek\\<hely>), szereplőalakokat (Szereplő-alakok\\<név>) és közös jelenetképeket.';
+  const missingButton=button('Hiányzó hátterek',()=>attempt(()=>openMissingBackdrops(tell)));
+  // Background package (2026-11-14): one ZIP with a folder per place.
+  const zipButton=button('📦 Háttércsomag (ZIP) betöltése',()=>importBackgroundZip(tell));zipButton.title='Egy ZIP, benne helyenként egy mappa (a hely katalógusneve) a képekkel. A program minden képet a helyére tesz; amit nem tud biztosan elhelyezni, félreteszi átnézésre.';
+  actions.append(status,saveButton,approveButton,historyButton,exportButton,importButton,tidyButton,scanButton,zipButton,missingButton,importFile);heading.append(titles,actions);
   const message=el('div',undefined,'lc-toast');message.setAttribute('role','status');message.setAttribute('aria-live','polite');
   const wrapper=el('div',undefined,'lc-layout'),palette=el('aside',undefined,'lc-palette'),main=el('div',undefined,'lc-main'),tools=el('div',undefined,'lc-tools');
   palette.setAttribute('aria-label','Helyszíncímkék és típusok');const search=el('input');search.type='search';search.placeholder='Helyszíncímke keresése…';search.setAttribute('aria-label','Helyszíncímke keresése');const sourceList=el('div',undefined,'lc-source-list'),typeDetails=el('details'),typeList=el('div'),archiveDetails=el('details'),archiveList=el('div');
@@ -32,7 +42,7 @@ export async function mountLocationCanvas({host}){
   const world=el('div',undefined,'lc-world'),lines=svg('svg');lines.classList.add('lc-edges');lines.setAttribute('aria-hidden','true');world.append(lines);board.append(world);
   const help=el('div',undefined,'lc-help'),inspector=el('div',undefined,'lc-inspector');main.append(tools,board,help,inspector);wrapper.append(palette,main);shell.append(heading,message,wrapper);host.replaceChildren(shell);
   const dialog=el('dialog',undefined,'lc-dialog');document.body.append(dialog);
-  async function request(url,body){const response=await fetch(url,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-LU-Location-CSRF':context.csrf}:{},body:body?JSON.stringify(body):undefined});const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.error||'A helyszínterv nem tölthető be.'),{status:response.status});return value;}
+  async function request(url,body){const response=await fetch(url,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-LU-Location-CSRF':context.csrf}:{},body:body?JSON.stringify(body):undefined});const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.error?translateServerMessage(value.error):'A helyszínterv nem tölthető be.'),{status:response.status});return value;}
   function tell(text,error=false){if(destroyed)return;message.textContent=text;message.dataset.error=String(error);}
   async function refreshLabels(){
     if(busy)return;busy=true;refreshButton.disabled=true;updateStatus();
@@ -55,15 +65,47 @@ export async function mountLocationCanvas({host}){
   }
   async function attempt(fn){try{await fn();}catch(e){tell(e.message,true);if(e.status===409)help.replaceChildren(el('span','A saját piszkozatod megmaradt.'),button('Friss változat összehasonlítása',conflict));}}
   function cache(){try{localStorage.setItem(storageKey,JSON.stringify({head:local?local.head:context.head,catalogue_version:local?.catalogue_version||context.catalogue_version,state,camera,collapsed:[...collapsed]}));}catch{tell('A böngésző nem tudja megőrizni a piszkozatot. Mentsd a tervet vagy töltsd le.',true);}}
-  function change(fn){if(busy)throw Error('Várd meg a folyamatban lévő mentést.');const next=copy(state);fn(next);const normalized=normalizeCanvas(next);undo.push(state);redo=[];state=normalized;pending=null;dirty=JSON.stringify(state)!==JSON.stringify(base);cache();renderGraph();renderPalette();updateStatus();}
+  // Each undo step holds a full plan copy, so the history is capped.
+  const UNDO_LIMIT=100;
+  function pushUndo(snapshot){undo.push(snapshot);if(undo.length>UNDO_LIMIT)undo.shift();}
+  // Camera moves fire many times a second; persist them after a pause instead of on every event.
+  let cacheTimer=0;
+  function cacheSoon(){clearTimeout(cacheTimer);cacheTimer=setTimeout(cache,400);}
+  function change(fn){if(busy)throw Error('Várd meg a folyamatban lévő mentést.');const next=copy(state);fn(next);const normalized=normalizeCanvas(next);pushUndo(state);redo=[];state=normalized;pending=null;dirty=JSON.stringify(state)!==JSON.stringify(base);cache();renderGraph();renderPalette();updateStatus();}
   function undoStep(){if(!undo.length||busy)return;redo.push(state);state=undo.pop();pending=null;dirty=JSON.stringify(state)!==JSON.stringify(base);cache();renderGraph();renderPalette();updateStatus();}
-  function redoStep(){if(!redo.length||busy)return;undo.push(state);state=redo.pop();pending=null;dirty=JSON.stringify(state)!==JSON.stringify(base);cache();renderGraph();renderPalette();updateStatus();}
+  // Tidy-up dialog: suggested parents (ticked by default) and possible duplicates (info only).
+  function tidy(){
+    const {suggestions,duplicates}=cleanupSuggestions(state);
+    if(!suggestions.length&&!duplicates.length){tell('Nincs rendrakási javaslat: a nevek alapján minden hely a helyén van.');return;}
+    const dialog=el('dialog',undefined,'lc-tidy'),list=el('div');
+    dialog.append(el('h3','Rendrakási javaslatok'),el('p','A kötőjellel elválasztott név minden része egy szint: „Káloz - Szomszéd ház - Nappali” a Káloz › Szomszéd ház alá kerül. A hiányzó szintet (jelölés: új) a program létrehozza. Csak a mentetlen tervet módosítja: utána mentsd piszkozatként vagy hagyd jóvá.'));
+    suggestions.forEach((s,i)=>{const row=el('label');const box=el('input');box.type='checkbox';box.checked=s.recommended;box.dataset.index=String(i);
+      row.append(box,el('span',` ${s.name} → ${s.to}${s.unplaced?' (még nincs a fában)':s.from?` (most: ${s.from})`:''}`));list.append(row);});
+    dialog.append(list);
+    const close=()=>{dialog.close();dialog.remove();};
+    // Duplicates (2026-11-11): one click merges them. The kept place is the one still in the
+    // catalogue (then the one with more sub-places); the rest are archived, nothing is deleted.
+    if(duplicates.length){
+      const inCatalogue=new Set((context.catalogue||[]).map(c=>c.id));
+      dialog.append(el('h4','Lehetséges ismétlődések'));
+      for(const d of duplicates){
+        const keep=pickDuplicateKeeper(state,d.node_ids,inCatalogue),ghosts=d.node_ids.filter(id=>{const n=state.nodes.find(x=>x.id===id);return n?.source_id&&!inCatalogue.has(n.source_id);}).length;
+        const row=el('div',undefined,'lc-duplicate');
+        row.append(el('span',`${d.name} ×${d.node_ids.length}${d.parent?' · '+d.parent+' alatt':''}${ghosts?` (${ghosts} közülük a katalógusból már törölt hely)`:''} `),
+          button('Összevonás',()=>attempt(()=>{let r={moved:0,archived:0};change(next=>{r=mergeDuplicates(next,d.node_ids,keep);});close();tell(`„${d.name}”: ${r.archived} ismétlődés archiválva${r.moved?`, ${r.moved} alhely átkerült a megtartott helyhez`:''}. Semmi nem törlődött; ellenőrizd, majd mentsd.`);})));
+        dialog.append(row);
+      }
+    }
+    dialog.append(el('div',undefined,'actions'));dialog.lastChild.append(button('Kijelöltek alkalmazása',()=>attempt(()=>{const chosen=[...list.querySelectorAll('input:checked')].map(b=>suggestions[Number(b.dataset.index)]);let r={created:0,moved:0};change(next=>{r=applyTidy(next,chosen);});close();tell(`${r.moved} hely áthelyezve${r.created?`, ${r.created} új szint létrehozva`:''} a mentetlen tervben. Ellenőrizd, majd mentsd.`);}),'primary'),button('Mégse',close));
+    document.body.append(dialog);dialog.showModal();
+  }
+  function redoStep(){if(!redo.length||busy)return;pushUndo(state);state=redo.pop();pending=null;dirty=JSON.stringify(state)!==JSON.stringify(base);cache();renderGraph();renderPalette();updateStatus();}
   function updateStatus(){status.textContent=dirty?'Nem mentett piszkozat':context.head?context.head===context.approved_head?'Jóváhagyott terv':'Mentett piszkozat':'Előrendezett piszkozat';saveButton.disabled=busy;approveButton.disabled=busy;undoButton.disabled=!undo.length||busy;redoButton.disabled=!redo.length||busy;}
   const typeName=id=>state.types.find(t=>t.id===id)?.name||'';
   const nodeName=id=>state.nodes.find(n=>n.id===id)?.name||context.catalogue.find(n=>n.id===id)?.name||'Living Universe';
   function pathTo(id){const parts=[];let n=state.nodes.find(n=>n.id===id);while(n){parts.unshift(n.name);n=n.parent_id?state.nodes.find(p=>p.id===n.parent_id):null;}return parts.join(' › ');}
   function applyCamera(){world.style.transform=`translate(${camera.x}px,${camera.y}px) scale(${camera.z})`;zoomReadout.textContent=Math.round(camera.z*100)+'%';}
-  function zoomAt(z,point={x:board.clientWidth/2,y:board.clientHeight/2}){camera=zoomCanvas(camera,z,point);applyCamera();cache();}
+  function zoomAt(z,point={x:board.clientWidth/2,y:board.clientHeight/2}){camera=zoomCanvas(camera,z,point);applyCamera();cacheSoon();}
   function fit(){const rects=[...layout.positions.values()],minX=Math.min(...rects.map(p=>p.x)),minY=Math.min(...rects.map(p=>p.y)),maxX=Math.max(...rects.map(p=>p.x+p.width)),maxY=Math.max(...rects.map(p=>p.y+p.height));const z=Math.min(1.05,(board.clientWidth-70)/(maxX-minX),(board.clientHeight-70)/(maxY-minY));camera={x:(board.clientWidth-(maxX-minX)*z)/2-minX*z,y:(board.clientHeight-(maxY-minY)*z)/2-minY*z,z:Math.max(.025,z)};applyCamera();cache();}
   function focusNode(id){let n=state.nodes.find(n=>n.id===id);while(n?.parent_id){collapsed.delete(n.parent_id);n=state.nodes.find(p=>p.id===n.parent_id);}selected=id;renderGraph();const p=layout.positions.get(id);if(p){camera={x:board.clientWidth/2-(p.x+p.width/2)*1.05,y:board.clientHeight/2-(p.y+p.height/2)*1.05,z:1.05};applyCamera();cache();}}
   function updateLines(preview=null){lines.replaceChildren();for(const edge of layout.edges){const a=layout.positions.get(edge.parent),b=layout.positions.get(edge.child),path=svg('path'),x=a.x+a.width/2,y=a.y+a.height,bx=b.x+b.width/2,by=b.y;path.setAttribute('d',`M ${x} ${y} C ${x} ${(y+by)/2}, ${bx} ${(y+by)/2}, ${bx} ${by}`);lines.append(path);}if(preview){const p=svg('path');p.classList.add('lc-link-preview');p.setAttribute('d',`M ${preview.x} ${preview.y} L ${preview.toX} ${preview.toY}`);lines.append(p);}}
@@ -103,7 +145,20 @@ export async function mountLocationCanvas({host}){
   async function save(kind,reason){
     if(busy)return;busy=true;updateStatus();
     try{const expectedHead=local?local.head:context.head,catVersion=local?.catalogue_version||context.catalogue_version,signature=JSON.stringify({state,kind,expectedHead,catVersion,reason});if(!pending||pending.signature!==signature)pending={signature,body:{expected_head:expectedHead,catalogue_version:catVersion,request_key:uid(),state:copy(state),reason}};
-      const result=await request('/api/location-canvas/'+(kind==='approved'?'approve':'draft'),pending.body);context=await request('/api/location-canvas');base=normalizeCanvas(result.state);state=copy(base);local=null;pending=null;dirty=false;undo=[];redo=[];cache();renderGraph();renderPalette();tell(kind==='approved'?'A helyszínterv külön jóváhagyott változata elmentve.':'A helyszínterv elmentve az alkalmazásban.');
+      const route='/api/location-canvas/'+(kind==='approved'?'approve':'draft');let result;
+      try{result=await request(route,pending.body);}
+      catch(e){
+        if(e.status!==409)throw e;
+        // 2026-11-11: when only the location catalogue moved on (a new, renamed or tidied place) and
+        // the saved plan is still the one this draft started from, carry the draft over to the fresh
+        // catalogue and save once more. If the plan itself changed elsewhere, the owner chooses.
+        const fresh=await request('/api/location-canvas');
+        if(fresh.head!==expectedHead||fresh.catalogue_version===catVersion)throw e;
+        context.catalogue=fresh.catalogue;context.catalogue_version=fresh.catalogue_version;context.csrf=fresh.csrf;if(local)local.catalogue_version=fresh.catalogue_version;
+        pending={signature:JSON.stringify({state,kind,expectedHead,catVersion:fresh.catalogue_version,reason}),body:{...pending.body,catalogue_version:fresh.catalogue_version,request_key:uid()}};
+        result=await request(route,pending.body);
+      }
+      context=await request('/api/location-canvas');base=normalizeCanvas(result.state);state=copy(base);local=null;pending=null;dirty=false;undo=[];redo=[];cache();renderGraph();renderPalette();tell(kind==='approved'?'A helyszínterv külön jóváhagyott változata elmentve.':'A helyszínterv elmentve az alkalmazásban.');
     }finally{busy=false;updateStatus();}
   }
   function changes(){const old=new Map(base.nodes.map(n=>[n.id,n]));return state.nodes.filter(n=>JSON.stringify(n)!==JSON.stringify(old.get(n.id))).map(n=>({n,old:old.get(n.id)}));}
@@ -139,14 +194,14 @@ export async function mountLocationCanvas({host}){
     if(pointers.size===2){board.setPointerCapture(e.pointerId);const mid=midpoint();gesture={kind:'pinch',camera:{...camera},mid};suppressClick=true;return;}
     const card=e.target.closest('.lc-node'),port=e.target.closest('.lc-port-out');
     if(port){port.setPointerCapture(e.pointerId);gesture={kind:'link',id:card.dataset.node,start:p,moved:false};return;}
-    const title=e.target.closest('.lc-node-title');if(title){title.setPointerCapture(e.pointerId);gesture={kind:'node',id:card.dataset.node,start:p,moved:false,layout:{...layout,positions:new Map([...layout.positions].map(([id,p])=>[id,{...p}]))}};return;}
+    const title=e.target.closest('.lc-node-title');if(title){title.setPointerCapture(e.pointerId);gesture={kind:'node',id:card.dataset.node,ids:descendants(state,card.dataset.node),start:p,moved:false,layout:{...layout,positions:new Map([...layout.positions].map(([id,p])=>[id,{...p}]))}};return;}
     if(card)return;board.setPointerCapture(e.pointerId);gesture={kind:'pan',start:p,camera:{...camera}};board.classList.add('lc-panning');
   },{signal});
   board.addEventListener('pointermove',e=>{
     if(!pointers.has(e.pointerId)||!gesture)return;const p=relative(e);pointers.set(e.pointerId,p);e.preventDefault();
     if(gesture.kind==='pinch'&&pointers.size===2){const mid=midpoint(),origin=gesture.mid;camera=zoomCanvas(gesture.camera,gesture.camera.z*mid.d/Math.max(1,origin.d),origin);camera.x+=mid.x-origin.x;camera.y+=mid.y-origin.y;applyCamera();return;}
     if(gesture.kind==='pan'){camera={...gesture.camera,x:gesture.camera.x+p.x-gesture.start.x,y:gesture.camera.y+p.y-gesture.start.y};applyCamera();return;}
-    if(gesture.kind==='node'){const dx=(p.x-gesture.start.x)/camera.z,dy=(p.y-gesture.start.y)/camera.z;if(Math.hypot(dx,dy)<5&&!gesture.moved)return;gesture.moved=true;const ids=descendants(state,gesture.id);for(const id of ids){const box=gesture.layout.positions.get(id);if(!box)continue;const next={...box,x:Math.max(0,box.x+dx),y:Math.max(0,box.y+dy)};layout.positions.set(id,next);const card=world.querySelector('[data-node="'+id+'"]');if(card){card.style.left=next.x+'px';card.style.top=next.y+'px';}}updateLines();return;}
+    if(gesture.kind==='node'){const dx=(p.x-gesture.start.x)/camera.z,dy=(p.y-gesture.start.y)/camera.z;if(Math.hypot(dx,dy)<5&&!gesture.moved)return;gesture.moved=true;for(const id of gesture.ids){const box=gesture.layout.positions.get(id);if(!box)continue;const next={...box,x:Math.max(0,box.x+dx),y:Math.max(0,box.y+dy)};layout.positions.set(id,next);const card=world.querySelector('[data-node="'+id+'"]');if(card){card.style.left=next.x+'px';card.style.top=next.y+'px';}}updateLines();return;}
     if(gesture.kind==='link'){if(Math.hypot(p.x-gesture.start.x,p.y-gesture.start.y)>5)gesture.moved=true;const start=layout.positions.get(gesture.id);updateLines({x:start.x+start.width/2,y:start.y+start.height,toX:(p.x-camera.x)/camera.z,toY:(p.y-camera.y)/camera.z});}
   },{signal});
   board.addEventListener('pointerup',e=>{
@@ -156,10 +211,10 @@ export async function mountLocationCanvas({host}){
   },{signal});
   board.addEventListener('pointercancel',()=>{pointers.clear();gesture=null;board.classList.remove('lc-panning');renderGraph();},{signal});board.addEventListener('click',e=>{if(suppressClick){suppressClick=false;e.preventDefault();e.stopImmediatePropagation();}}, {capture:true,signal});
   board.addEventListener('wheel',e=>{e.preventDefault();zoomAt(camera.z*Math.exp(-e.deltaY*.0015),relative(e));},{passive:false,signal});
-  board.addEventListener('keydown',e=>{if(e.target!==board)return;if(['+','=','-','0','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Escape'].includes(e.key))e.preventDefault();if(e.key==='+'||e.key==='=')zoomAt(camera.z*1.2);else if(e.key==='-')zoomAt(camera.z/1.2);else if(e.key==='0')fit();else if(e.key==='Escape'){carry=null;linkParent=null;showHelp();}else{const dx=e.key==='ArrowLeft'?60:e.key==='ArrowRight'?-60:0,dy=e.key==='ArrowUp'?60:e.key==='ArrowDown'?-60:0;camera.x+=dx;camera.y+=dy;applyCamera();cache();}},{signal});
+  board.addEventListener('keydown',e=>{if(e.target!==board)return;if(['+','=','-','0','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Escape'].includes(e.key))e.preventDefault();if(e.key==='+'||e.key==='=')zoomAt(camera.z*1.2);else if(e.key==='-')zoomAt(camera.z/1.2);else if(e.key==='0')fit();else if(e.key==='Escape'){carry=null;linkParent=null;showHelp();}else{const dx=e.key==='ArrowLeft'?60:e.key==='ArrowRight'?-60:0,dy=e.key==='ArrowUp'?60:e.key==='ArrowDown'?-60:0;camera.x+=dx;camera.y+=dy;applyCamera();cacheSoon();}},{signal});
   let boardSize={width:board.clientWidth,height:board.clientHeight};
   search.oninput=renderPalette;const resize=new ResizeObserver(()=>{if(destroyed)return;const next={width:board.clientWidth,height:board.clientHeight};camera.x+=(next.width-boardSize.width)/2;camera.y+=(next.height-boardSize.height)/2;boardSize=next;applyCamera();});resize.observe(board);
   dirty=JSON.stringify(state)!==JSON.stringify(base);renderGraph();renderPalette();updateStatus();
   if(!local){const rootBox=layout.positions.get(WORLD_ROOT);camera={x:board.clientWidth/2-(rootBox.x+rootBox.width/2)*.9,y:65-rootBox.y*.9,z:.9};applyCamera();cache();tell('A Living Universe gyökérből kiindulva a + gombbal bővítheted a világot.');}else if(local.head!==context.head||local.catalogue_version!==context.catalogue_version){tell('A megőrzött saját piszkozatod és a szerver változata eltér. Összehasonlítás után menthető.',true);help.append(button('Változatok összehasonlítása',conflict));}
-  return{destroy(){cache();destroyed=true;abort.abort();resize.disconnect();if(document.fullscreenElement===shell)document.exitFullscreen().catch(()=>{});document.body.classList.remove('lu-location-focus');dialog.close();dialog.remove();document.querySelectorAll('.lc-ghost').forEach(n=>n.remove());}};
+  return{destroy(){clearTimeout(cacheTimer);cache();destroyed=true;abort.abort();resize.disconnect();if(document.fullscreenElement===shell)document.exitFullscreen().catch(()=>{});document.body.classList.remove('lu-location-focus');dialog.close();dialog.remove();document.querySelectorAll('.lc-ghost').forEach(n=>n.remove());}};
 }

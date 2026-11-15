@@ -52,7 +52,7 @@ export function installGhostProfiles({one,run,transaction,characterPolicy}){
   const read=(key,fallback)=>{const row=one('SELECT value FROM application_settings WHERE key=?',key);return row?JSON.parse(row.value):structuredClone(fallback);};
   const write=(key,value)=>run('INSERT INTO application_settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',key,JSON.stringify(value));
   const template=()=>({...read('ghost:template',defaultTemplate),character:templateCharacter,...(characterPolicy?.description?{character_policy:characterPolicy.description}:{})});
-  function get(cid){const c=one('SELECT * FROM characters WHERE id=?',cid);if(!c)throw error('Nincs ilyen karakter.',404);const record=read('ghost:character:'+cid,{version:0,values:{},history:[],proposals:[]});return {...record,template:template(),character_id:cid,profile_version:profileVersion(c),legacy:Object.fromEntries(['biography','appearance','personality','speech_style','sexuality'].map(k=>[k,c[k]||'']))};}
+  function get(cid){const c=one('SELECT * FROM characters WHERE id=?',cid);if(!c)throw error('Nincs ilyen szereplő.',404);const record=read('ghost:character:'+cid,{version:0,values:{},history:[],proposals:[]});return {...record,template:template(),character_id:cid,profile_version:profileVersion(c),legacy:Object.fromEntries(['biography','appearance','personality','speech_style','sexuality'].map(k=>[k,c[k]||'']))};}
   function persistTemplate(body,actor='local-creator'){
     const old=template();if(body.expected_version!==old.version)throw error('A sablon közben megváltozott.',409);
     const next=validateTemplate({version:old.version+1,fields:body.fields});
@@ -91,8 +91,27 @@ export function installGhostProfiles({one,run,transaction,characterPolicy}){
       record.history.push({version:current.version,values:current.values,actor,proposal_id:pid,at:new Date().toISOString()});record.values={...record.values,...body.values};record.version++;p.accepted_values=body.values;
     }
     p.status=body.decision==='accept'?'accepted':'rejected';p.decided_at=new Date().toISOString();p.actor=actor;write('ghost:character:'+cid,record);return get(cid);});}
-  return {get,template,saveTemplate,updateTemplate,propose,decide,handle({p,req,body,json}){
+  // Owner request (2026-11-14): "Mindet elfogadom" accepts every pending proposal of a character,
+  // even stale ones, oldest first, so a newer proposal overwrites the same field of an older one.
+  // Fields missing from the current template or failing validation are left out; the character
+  // policy checks the merged result. One history entry keeps the previous values restorable.
+  function acceptAll(cid,actor='local-creator'){return transaction(()=>{const current=get(cid);
+    const {template:t,character_id,profile_version,legacy,...record}=current;
+    const pending=record.proposals.filter(p=>p.status==='pending').sort((a,b)=>String(a.at).localeCompare(String(b.at)));
+    if(!pending.length)throw error('Nincs elbírálatlan javaslat.',409);
+    const merged={},applied=new Map();let skipped_fields=0;
+    for(const p of pending){const own={};
+      for(const [id,e] of Object.entries(p.values||{})){const f=t.fields.find(f=>f.id===id);try{if(!f)throw 0;validateEntry(e,f);own[id]=e;merged[id]=e;}catch{skipped_fields++;}}
+      applied.set(p.id,own);}
+    if(!Object.keys(merged).length)throw error('Egyik javaslat mezője sem fogadható el a jelenlegi sablonnal.',409);
+    characterPolicy?.assertValues(merged,cid,{requireKnown:true});
+    const at=new Date().toISOString();
+    record.history.push({version:current.version,values:current.values,actor,proposal_ids:pending.map(p=>p.id),at});record.values={...record.values,...merged};record.version++;
+    for(const p of pending){p.status='accepted';p.decided_at=at;p.actor=actor;p.accepted_values=applied.get(p.id);}
+    write('ghost:character:'+cid,record);return {...get(cid),accepted:pending.length,skipped_fields};});}
+  return {get,template,saveTemplate,updateTemplate,propose,decide,acceptAll,handle({p,req,body,json}){
     if(p==='/api/ghost-template'){if(req.method==='GET'){json(template());return true;}if(req.method==='PUT'){json(saveTemplate(body));return true;}}
+    const all=p.match(/^\/api\/characters\/([a-f0-9-]{36})\/ghost\/accept-all$/i);if(all){if(req.method!=='POST')throw error('Nem támogatott művelet.',405);json(acceptAll(all[1]));return true;}
     const m=p.match(/^\/api\/characters\/([a-f0-9-]{36})\/ghost(?:\/proposals(?:\/([a-f0-9-]{36})\/decision)?)?$/i);if(!m)return false;
     if(req.method==='GET'&&!p.endsWith('/proposals')&&!m[2])json(get(m[1]));else if(req.method==='POST'&&m[2])json(decide(m[1],m[2],body));else if(req.method==='POST'&&p.endsWith('/proposals'))json(propose(m[1],body));else throw error('Nem támogatott művelet.',405);return true;
   }};

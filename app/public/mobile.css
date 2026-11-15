@@ -14,3 +14,31 @@
 #editor .panel{padding:16px;border:1px solid #465058;border-radius:10px}#editor #ghost-form fieldset{margin:14px 0;padding:14px;border:1px solid #465058}#editor #ghost-form details{margin:12px 0}#editor .actions{display:flex;gap:8px;flex-wrap:wrap}
 
 .profile-overview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}.profile-overview-grid>section{padding:16px;border:1px solid #465058;border-radius:10px;min-width:0}.profile-overview-grid h3{margin:0 0 10px;font-size:17px}.profile-overview-grid p{font-size:14px;line-height:1.65;overflow-wrap:anywhere;margin:10px 0}.profile-overview-grid small{display:block;color:#b6ac97;font-size:11px}.profile-overview{margin-bottom:24px}.profile-overview>p{color:#a9acac}
+
+/* Velvet Night (2026-11-11): same palette as the desktop theme.css. Presentation only. */
+:root{background:#110c15;color:#f4ebf1;--muted:#a99bb1;--accent:#ff7aa5;--line:#35283f;--grad:linear-gradient(120deg,#ff7aa5,#d877e0 55%,#a988ff);font-family:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif}
+body{background:radial-gradient(700px 420px at 10% -8%,#ff5e941c,transparent 65%),radial-gradient(700px 520px at 105% 108%,#8f6bff1f,transparent 62%),#110c15;background-attachment:fixed}
+h1,h2{font-family:"Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;font-weight:400}
+a{color:var(--accent)}
+button,input,select,textarea{background:#241a2c;border-radius:10px}
+input,select,textarea{background:#150f1a}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px #ff7aa51f;outline:none}
+input[type=checkbox],input[type=radio],progress,.ghost-wizard progress{accent-color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+header,.sorting-save-actions{background:#110c15}
+.field,.sorting-card,.sorting-tools,.mobile-create{background:linear-gradient(180deg,#1e1625,#19121f);border-radius:14px}
+.sorting-preview,.sorting-viewer{background:#0b070e}
+.sorting-save-actions button:last-child,button.primary,.ghost-wizard button.primary{background:var(--grad);color:#2a0c1b;border-color:transparent;font-weight:650}
+.error,.preview-error,.ghost-wizard #wizard-error{color:#ff9f94!important}
+.saved{color:#8fd6a8!important}
+.field .conflict,.sorting-conflict,.place-conflict{border-color:#ff9f94}
+.ghost-wizard{background:linear-gradient(180deg,#201727,#17101d);color:#f4ebf1;border-color:#4d3a5a;border-radius:18px}
+.ghost-wizard::backdrop{background:#0b070ed9;backdrop-filter:blur(8px)}
+.ghost-wizard-progress,.ghost-wizard-group,.ghost-wizard-hint,.template-field-row small,.profile-overview>p,.profile-overview-grid small{color:var(--muted)}
+.ghost-wizard input,.ghost-wizard textarea,.ghost-wizard select{background:#150f1a;border-color:var(--line);color:#f4ebf1;border-radius:10px}
+.ghost-wizard button{background:#241a2c;border-color:var(--line);color:#f4ebf1;border-radius:10px}
+.ghost-wizard-actions{background:#17101d}
+.ghost-wizard-summary span{color:#e9bd8c}
+.ghost-wizard-summary>div,.template-field-row,#template-fields-form fieldset,#editor .panel,#editor #ghost-form fieldset,.profile-overview-grid>section{border-color:var(--line)}
+
+.play-link{display:inline-flex;align-items:center;padding:.55rem .9rem;border-radius:999px;background:#7c4dff;color:#fff;font-weight:700;text-decoration:none;margin-inline:auto .5rem}

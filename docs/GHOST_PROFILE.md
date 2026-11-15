@@ -61,8 +61,9 @@ az azonosítót adja. Az elutasítás nem módosít karakterértéket.
 ## Hatókör és további fejlesztés
 
 Ez a szellemprofil és javaslatkezelés első működő változata. Nem állítja késznek
-a mentések teljes világszimulációs tervét. A hangulati reaktivitás és
-memóriahajlam most profiladat, nem futó szimuláció. A pillanatnyi hangulatot,
+a mentések teljes világszimulációs tervét. A hangulati reaktivitás most profiladat, nem futó szimuláció. Az érzelmi
+emlékek tartóssága és a sérelmek megőrzése 2026-11-15 óta az emlékfelidézést
+súlyozza (DECISIONS.md). A pillanatnyi hangulatot,
 öltözetet és programot nem szabad ezekre ráírni.
 
 Következő külön fejlesztési fázisok: karakterenkénti konkrét emlékezet a meglévő

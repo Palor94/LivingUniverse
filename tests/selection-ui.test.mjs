@@ -10,7 +10,7 @@ test('selection controls update all bulk buttons without iterating a single DOM 
   const $$=selector=>selector==='[data-bulk-action]'?buttons:[];
   const sorting=installSorting({$,$$,getView:()=> 'library',esc:s=>s,action:fn=>fn});
   sorting.setPage([{id:'one'},{id:'two'}],'/api/media?ids_only=1','test-page');
-  sorting.listing();assert.ok(buttons.every(b=>b.disabled));assert.equal(nodes.get('#selection-count').textContent,'0 selected on this page');
-  nodes.get('#select-visible').onclick();assert.ok(buttons.every(b=>!b.disabled));assert.equal(nodes.get('#selection-count').textContent,'2 selected on this page');
-  nodes.get('#clear-selected').onclick();assert.ok(buttons.every(b=>b.disabled));assert.ok(buttons.every(b=>b.title.includes('Select at least one')));
+  sorting.listing();assert.ok(buttons.every(b=>b.disabled));assert.equal(nodes.get('#selection-count').textContent,'0 kijelölve ezen az oldalon');
+  nodes.get('#select-visible').onclick();assert.ok(buttons.every(b=>!b.disabled));assert.equal(nodes.get('#selection-count').textContent,'2 kijelölve ezen az oldalon');
+  nodes.get('#clear-selected').onclick();assert.ok(buttons.every(b=>b.disabled));assert.ok(buttons.every(b=>b.title.includes('Előbb jelölj ki legalább egy')));
 });

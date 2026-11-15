@@ -12,7 +12,9 @@ future work. The sections below retain the broader design and its limitations.
 
 An identity lock protects the approved definition within Living Universe. It cannot force an external model to obey that definition. Generated images start unreviewed. Approval means an output is acceptable for its reviewed context, not that it becomes a new identity template.
 
-Canon promotion requires a distinct user action specifying which character, crop, features, and reference roles are approved. New canon creates an immutable revision with author, timestamp, rationale, and parent revision. Conflicting references remain visible for resolution; imports never silently settle conflicts. Clothing, expression, pose, and scene lighting are normally variable context. Age and physique variants require explicit linkage to the intended appearance revision or timeline variant.
+Canon promotion normally requires a distinct user action specifying which character, crop, features, and reference roles are approved. New canon creates an immutable revision with author, timestamp, rationale, and parent revision. Conflicting references remain visible for resolution; imports never silently settle conflicts. Clothing, expression, pose, and scene lighting are normally variable context. Age and physique variants require explicit linkage to the intended appearance revision or timeline variant.
+
+Owner exception (2026-11-06): a gated machine may append visual-canon revisions under [Machine auto-canon policy](AUTO_CANON.md). Multi-character frames never promote as a whole; only character-bound crops with separate face/body evaluation may auto-promote, and ambiguous regions abstain. Numeric thresholds stay unset until benchmark lock-in. This does not enable a live writer by itself.
 
 ## 2. Proposed relational records
 

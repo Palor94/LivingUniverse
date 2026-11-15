@@ -21,6 +21,7 @@
 !/mcp/*.mjs
 !/mcp/*.ps1
 !/mcp/*.cmd
+!/mcp/*.vbs
 !/app/
 !/tests/
 !/RECOVERY.md
@@ -33,6 +34,10 @@
 !/ops/backup/*.mjs
 !/ops/backup/*.ps1
 !/ops/backup/components.json
+!/ops/code-checkpoint.mjs
+!/ops/*.mjs
+!/ops/*.ps1
+!/.ignore
 /app/**/node_modules/
 /app/**/__pycache__/
 

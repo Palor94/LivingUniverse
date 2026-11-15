@@ -20,6 +20,7 @@ export const extraTables={
   mcp_reference_changes:['id','request_key','request_hash','change_hash','character_id','payload_json','status','created_at','expires_at','approved_by','approved_at','applied_at','result_json'],
   mcp_changes:['id','request_key','request_hash','change_hash','operation','payload_json','status','created_at','expires_at','approved_by','approved_at','applied_at','result_json'],
   character_ui:['character_id','cover_crop','merged_into'],
+  character_groups:['character_id','created_at'],
   character_cover_frames:['character_id','media_id','time_seconds','data_url','source_crop_json','source_size','source_mtime','captured_at'],
   media_hidden:['media_id','original_path','physical','created_at'],
   application_settings:['key','value'],
@@ -46,7 +47,45 @@ export const extraTables={
   story_event_source_keys:['source_key','event_id','system','external_id'],
   image_generation_runs:['id','request_key','request_hash','manifest_json','manifest_hash','status','created_at','expires_at','approved_by','approved_at','error_code'],
   image_generation_outputs:['run_id','media_id','sha256','size','receipt_json','created_at'],
-  image_generation_events:['id','run_id','event','actor','detail','created_at']
+  image_generation_events:['id','run_id','event','actor','detail','created_at'],
+  world_places:['id','character_id','location_id','role','note','source','created_at'],
+  world_relationship_levels:['source_id','target_id','level','updated_at'],
+  world_level_revisions:['id','source_id','target_id','level','previous_level','reason','actor','event_id','created_at'],
+  world_events:['id','world_day','kind','status','title','summary','payload_json','model','seen_at','decided_at','created_at','rewound_at'],
+  world_messages:['id','from_character_id','text','world_day','event_id','read_at','created_at','rewound_at'],
+  world_rewinds:['id','target_time','label','payload_json','created_at','undone_at'],
+  world_usage:['day','calls','input_tokens','output_tokens','cost_usd','cached_tokens'],
+  play_conversations:['id','character_id','location_id','channel','world_day','slot','status','summary_json','created_at','closed_at','rewound_at','mode','participants_json','memo_json'],
+  world_threads:['id','character_id','promised_by','text','due_day','status','conversation_id','noted_at','created_at','updated_at','rewound_at'],
+  play_line_speaker:['line_id','character_id'],
+  // Character memories and their history were missing from the JSON backup (audit 2026-11-10).
+  character_memories:['id','character_id','version','kind','text','related_event_id','visibility','status','belief_accuracy','reason','created_at','updated_at'],
+  character_memory_revisions:['id','memory_id','version','kind','text','related_event_id','visibility','status','belief_accuracy','reason','actor','created_at'],
+  generation_feedback:['id','request_key','request_hash','media_id','character_id','run_id','decision','rating','face_verdict','body_verdict','notes','created_at'],
+  media_signal_distinct:['media_id','marked_at'],
+  play_lines:['id','conversation_id','speaker','text','created_at'],
+  play_seen:['media_id','character_id','seen_at'],
+  play_content:['media_id','level','set_at'],
+  play_inserts:['id','media_id','kind','source','character_id','location_id','created_at'],
+  play_appointments:['id','character_id','location_id','world_day','slot','status','created_at'],
+  play_invitations:['appointment_id','message_id','created_at'],
+  play_items:['id','name','kind','node_id','carried','created_at','updated_at'],
+  play_asset_sources:['media_id','target','placed_at'],
+  play_media_feedback:['media_id','panel','cast_key','verdict','at'],
+  play_event_media:['event_id','media_id','picked_at'],
+  play_line_media:['line_id','media_id','kind','level','reasons_json','created_at'],
+  play_line_meta:['line_id','beat','spark','choices_json'],
+  play_conversation_flags:['conversation_id','intimate_at'],
+  play_dates:['appointment_id','conversation_id','met_at','missed_noted_at','created_at'],
+  play_line_scene:['line_id','media_id','kind','level','beat','start_at','display_json','created_at'],
+  // Owner verdicts from the Képműhely and rejected figures are decisions, so they are backed up.
+  workshop_checks:['item_key','target','character_id','location_id','verdict','face','body','note','job_id','created_at'],
+  workshop_media_flags:['media_id','no_characters','set_at'],
+  idea_box_notes:['media_id','note','updated_at'],
+  workshop_dismissed:['key','created_at'],
+  sprite_rejections:['sprite_id','sha256','note','rejected_at'],
+  play_generation_jobs:['id','target','character_id','location_id','expression','time_of_day','status','brief_json','media_id','placed_media_id','note','model','created_at','updated_at'],
+  world_runs:['id','world_day','slot','events','messages','dropped','cost_usd','created_at']
 };
 export function installEnhancements(ctx){
   const {db,root,dataDir,all,one,run,transaction,asset,character,canon,safeFile,fingerprint,moving,isScanning,fail}=ctx;
@@ -84,7 +123,7 @@ export function installEnhancements(ctx){
       run('UPDATE file_moves SET status=? WHERE id=?','complete',moveId);return {from:m.relative_path,to:relative};
     }catch(e){if(logged)run("UPDATE file_moves SET status='needs_review' WHERE id=? AND status='preparing'",moveId);if(e.status)throw e;throw fail('The file operation could not finish. Check OneDrive availability and move history. The source or verified copy is retained.',409);}finally{moving.delete(mid);}
   }
-  function protagonist(){const setting=one("SELECT value FROM application_settings WHERE key='protagonist'");if(setting)return character(setting.value);const list=all('SELECT c.* FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL');return list.find(c=>c.name.toLowerCase()==='palor')||list.find(c=>c.name.toLowerCase()==='tibor')||null;}
+  function protagonist(){const setting=one("SELECT value FROM application_settings WHERE key='protagonist'");if(setting)return character(setting.value);const list=all('SELECT c.* FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL');return list.find(c=>c.name.toLowerCase()==='palor')||null;}
   function crop(cid){return one('SELECT cover_crop FROM character_ui WHERE character_id=?',cid)?.cover_crop||null;}
   async function handle({p,body,req,json}){
     let match;
@@ -129,39 +168,19 @@ export function installEnhancements(ctx){
           try{const info=await fs.lstat(full);if(!info.isFile()||info.isSymbolicLink())throw fail('Only regular files in application trash can be erased.',409);await fs.unlink(full);}catch(e){if(e.code!=='ENOENT')throw e;}
         }
         run('INSERT INTO application_settings(key,value) VALUES(?,?)','erased_media:'+m.id,JSON.stringify({erased_at:now(),physical:!!h.physical,path:m.relative_path}));
-        json({ok:true,physical:!!h.physical});return true;
       }finally{moving.delete(m.id);}
+      // The file is gone: remove the catalogue record and its links too (owner request
+      // 2026-11-10). A catalogue-only removal whose original still exists keeps its record.
+      const purged=ctx.purgeErased?await ctx.purgeErased([m.id]):null;
+      json({ok:true,physical:!!h.physical,record_removed:purged?.removed===1});return true;
     }
     if((match=p.match(/^\/api\/media\/([^/]+)\/restore-item$/))&&req.method==='POST'){
       if(one('SELECT 1 FROM application_settings WHERE key=?','erased_media:'+match[1]))throw fail('This removed item was permanently erased and cannot be restored here.',409);
       const h=one('SELECT * FROM media_hidden WHERE media_id=?',match[1]);if(!h)throw fail('Removed item not found.',404);let result={};if(h.physical)result=await relocate(h.media_id,h.original_path);run('DELETE FROM media_hidden WHERE media_id=?',h.media_id);json({...result,ok:true});return true;
     }
-    if(p==='/api/palor-merge/preview'&&req.method==='GET'){
-      const target=protagonist();const sources=all('SELECT c.id,c.name FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL').filter(c=>['palor','tibor'].includes(c.name.toLowerCase())&&c.id!==target?.id);
-      json({target,sources,files:all("SELECT id,relative_path FROM active_media WHERE lower(folder)='tibor'"),destination:'Palor'});return true;
-    }
-    if(p==='/api/palor-merge'&&req.method==='POST'){
-      if(moving.size||isScanning())throw fail('Wait for the current file operation before merging.',409);
-      const snapshot=transaction(()=>Object.fromEntries(all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").map(t=>[t.name,all('SELECT * FROM '+t.name)])));
-      const backupPath=path.join(dataDir,'before-palor-merge-'+Date.now()+'.json');await fs.writeFile(backupPath,JSON.stringify({schema_version:1,exported_at:now(),...snapshot}));
-      let target=protagonist();if(!target){const cid=randomUUID();run('INSERT INTO characters(id,name,aliases,created_at) VALUES(?,?,?,?)',cid,'Palor','Tibor',now());target=character(cid);}
-      const sources=all('SELECT c.* FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL').filter(c=>['palor','tibor'].includes(c.name.toLowerCase())&&c.id!==target.id);
-      transaction(()=>{
-        for(const source of sources){
-          run('INSERT OR IGNORE INTO depictions SELECT media_id,? FROM depictions WHERE character_id=?',target.id,source.id);
-          for(const r of all('SELECT * FROM relationships WHERE source_id=? OR target_id=?',source.id,source.id)){const from=r.source_id===source.id?target.id:r.source_id,to=r.target_id===source.id?target.id:r.target_id;if(from===to)continue;const old=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',from,to);run('INSERT INTO relationships VALUES(?,?,?,?) ON CONFLICT(source_id,target_id) DO UPDATE SET description=excluded.description',randomUUID(),from,to,old&&old.description!==r.description?old.description+'\n'+r.description:r.description);}
-          run('UPDATE sorted_folders SET character_id=? WHERE character_id=?',target.id,source.id);
-          run('INSERT INTO character_ui(character_id,merged_into) VALUES(?,?) ON CONFLICT(character_id) DO UPDATE SET merged_into=excluded.merged_into',source.id,target.id);
-          for(const field of ['biography','personality','sexuality','speech_style','appearance','notes']){const current=character(target.id)[field];if(source[field]&&!current)run(`UPDATE characters SET ${field}=? WHERE id=?`,source[field],target.id);else if(source[field]&&current!==source[field])run('UPDATE characters SET notes=notes||? WHERE id=?','\nPreserved '+source.name+' '+field+': '+source[field],target.id);}
-        }
-        const aliases=[...new Set([target.aliases,'Tibor','Palor',...sources.map(c=>c.aliases)].filter(Boolean))].join(', ');run('UPDATE characters SET name=?,aliases=? WHERE id=?','Palor',aliases,target.id);
-        run("INSERT INTO application_settings VALUES('protagonist',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",target.id);
-      });
-      const results=[],errors=[];for(const m of all("SELECT * FROM active_media WHERE lower(folder)='tibor'")){try{const suffix=m.relative_path.split(path.sep).slice(1);let dest=path.join('Palor',...suffix);try{await fs.lstat(path.join(root,dest));dest=path.join('Palor',path.basename(dest,path.extname(dest))+'-'+m.id.slice(0,8)+path.extname(dest));}catch(e){if(e.code!=='ENOENT')throw e;}
-        const result=await relocate(m.id,dest);run('INSERT OR IGNORE INTO depictions VALUES(?,?)',m.id,target.id);results.push(result);}catch(e){errors.push({file:m.relative_path,error:e.message});}}
-      const oldFolder=path.resolve(root,'Tibor');if(path.dirname(oldFolder)===root){try{const real=await fs.realpath(oldFolder);inside(real);await fs.rmdir(oldFolder);}catch(e){if(!['ENOENT','ENOTEMPTY','EEXIST'].includes(e.code))errors.push({file:'Tibor',error:'Files were preserved, but the empty source folder could not be removed.'});}}
-      json({target:character(target.id),merged:sources.length,moved:results.length,errors,backupPath});return true;
-    }
+    const separateIdentities='Tibor the admin and Palor the character are unrelated identities and must not be merged, aliased or linked.';
+    if(p==='/api/palor-merge/preview'&&req.method==='GET')throw fail(separateIdentities,400);
+    if(p==='/api/palor-merge'&&req.method==='POST')throw fail(separateIdentities,400);
     return false;
   }
   return {handle,crop,protagonist,relocate,removeCatalogue};

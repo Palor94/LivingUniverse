@@ -55,9 +55,19 @@ majd az eredeti pontos terv folytatódik. Idegen/később módosított tartalom 
 Más alkalmazásbeli írások az aszinkron teljes átnevezés alatt blokkoltak. Az
 előnézet óta módosult katalógus vagy könyvtár új előnézetet igényel. Azonos
 request_key ismétlése az eredeti eredményt adja, nem mozgatja újra a fájlokat.
-A meglévő karakter-policy TEMP triggerek továbbra is érvényesek. Kánon,
-eredeti forrásidézet, import-/generálási proveniencia és régi történeti revízió
-nem kerül csendesen átírásra. Az aktuális esemény szerkesztése új revízió.
+A meglévő karakter-policy TEMP triggerek továbbra is érvényesek.
+
+## Minden átíródik (2026-11-11)
+
+Az átnevezés végleges, és mindenhol az új nevet hagyja: kánon (kinézet, referenciajegyzetek,
+korábbi kánonváltozatok is, helyben), történeti és eredetszövegek, generálási
+manifesztek, események (új revízió; a jóváhagyott jóváhagyott marad), helyszínfa, valamint
+minden régi nevet viselő fájl- és almappanév: a saját mappában, a közös médiatárban és az
+eltávolított elemek között (a visszaállítási cél is követi). A fájlbájtok, a média- és
+karakter-ID-k és a linkek nem változnak. Foglalt célnévnél nincs felülírás: az a fájl kimarad,
+és az eredmény `game.skipped` listája jelzi. Útvonalmező csak a fájllal együtt változik.
+Más karakter neve, amely tartalmazza a régi nevet (pl. „Kis Bence”), érintetlen marad.
+Visszaút: az átnevezés előtti ellenőrzött adatbázismentés.
 
 ## Integráció
 

@@ -12,7 +12,7 @@ import {confirmFolders} from './folder-preview-client.mjs';
 test('private catalogue: shared media, immutable canon, persistence, restore, and original preservation',async()=>{
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'living-universe-test-'));
   const root=path.join(temp,'resources');await fs.mkdir(path.join(root,'Pákozdi + Attila'),{recursive:true});
-  const bytes=Buffer.from('test fixture, not a real photo');const mediaFile=path.join(root,'Pákozdi + Attila','scene.png');await fs.writeFile(mediaFile,bytes);await fs.writeFile(path.join(root,'clip.mp4'),Buffer.alloc(20,4));
+  const bytes=Buffer.from('test fixture, not a real photo');let mediaFile=path.join(root,'Pákozdi + Attila','scene.png');await fs.writeFile(mediaFile,bytes);await fs.writeFile(path.join(root,'clip.mp4'),Buffer.alloc(20,4));
   let app;
   async function start(dataDir){app=await createApp({root,dataDir});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));return 'http://127.0.0.1:'+app.server.address().port;}
   const dataDir=path.join(temp,'data');let base=await start(dataDir);
@@ -32,7 +32,11 @@ test('private catalogue: shared media, immutable canon, persistence, restore, an
     assert.equal((await approveCanon(request,peter.id,{appearance:'New draft',references:[{media_id:image.id,role:'body'}]})).status,400);
     await fs.writeFile(mediaFile,bytes);
     await call('/api/media/'+image.id+'/review',{character_id:peter.id,decision:'rejected',rating:2,notes:'Eyes are incorrect'});
-    await renameFixture(app,peter.id,'Pákozdi Péter');await call('/api/characters/'+peter.id,{...peter,name:'Pákozdi Péter',appearance:'Draft with different clothing'},'PUT');
+    await renameFixture(app,peter.id,'Pákozdi Péter');
+    // The shared folder carries his name, so it follows the rename (owner decision 2026-11-11); bytes stay.
+    mediaFile=path.join(root,'Pákozdi Péter + Attila','scene.png');assert.deepEqual(await fs.readFile(mediaFile),bytes);
+    assert.equal(app.db.prepare('SELECT relative_path FROM media WHERE id=?').get(image.id).relative_path,path.join('Pákozdi Péter + Attila','scene.png'));
+    await call('/api/characters/'+peter.id,{...peter,name:'Pákozdi Péter',appearance:'Draft with different clothing'},'PUT');
     const profile=await call('/api/characters/'+peter.id);assert.equal(profile.canon.id,initial.id);assert.equal(profile.canon.appearance,'User-approved physique');assert.equal((await call('/api/media?character='+peter.id)).total,1);
     assert.equal((await request('/api/media/'+image.id,{character_ids:[attila.id]},'PUT')).status,400);
     const next=await approveCanon(call,peter.id,{appearance:initial.appearance,references:[],reason:'Remove reference explicitly'});assert.equal(next.id,initial.id);assert.equal(next.parent_id,initial.parent_id);

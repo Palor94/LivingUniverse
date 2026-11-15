@@ -14,7 +14,7 @@ export function installDesktopGeneration({imageGeneration,one,all}){
     const references=canon?JSON.parse(canon.references_json).map(ref=>{
       const media=one('SELECT relative_path,kind FROM active_media WHERE id=?',ref.media_id);
       const supported=!!media&&['.png','.jpg','.jpeg'].includes(path.extname(media.relative_path).toLowerCase());
-      return {...ref,name:media?path.basename(media.relative_path):'Unavailable reference',available:!!media&&media.kind==='image'&&supported&&/^[a-f0-9]{64}$/.test(ref.sha256||''),unavailable_reason:media&&!supported?'Ehhez a kapcsolathoz PNG vagy JPEG referencia szükséges.':null};
+      return {...ref,name:media?path.basename(media.relative_path):'Unavailable reference',available:!!media&&media.kind==='image'&&supported&&/^[a-f0-9]{64}$/.test(ref.sha256||''),unavailable_reason:!media?null:media.kind!=='image'?'Ez egy videó. Azonosító-referenciának álló JPEG vagy PNG kép kell.':!supported?'Ehhez a kapcsolathoz PNG vagy JPEG referencia szükséges.':null};
     }):[];
     const runs=(capabilities.enabled?all("SELECT r.id FROM image_generation_runs r WHERE json_extract(r.manifest_json,'$.provider')='sogni' AND EXISTS(SELECT 1 FROM json_each(json_extract(r.manifest_json,'$.characters')) c WHERE json_extract(c.value,'$.character_id')=?) ORDER BY r.rowid DESC LIMIT 30",cid):[]).map(row=>{
       const plan=view(cid,row.id);return {run_id:plan.run_id,status:plan.status,created_at:plan.created_at,prompt:plan.manifest.prompt,provider:plan.manifest.provider,model:plan.manifest.model,output:plan.output};

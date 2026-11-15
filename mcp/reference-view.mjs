@@ -1,7 +1,8 @@
 // Static presentation only: this resource has no filesystem, network or tool-call API.
-export const REFERENCE_VIEW_URI='ui://living-universe/reference-quality-v5.html';
+export const REFERENCE_VIEW_URI='ui://living-universe/reference-quality-v6.html';
 // Existing conversations can retain a descriptor from an earlier refresh.
-export const REFERENCE_VIEW_URIS=new Set([REFERENCE_VIEW_URI,'ui://living-universe/reference-original-v4.html','ui://living-universe/reference-preview-v1.html','ui://living-universe/reference-preview-v2.html','ui://living-universe/reference-preview-v3.html']);
+// v6 (2026-11-12): ChatGPT may hand the panel a transformed image; say "not shown here", not "invalid".
+export const REFERENCE_VIEW_URIS=new Set([REFERENCE_VIEW_URI,'ui://living-universe/reference-quality-v5.html','ui://living-universe/reference-original-v4.html','ui://living-universe/reference-preview-v1.html','ui://living-universe/reference-preview-v2.html','ui://living-universe/reference-preview-v3.html']);
 export function mountReferencePreview(){
   const picture=document.getElementById('reference'),status=document.getElementById('status'),details=document.getElementById('details');
   let connected=false;
@@ -20,7 +21,7 @@ export function mountReferencePreview(){
     // No remote URL, SVG, HTML, network request or tool invocation is accepted.
     const mime=preview.mimeType||'image/jpeg',prefix={'image/jpeg':'/9j/','image/png':'iVBORw0KGgo','image/gif':'R0lGOD','image/bmp':'Qk'}[mime];
     if(!prefix||typeof preview.data!=='string'||preview.data.length>8388608||preview.data.length%4||!preview.data.startsWith(prefix)||!/^[A-Za-z0-9+/]+={0,2}$/.test(preview.data)){
-      picture.hidden=true;picture.removeAttribute('src');status.textContent='The image preview was invalid.';details.textContent='';return;
+      picture.hidden=true;picture.removeAttribute('src');status.textContent='Reference delivered to the model; this panel cannot display it here (preview only, nothing failed).';details.textContent='';return;
     }
     picture.src='data:'+mime+';base64,'+preview.data;picture.hidden=false;
     picture.alt='Approved character reference — '+String(preview.role||'general');

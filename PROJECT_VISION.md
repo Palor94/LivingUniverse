@@ -1,6 +1,6 @@
 # Living Universe
 
-Living Universe is a persistent fictional world of adult characters with stable identities, appearances, personalities, relationships, histories, and evolving memories. The creator participates through an in-world character and separately administers the world. Characters know only what their experiences and knowledge permit, not everything the administrator knows.
+Living Universe is a persistent fictional world of adult characters with stable identities, appearances, personalities, relationships, histories, and evolving memories. The administrator (Tibor) administers the world and is not a character. Palor is a fictional, 32-year-old character and the playable protagonist whom whoever uses the program plays as; the player is not Palor, and Palor is not the administrator or the administrator's in-world identity, avatar, or alter ego. Characters know only what their experiences and knowledge permit, not everything the administrator knows.
 
 The project starts directly in this folder. The earlier Personal AI Character Studio ZIP is unavailable and is not a dependency.
 
@@ -16,6 +16,6 @@ No generator is assumed to preserve identity perfectly. Canon protection is a so
 
 ## Wider world
 
-Support approximately 50 initial characters and expansion through data rather than code changes. Tibor is the administrator; Palor is his in-world presence. Preserve objective events separately from subjective memories, beliefs, secrets, and mistaken assumptions. Allow administrator corrections, timeline branches, and eventual event-driven daily life without expensive continuous simulation by default.
+Support approximately 50 initial characters and expansion through data rather than code changes. Tibor is the administrator and is not a character. Palor is a fictional, 32-year-old character, unrelated to the administrator, and the playable protagonist whom whoever uses the program plays as. Preserve objective events separately from subjective memories, beliefs, secrets, and mistaken assumptions. Allow administrator corrections, timeline branches, and eventual event-driven daily life without expensive continuous simulation by default.
 
 The user is learning software development through practical work. Prefer small working increments, accessible explanations, private ownership of creative data, reliable backups, and replaceable AI providers.

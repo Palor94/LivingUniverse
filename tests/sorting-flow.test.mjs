@@ -13,14 +13,14 @@ test('Finish sorting explicitly completes multicharacter items; Save for later e
   let returned=0,returnEnabled=false,closed=0;const form={dataset:{},insertAdjacentHTML(){}},nodes=new Map(['#media-form','#categorization-complete','#quick-character-search','.dialog-head','#sort-prev','#sort-next','#sort-save-next','#sort-draft','#media-save-status','button[type="submit"],button.primary','#dialog'].map(s=>[s,{dataset:{},insertAdjacentHTML(){},close(){closed++;}}]));nodes.set('#media-form',form);nodes.get('#categorization-complete').checked=false;const requests=[];
   try{globalThis.FormData=class{constructor(){return values;}};const sorting=installSorting({afterFinish:async mid=>{if(returnEnabled){assert.equal(mid,'shared');returned++;return true;}return false;},$:selector=>nodes.get(selector)||null,$$:()=>[],esc:s=>s,api:async(route,payload)=>{requests.push({route,payload});return {};},action:fn=>fn,refresh:async()=>{},reload:async()=>{},toast(){},mediaDialog:async()=>{}});
     await sorting.viewer({id:'shared',relative_path:'shared.png',categorization_complete:false,sorting_status:'multiple'});let release;form._pendingTagCreation=new Promise(resolve=>{release=()=>{values.append('structured_tag','created-inline');resolve(true);};});const finish=nodes.get('#sort-save-next').onclick();await Promise.resolve();assert.equal(requests.length,0);release();await finish;assert.equal(requests.at(-1).payload.categorization_complete,true);assert.deepEqual(requests.at(-1).payload.character_ids,['Palor','Pákozdi']);assert.ok(requests.at(-1).payload.structured_tag_ids.includes('created-inline'));assert.equal(nodes.get('#categorization-complete').checked,true);
-    await nodes.get('#sort-draft').onclick();assert.equal(requests.at(-1).payload.categorization_complete,false);assert.match(nodes.get('#media-save-status').textContent,/Draft/);
+    await nodes.get('#sort-draft').onclick();assert.equal(requests.at(-1).payload.categorization_complete,false);assert.match(nodes.get('#media-save-status').textContent,/Piszkozat/);
     const closesBefore=closed;returnEnabled=true;await form.onsubmit({preventDefault(){}});assert.equal(returned,1);assert.equal(closed,closesBefore);assert.equal(requests.at(-1).payload.categorization_complete,true);
     await nodes.get('#sort-save-next').onclick();assert.equal(returned,2);assert.equal(closed,closesBefore);
   }finally{globalThis.FormData=native;}
 });
 
 test('failed inline creation stops a pending Finish operation instead of silently dropping the new label',async()=>{
-  await assert.rejects(mediaFormPayload({_pendingLocationCreation:Promise.resolve(false)},true),/could not be created/);
+  await assert.rejects(mediaFormPayload({_pendingLocationCreation:Promise.resolve(false)},true),/nem sikerült létrehozni/);
 });
 
 test('saved assignments refresh review/reference controls without discarding review fields or approving canon',()=>{

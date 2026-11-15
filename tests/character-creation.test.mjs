@@ -15,7 +15,7 @@ test('profile race selector saves on change and supplies its saved value for con
   const select=new Select(),form={insertAdjacentHTML(){}},status={},calls=[],c={id:'test',race:'orc',relationships:[]};
   const ui=installEnhancements({$:s=>s==='#profile-form'?form:s==='#save-status'?status:null,$$:(s,f)=>{assert.equal(s,'input,textarea,select');assert.equal(f,form);return [select];},api:async(route,body)=>{calls.push({route,body});return {};},getState:()=>({characters:[c]}),toast(){}});
   ui.profile(c);assert.equal(select.dataset.saved,'orc');select.value='dwarf';select.dispatchEvent(new Event('change'));await new Promise(r=>setImmediate(r));
-  assert.deepEqual(calls,[{route:'/api/characters/test/profile-field',body:{field:'race',value:'dwarf',expected:'orc'}}]);assert.equal(select.dataset.saved,'dwarf');assert.equal(c.race,'dwarf');assert.equal(status.textContent,'Saved automatically');
+  assert.deepEqual(calls,[{route:'/api/characters/test/profile-field',body:{field:'race',value:'dwarf',expected:'orc'}}]);assert.equal(select.dataset.saved,'dwarf');assert.equal(c.race,'dwarf');assert.equal(status.textContent,'Automatikusan mentve');
 });
 
 test('suggestions normalize accents, case, Unicode composition and whitespace; handle session reuse and exhaustion',()=>{
@@ -46,7 +46,7 @@ test('changing race immediately requests a matching name and only the latest sel
   pending[2].resolve({name:'Snikt',message:'Suggested'});await new Promise(r=>setImmediate(r));assert.equal(input.value,'Snikt');assert.equal(button.disabled,false);
   raceInput.value='human';raceInput.dispatchEvent(new Event('change'));assert.equal(pending[3].body.race,'human');pending[3].resolve({name:'Gábor',message:'Suggested'});await new Promise(r=>setImmediate(r));assert.equal(input.value,'Gábor');
   raceInput.value='troll';raceInput.dispatchEvent(new Event('change'));raceInput.value='human';raceInput.dispatchEvent(new Event('change'));pending[5].resolve({name:'Ádám',message:'Suggested'});await new Promise(r=>setImmediate(r));pending[4].reject(Error('Old failure'));await new Promise(r=>setImmediate(r));assert.equal(input.value,'Ádám');assert.equal(status.textContent,'Suggested');assert.equal(createButton.disabled,false);
-  raceInput.value='dwarf';raceInput.dispatchEvent(new Event('change'));input.value='My own name';input.dispatchEvent(new Event('input'));pending[6].resolve({name:'Thorin',message:'Suggested'});await new Promise(r=>setImmediate(r));assert.equal(input.value,'My own name');assert.match(status.textContent,/manual edit/);
+  raceInput.value='dwarf';raceInput.dispatchEvent(new Event('change'));input.value='My own name';input.dispatchEvent(new Event('input'));pending[6].resolve({name:'Thorin',message:'Suggested'});await new Promise(r=>setImmediate(r));assert.equal(input.value,'My own name');assert.match(status.textContent,/kézi módosításod/);
 });
 
 test('name button replaces repeated suggestions, preserves pending manual edits and recovers from errors without creating',async()=>{
@@ -54,7 +54,7 @@ test('name button replaces repeated suggestions, preserves pending manual edits 
   const input=new Input(),button={disabled:false,isConnected:true},createButton={disabled:false},status={isConnected:true};let response={name:'Adam Archer',message:'Suggested'},release,wait=false,fail=false;const calls=[];
   bindNameSuggestion({input,button,status,createButton,api:async(route,body)=>{calls.push({route,body});if(wait)await new Promise(r=>release=r);if(fail)throw Error('Unavailable');return response;}});
   await button.onclick();assert.equal(input.value,'Adam Archer');response={name:'Peter Reed',message:'Suggested'};await button.onclick();assert.equal(input.value,'Peter Reed');assert.deepEqual(calls[1].body.exclude,['Adam Archer','Adam Archer']);
-  wait=true;const pending=button.onclick();assert.equal(createButton.disabled,true);input.value='My own name';input.dispatchEvent(new Event('input'));release();await pending;assert.equal(input.value,'My own name');assert.match(status.textContent,/manual edit/);
+  wait=true;const pending=button.onclick();assert.equal(createButton.disabled,true);input.value='My own name';input.dispatchEvent(new Event('input'));release();await pending;assert.equal(input.value,'My own name');assert.match(status.textContent,/kézi módosításod/);
   wait=false;fail=true;await button.onclick();assert.equal(status.textContent,'Unavailable');assert.equal(button.disabled,false);assert.equal(createButton.disabled,false);
   fail=false;response={name:null,message:'Enter a name manually.'};await button.onclick();assert.equal(input.value,'My own name');assert.match(status.textContent,/manually/);assert.ok(calls.every(c=>c.route==='/api/character-name-suggestion'));
 });

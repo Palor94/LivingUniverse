@@ -2,6 +2,7 @@ import {promises as fs,readFileSync} from 'node:fs';
 import {randomUUID,createHash} from 'node:crypto';
 import {fileSignature,distance} from './duplicates.mjs';
 import {visualVersion} from './public/image-hash.js';
+import {isPlanningSource} from './media-purpose.mjs';
 
 const method='local-approved-reference-hash-v1';
 export function installSuggestions({db,all,one,run,transaction,fail,safeFile}){
@@ -26,6 +27,7 @@ export function installSuggestions({db,all,one,run,transaction,fail,safeFile}){
       let created=0,reused=0;const results=[];
       for(const mid of new Set(body.media_ids)){
         const target=await cached(mid);if(!target||target.kind!=='image'||target.visual_version!==visualVersion||! /^[0-9a-f]{16}$/.test(target.visual_hash)){results.push({id:mid,reason:'No current visual fingerprint. Analyze this picture in Duplicates first.'});continue;}
+        if(isPlanningSource(target.relative_path)){results.push({id:mid,reason:'Generation-plan / idea drawings are excluded from character sorting suggestions.'});continue;}
         const candidates=[];
         for(const {canon,refs} of referenceCharacters){if(one('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?',mid,canon.character_id))continue;
           const matches=refs.filter(r=>r.id!==mid).map(r=>({media_id:r.id,sha256:r.sha256,signature:r.signature,role:r.role,distance:distance(target.visual_hash,r.visual_hash),exact:target.sha256===r.sha256})).filter(r=>r.exact||r.distance<=threshold).sort((a,b)=>Number(b.exact)-Number(a.exact)||a.distance-b.distance);
@@ -49,7 +51,7 @@ export function installSuggestions({db,all,one,run,transaction,fail,safeFile}){
       json({items,total:one('SELECT COUNT(*) n FROM sorting_suggestions s JOIN active_media m ON m.id=s.media_id WHERE '+where,...args).n});return true;
     }
     if(p==='/api/suggestions/feedback'&&req.method==='POST'){
-      const s=one('SELECT * FROM sorting_suggestions WHERE id=?',body.id);if(!s)throw fail('Suggestion not found',404);if(!['accepted','rejected','reopened'].includes(body.decision))throw fail('Choose accept, reject, or reopen');
+      const s=typeof body.id==='string'?one('SELECT * FROM sorting_suggestions WHERE id=?',body.id):null;if(!s)throw fail('Suggestion not found',404);if(!['accepted','rejected','reopened'].includes(body.decision))throw fail('Choose accept, reject, or reopen');
       const verdict=value=>value===undefined?'unknown':value;if(![verdict(body.face_verdict),verdict(body.body_verdict)].every(v=>['unknown','matches','mismatch','uncertain'].includes(v)))throw fail('Invalid face or body review');if(typeof (body.notes??'')!=='string'||(body.notes||'').length>5000)throw fail('Keep feedback under 5,000 characters.');
       // Rejections can record a stale proposal; accepting/reopening must be current.
       if(body.decision!=='rejected'&&await stale(s))throw fail('The file or approved references changed. Generate fresh suggestions before accepting.',409);

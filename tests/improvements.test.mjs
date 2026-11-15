@@ -33,14 +33,14 @@ test('field autosave, cover regions, rename, reference protection, reversible re
   await fs.writeFile(path.join(root,'új név.png'),'collision');assert.equal((await request('/api/media/'+m.id+'/restore-item',{})).status,409);await fs.unlink(path.join(root,'új név.png'));await call('/api/media/'+m.id+'/restore-item',{});assert.equal(await fs.readFile(path.join(root,'új név.png'),'utf8'),'picture fixture');
 }));
 
-test('Palor merge keeps stable identities and canon history, relationships, shared media, and conflicts',()=>fixture(async({root,call,app})=>{
+test('Palor and a character named Tibor stay separate; identity merge is refused',()=>fixture(async({root,call,request})=>{
   await fs.mkdir(path.join(root,'Tibor'));await fs.mkdir(path.join(root,'Palor'));await fs.writeFile(path.join(root,'Tibor','scene.png'),'Tibor bytes');await fs.writeFile(path.join(root,'Palor','scene.png'),'Palor bytes');await call('/api/scan',{});
-  const p=await call('/api/characters',{name:'Palor'}),t=await call('/api/characters',{name:'Tibor'}),other=await call('/api/characters',{name:'Dezső'});
-  await call('/api/assign-folder',{character_id:t.id,folder:'Tibor'});const m=(await call('/api/media?folder=Tibor')).items[0];const identity=await approveCanon(call,t.id,{appearance:'Approved Tibor appearance',references:[{media_id:m.id,role:'face'}]});
-  await call('/api/relationships',{source_id:other.id,target_id:t.id,description:'Knows Tibor'});await call('/api/characters/'+t.id+'/profile-field',{field:'biography',value:'Existing biography'});
-  const merge=await call('/api/palor-merge',{});assert.equal(merge.target.id,p.id);assert.equal(merge.errors.length,0);assert.equal(merge.moved,1);assert.equal((await call('/api/state')).characters.length,2);assert.equal((await call('/api/protagonist')).character.id,p.id);
-  assert.equal((await call('/api/characters/'+t.id)).canon.id,identity.id);assert.equal((await call('/api/characters/'+p.id)).canon,null);assert.equal((await call('/api/characters/'+p.id)).biography,'Existing biography');assert.equal((await call('/api/characters/'+other.id)).relationships.find(r=>r.target_id===p.id).description,'Knows Tibor');
-  const moved=await call('/api/media/'+m.id);assert.equal(moved.characters[0].id,p.id);assert.equal(await fs.readFile(path.join(root,moved.relative_path),'utf8'),'Tibor bytes');assert.equal(await fs.readFile(path.join(root,'Palor','scene.png'),'utf8'),'Palor bytes');assert.ok(moved.relative_path.includes(m.id.slice(0,8)));assert.equal((await call('/api/characters/'+t.id+'/integrity',{})).results[0].status,'unchanged');
-  await call('/api/media/'+m.id,{character_ids:[p.id],notes:'Still linked'},'PUT');assert.equal((await call('/api/media/'+m.id)).canonicalFor[0],t.id);assert.ok((await fs.stat(merge.backupPath)).size>0);
-  const again=await call('/api/palor-merge',{});assert.equal(again.merged,0);assert.equal(again.moved,0);
+  const p=await call('/api/characters',{name:'Palor'}),t=await call('/api/characters',{name:'Tibor'});
+  await call('/api/assign-folder',{character_id:t.id,folder:'Tibor'});await call('/api/characters/'+t.id+'/profile-field',{field:'biography',value:'Existing biography'});
+  const preview=await request('/api/palor-merge/preview');assert.equal(preview.status,400);
+  const merge=await request('/api/palor-merge',{});assert.equal(merge.status,400);
+  assert.equal((await call('/api/state')).characters.length,2);assert.equal((await call('/api/protagonist')).character.id,p.id);
+  assert.equal((await call('/api/characters/'+t.id)).biography,'Existing biography');
+  const palor=await call('/api/characters/'+p.id);assert.notEqual(palor.biography,'Existing biography');
+  const m=(await call('/api/media?folder=Tibor')).items[0];assert.equal(await fs.readFile(path.join(root,m.relative_path),'utf8'),'Tibor bytes');assert.equal(await fs.readFile(path.join(root,'Palor','scene.png'),'utf8'),'Palor bytes');
 }));

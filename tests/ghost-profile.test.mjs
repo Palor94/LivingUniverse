@@ -112,6 +112,13 @@ test('ghost profile: shared template, preserved legacy/canon, explicit review, s
  g=(await req(base)).data;p=(await req(base+'/proposals',make({reward:{...e,kind:'fact',visibility:'public'}}))).data;
  await req(base+'/proposals/'+p.id+'/decision',{decision:'accept',expected_version:g.version,values:p.values});
  const catalogue=await createCatalogue({database:path.join(dir,'first','universe.sqlite'),mediaRoot:root});const visible=(await catalogue.call('get_character',{character_id:a.id})).data.structured_profile;assert.deepEqual(Object.keys(visible.values),['reward']);catalogue.close();
+ // Accept all: two pending proposals on the same base, oldest first, newer overwrites the shared field.
+ g=(await req(base)).data;const older=(await req(base+'/proposals',make({extraversion:{...e,value:2},reward:{...e,value:4}}))).data;assert.equal(older.status,'pending');
+ await new Promise(r=>setTimeout(r,5));const newer=(await req(base+'/proposals',{...make({extraversion:{...e,value:9}}),model:'Synthetic model 2'})).data;
+ const all=await req(base+'/accept-all',{});assert.equal(all.status,200);assert.equal(all.data.accepted,2);
+ assert.equal(all.data.values.extraversion.value,9);assert.equal(all.data.values.reward.value,4);assert.equal(all.data.version,g.version+1);
+ assert.deepEqual(all.data.proposals.filter(x=>[older.id,newer.id].includes(x.id)).map(x=>x.status),['accepted','accepted']);
+ assert.equal((await req(base+'/accept-all',{})).status,409);
  const backup=(await req('/api/export')).data;assert.equal(backup.characters.find(c=>c.id===a.id).biography,'Keep exact original.');assert.equal(backup.canon[0].id,canon.id);assert.equal((await req('/api/characters/'+a.id,undefined,'DELETE')).status,409);
  const restored=await start('restored');assert.equal((await restored.req('/api/restore',backup)).status,200);assert.deepEqual((await restored.req(base)).data,(await req(base)).data);
 });

@@ -12,6 +12,14 @@ Phase 4 implemented: custom grouped vocabulary, stable tag IDs with editable nam
 
 Phase 5 review foundation implemented: optional local approved-reference hash suggestions with provenance, manual multi-character additive acceptance, rejection/reopening, separate human face/body feedback, suppression of repeated rejected evidence, stale-evidence checks, and export/restore. This baseline is not AI recognition. Local learned encoders, local vision-language models, and external APIs are compared in `docs/ASSISTED_SORTING.md`; actual AI model selection, a held-out benchmark, and provider connection remain pending the user's preference. No external upload, paid call, model installation, automatic assignment, or canon mutation is enabled.
 
+Owner policy lock (2026-11-06): full machine auto-canon is authorized under
+`docs/AUTO_CANON.md` (per-person crops for multi-character shots; hard abstain
+rules; numeric gates unset). This does not enable a writer, model, or upload.
+
+Vision engine lock (2026-11-06): OpenAI `gpt-6.1-sol` for world-v1 tagging and
+identity-v1 compare (`docs/VISION_ENGINE.md`). In-repo estimate/trial CLI and
+gates landed; bulk library runner resume and live auto-canon writer remain next.
+
 ## 1. Character identity library: first useful prototype
 
 Implemented in the first local build: editable characters/profiles, folder discovery and explicit assignments, shared media, sorting inbox, tags and notes, directed relationships, per-character reviews, versioned canon, reference integrity checks, side-by-side reference comparison, export/restore, and a laptop launcher. Integration checks cover persistence, canon boundaries, shared assignments, missing originals, video range delivery, and restore. Face/crop tools, richer feature fields, duplicate reconciliation, and bulk individual selection remain later increments.
@@ -68,3 +76,30 @@ Reference retention update (2026-10-29): explicit reference removal now scrubs h
 2026-10-30: Shared anatomy/appearance_detail field guidance now covers the supplied A–D checklist; full-generation package version 2 exports the current shared guidance. Existing field values and canon remain unchanged.
 
 2026-10-31: authenticated admin one-click crop saving atomically adds an approved, independently identified reference and reversible attributed revision history. Multiple approved crops per source/character flow into plugin reads and generation inputs without replacing prior references.
+
+## 2026-11-06: MCP living-world upgrade streak
+
+Ship as separate working increments in this order. No auto-canon, no invented biographies, no continuous simulation, no female character creation. Later items (compare widget, locations, multi-character binding, identity benchmark) stay outside this streak.
+
+| Step | Feature | Size | Status |
+| --- | --- | --- | --- |
+| 5 | `get_reference_coverage` | Small | Implemented: present/missing approved roles from current canon only |
+| 6 | `fill_gaps_only` on profile propose | Small | Implemented: refuses non-empty saved fields |
+| 7 | `get_image_generation_summary` | Small | Implemented: status counts, estimated/actual cost totals, recent receipts |
+| 4 | `submit_generation_feedback` | Small–medium | Implemented: append-only face/body feedback; never canon |
+| 1 | `get_scene_pack` | Medium | Implemented: perspective pack with knowledge boundaries |
+| 2 | Event + memory proposals | Medium–large | Implemented: `propose_story_event` / `propose_character_memory` (+ apply tools) |
+| 3 | Story clock + next-scene candidates | Medium | Implemented: `get_story_clock`, clock propose/apply, `get_next_scene_candidates` |
+
+Migration `025-mcp-living-world` adds generation feedback, character memories and MCP proposal tables. Covered by `tests/mcp-adapter.test.mjs` and `tests/mcp-living-world-streak.test.mjs`. Restart the app/tunnel and refresh MCP tools to discover the new surface.
+
+Deferred after this streak: compare widget, session→memory helper polish, location MCP tools, multi-character scene binding, identity benchmark runner.
+
+## Status 2026-11-12
+
+The current roadmap is `docs/NEXT_GEN_PLAN_2026-11-11.md`. Done since: Phase 0; thumbnails and
+compression (1.1, 1.2); memory recall, running summaries, promises (2.1–2.3); beliefs and gossip
+(2.4, 2.5); game clock (3.1, real time plus actions); invitations (3.3); play on the phone (4.8);
+face identity suggestions and reference checks in the app (toward 5.1). Open: profile storage split
+(1.3), lazy i18n (1.6), schedules (3.2), story threads (3.4), timelines (3.6), body identity method,
+benchmark lock-in of the auto-canon gates (owner).

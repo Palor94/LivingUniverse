@@ -2,6 +2,7 @@ import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {createHash,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import {normalizeCanvas,catalogueCanvas,copy,WORLD_ROOT} from './public/location-canvas-model.js';
+import {renameText} from './rename-play-extras.mjs';
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const shape=(body,keys)=>{if(!body||Array.isArray(body)||typeof body!=='object'||Object.keys(body).some(k=>!keys.includes(k)))throw fail('Ismeretlen helyszínterv-mező.');};
@@ -42,7 +43,38 @@ export function installLocationCanvas({dataDir,editor,transaction}){
       await writeAtomic(disk);return{head:disk.head,approved_head:disk.approved_head,state,revision:{...revision,state:undefined}};
     }finally{if(lock){await lock.close();await fs.unlink(lockFile);}}
   });}
-  return{context,async handle({p,body,req,json}){
+  // Character rename: place names in the tree that carry his name follow it, as a new revision
+  // of the same kind as the current head (an approved tree stays approved; a draft stays draft).
+  async function renameMentions(oldName,newName,reason,others=[]){return exclusive(async()=>{
+    let lock;
+    try{try{lock=await fs.open(lockFile,'wx',0o600);}catch(e){if(e.code==='EEXIST')throw fail('A helyszínterv mentése már folyamatban van.',409);throw e;}
+      const disk=await read(),head=disk.revisions.at(-1);if(!head)return {changed:0};
+      if(disk.revisions.length>=300)return {changed:0,skipped:'history limit'};
+      const state=structuredClone(head.state);let changed=0;
+      for(const n of state.nodes||[]){const next=renameText(n.name||'',oldName,newName,others);if(next!==n.name){n.name=next;changed++;}}
+      if(!changed)return {changed:0};
+      const normalized=normalizeCanvas(state),cat=catalogue(),text=String(reason).slice(0,1000);
+      const revision={id:randomUUID(),parent_id:disk.head,kind:head.kind,actor:'local-creator',reason:text,created_at:new Date().toISOString(),catalogue_version:cat.version,state_hash:hash(normalized),request_key:randomUUID(),request_hash:hash({kind:head.kind,reason:text,state:normalized}),state:normalized};
+      disk.revisions.push(revision);disk.head=revision.id;if(head.kind==='approved')disk.approved_head=revision.id;
+      await writeAtomic(disk);return {changed,revision_id:revision.id,kind:head.kind};
+    }finally{if(lock){await lock.close();await fs.unlink(lockFile);}}
+  });}
+  // Final rename: the old name leaves every revision (and the one-step backup copy).
+  async function scrubHistory(oldName,newName,others=[]){return exclusive(async()=>{
+    let lock;
+    try{try{lock=await fs.open(lockFile,'wx',0o600);}catch(e){if(e.code==='EEXIST')throw fail('A helyszínterv mentése már folyamatban van.',409);throw e;}
+      const disk=await read();let changed=0;
+      for(const r of disk.revisions){let touched=false;
+        for(const n of r.state?.nodes||[]){for(const k of ['name','note']){const next=renameText(n[k]||'',oldName,newName,others);if(next!==(n[k]||'')){n[k]=next;touched=true;}}}
+        const reason=renameText(r.reason||'',oldName,newName,others);if(reason!==r.reason){r.reason=reason;touched=true;}
+        if(touched){r.state=normalizeCanvas(r.state);r.state_hash=hash(r.state);changed++;}}
+      if(!changed)return {revisions_changed:0};
+      await writeAtomic(disk);
+      await fs.copyFile(file,path.join(dataDir,'location-canvas.previous.json'));
+      return {revisions_changed:changed};
+    }finally{if(lock){await lock.close();await fs.unlink(lockFile);}}
+  });}
+  return{context,renameMentions,scrubHistory,async handle({p,body,req,json}){
     if(!p.startsWith('/api/location-canvas'))return false;
     if(req.method==='GET'&&p==='/api/location-canvas'){json(await context());return true;}
     if(req.method==='GET'&&p==='/api/location-canvas/export'){await queue;json(await read());return true;}

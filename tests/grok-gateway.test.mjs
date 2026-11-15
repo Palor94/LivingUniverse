@@ -31,8 +31,12 @@ test('OAuth requires private human authorization, S256 PKCE, exact redirect, aud
   const persisted=await fs.readFile(file,'utf8');for(const value of [issued.access_token,issued.refresh_token,code,cookie.split('=')[1]])assert.equal(persisted.includes(value),false);
   const reloaded=createAuthorization(options);assert.equal(reloaded.authenticate('Bearer '+issued.access_token).client_id,client.client_id);
   assert.throws(()=>createAuthorization({...options,publicOrigin:'https://other.example'}).authenticate('Bearer '+issued.access_token),{code:'invalid_token'});
-  const fresh=auth.token({grant_type:'refresh_token',client_id:client.client_id,refresh_token:issued.refresh_token});assert.throws(()=>auth.token({grant_type:'refresh_token',client_id:client.client_id,refresh_token:issued.refresh_token}),{code:'invalid_grant'});
-  auth.revoke({token:fresh.access_token});assert.throws(()=>auth.authenticate('Bearer '+fresh.access_token),{code:'invalid_token'});
+  const fresh=auth.token({grant_type:'refresh_token',client_id:client.client_id,refresh_token:issued.refresh_token});
+  // A lost response: the used refresh token works again within 10 minutes (2026-11-11), then not.
+  const retry=auth.token({grant_type:'refresh_token',client_id:client.client_id,refresh_token:issued.refresh_token});assert.ok(retry.access_token&&retry.access_token!==fresh.access_token);
+  time+=10*60*1000+1;assert.throws(()=>auth.token({grant_type:'refresh_token',client_id:client.client_id,refresh_token:issued.refresh_token}),{code:'invalid_grant'});time-=10*60*1000+1;
+  assert.throws(()=>auth.token({grant_type:'refresh_token',client_id:'someone-else',refresh_token:fresh.refresh_token}),{code:/invalid_(client|grant)/});
+  auth.revoke({token:fresh.access_token});assert.throws(()=>auth.token({grant_type:'refresh_token',client_id:client.client_id,refresh_token:retry.refresh_token}),{code:'invalid_grant'},'revoking the grant removes the whole family');assert.throws(()=>auth.authenticate('Bearer '+fresh.access_token),{code:'invalid_token'});
   assert.throws(()=>auth.authenticate('Bearer '+issued.access_token),{code:'invalid_token'});
   time+=3600001;assert.throws(()=>auth.authenticate('Bearer '+issued.access_token),{code:'invalid_token'});
  }finally{await fs.rm(temp,{recursive:true,force:true});}

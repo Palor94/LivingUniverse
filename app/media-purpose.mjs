@@ -7,6 +7,14 @@ function normalizedPath(value){
   return parts.join('/').toLocaleLowerCase('en');
 }
 export function isPlanningSource(relativePath){const value=normalizedPath(relativePath),prefix=normalizedPath(planningFolder);return value!==null&&value.startsWith(prefix+'/');}
+/** SQL predicate: media row alias must be `m`. Matches forward/backslash paths case-insensitively. */
+export const planningSQL="lower(replace(m.relative_path,'\\','/')) LIKE (lower('"+planningFolder.replaceAll("'","''")+"') || '/%')";
+/** Exclude drawn generation-plan / idea sheets from Needs sorting and machine categorize queues. */
+export const notPlanningSQL='NOT ('+planningSQL+')';
+/** Generated figure/background sources copied into Play folders (play-assets): game assets, never sorting work. Alias `m`. */
+export const notPlayAssetSQL='NOT EXISTS(SELECT 1 FROM play_asset_sources pa WHERE pa.media_id=m.id)';
+/** The same, but harmless before Play mode created its table (standalone use): pass the db helper `one`. */
+export const playAssetFilter=one=>one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='play_asset_sources'")?notPlayAssetSQL:'1';
 export function describeMediaPurpose(relativePath,result){
   if(!isPlanningSource(relativePath))return {kind:'catalogue_media',realization_state:'unspecified',simulation_role:'scene_or_reference_candidate',basis:'default_media_scope',uses:[]};
   const uses=['generation_plan'];

@@ -10,6 +10,8 @@ import {thumbnail,referenceImage,MAX_SOURCE_BYTES,dimensions,MAX_IMAGE_BYTES,MAX
 import {originalInfo,verifyOriginal,MAX_INLINE_IMAGE_BYTES,IMAGE_READ_CHUNK_BYTES,digest} from './original-images.mjs';
 import {profileVersion} from '../app/character-edit.mjs';
 import {createEventReader} from '../app/story-events.mjs';
+import {createLivingWorldReader} from '../app/living-world.mjs';
+import {analyzeReferenceCoverage} from './reference-coverage.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const roles=['face','body','detail','general'];
@@ -32,6 +34,7 @@ export async function createCatalogue({database,mediaRoot,allowAdminNotes=false,
   for(const table of ['characters','media','depictions','media_notes','relationships','canon'])if(!tables.has(table)){db.close();fail('SCHEMA_UNSUPPORTED','The configured file is not the existing Living Universe catalogue.');}
   const all=(sql,...args)=>db.prepare(sql).all(...args),one=(sql,...args)=>db.prepare(sql).get(...args);
   const events=createEventReader(db,{creator:allowAdminNotes});
+  const living=createLivingWorldReader({one,all,events,fail:(message,status=400)=>Object.assign(new CatalogueError(status===404?'NOT_FOUND':status===403?'FORBIDDEN':'INVALID_ARGUMENT',message),{status})});
   const active=tables.has('media_hidden')?'NOT EXISTS(SELECT 1 FROM media_hidden h WHERE h.media_id=m.id)':'1';
   const redact=value=>String(value??'').split(root).join('[private location]').split(mediaRoot).join('[private location]').split(database).join('[private location]').replace(/[A-Za-z]:[\\/][^\r\n"<>]*/g,'[private location]').replace(/\\\\[^\r\n"<>]*/g,'[private location]').replace(/(^|[\s("'=])\/[^\s"'<>]+/g,'$1[private location]');
   function character(cid){identifier(cid);const c=one('SELECT id,name,aliases,biography,personality,appearance,notes,created_at FROM characters WHERE id=?',cid);if(c){const columns=new Set(all('PRAGMA table_info(characters)').map(column=>column.name));for(const field of ['sexuality','speech_style'])c[field]=columns.has(field)?one(`SELECT ${field} value FROM characters WHERE id=?`,cid).value:'';}if(!c)fail('NOT_FOUND','No character has that catalogue ID.');c.race=all('PRAGMA table_info(characters)').some(column=>column.name==='race')?one('SELECT race FROM characters WHERE id=?',cid).race:'human';return c;}
@@ -142,6 +145,17 @@ export async function createCatalogue({database,mediaRoot,allowAdminNotes=false,
       let info;
       if(flag(args.include_image)){if(!args.media_id)fail('INVALID_ARGUMENT','Select one approved media_id before requesting image content.');if(refs.length>1)fail('AMBIGUOUS_REFERENCE','Select reference_id for the exact approved crop, or filter to one unique role.');if(!refs.length)fail('NOT_APPROVED','That media is not an approved reference in the selected revision.');if(!refs[0].sha256)fail('CANON_FINGERPRINT_UNAVAILABLE','This legacy approved reference has no stored fingerprint. Review it locally before requesting verified imagery.',true);if(!/^[a-f0-9]{64}$/i.test(refs[0].sha256))fail('CANON_INVALID','The approved reference fingerprint is invalid.');const m=media(args.media_id),output=await imageResult(m,await original(m,refs[0].sha256),args.image_quality,refs[0].crop);imageContent=output.image;info={...output.info,approved_original_fingerprint_verified:true};if(info.transfer)info.transfer={...info.transfer,character_id:args.character_id,revision_id:r.id};}
       data={character_id:args.character_id,revision:r?{id:r.id,parent_id:r.parent_id,appearance:r.appearance,reason:r.reason,created_at:r.created_at}:null,references:refs.slice(offset,offset+limit),next_offset:refs.length>offset+limit?offset+limit:null,...(info?{image_info:info}:{})};
+    }else if(name==='get_reference_coverage'){
+      shape(args,['character_id','revision_id']);const r=canon(revision(args.character_id,args.revision_id));
+      data={character_id:args.character_id,revision:r?{id:r.id,created_at:r.created_at}:null,coverage:analyzeReferenceCoverage((r?.references||[]).map(ref=>({...ref,media_kind:one('SELECT kind FROM media WHERE id=?',ref.media_id)?.kind||'missing'}))),canon_changed:false};
+    }else if(name==='get_scene_pack'){
+      try{data=living.scenePack(args);}catch(e){fail(e.code||(e.status===404?'NOT_FOUND':'INVALID_ARGUMENT'),e.message);}
+    }else if(name==='get_story_clock'){
+      shape(args,[]);data={story_clock:living.readClock()};
+    }else if(name==='get_next_scene_candidates'){
+      try{data=living.nextScenes(args);}catch(e){fail(e.code||(e.status===404?'NOT_FOUND':'INVALID_ARGUMENT'),e.message);}
+    }else if(name==='list_character_memories'){
+      try{if(args.creator===true&&!allowAdminNotes)fail('ADMIN_NOTES_DISABLED','Creator memory access requires local administrator-note permission.');data=living.listMemories({...args,creator:args.creator===true&&allowAdminNotes});}catch(e){fail(e.code||(e.status===404?'NOT_FOUND':'INVALID_ARGUMENT'),e.message);}
     }else if(['search_events','get_character_timeline','get_event'].includes(name)){
       try{
         if(name==='get_event'){shape(args,['event_id','creator','perspective_character_id']);data=events.get(args.event_id,{creator:args.creator,perspective_character_id:args.perspective_character_id});}

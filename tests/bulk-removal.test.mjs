@@ -14,7 +14,7 @@ test('bulk removal snapshots selected IDs, reports failures and warnings, and st
   assert.deepEqual(requests.map(r=>r.route),['/api/media/spare/remove','/api/media/protected/remove','/api/media/last/remove']);assert.ok(requests.every(r=>r.body.mode==='file'));
   assert.deepEqual(result.removed,['spare','last']);assert.deepEqual(result.failed,[{id:'protected',message:'Approved reference'}]);assert.equal(result.warnings.length,1);assert.equal(progress.at(-1).processed,3);assert.deepEqual(result.unprocessed,[]);
   let canceled=false;requests.length=0;const stopped=await removeSelectedMedia({ids:['first','second'],mode:'catalogue',api,onProgress:()=>{canceled=true;},isCanceled:()=>canceled});assert.deepEqual(stopped.removed,['first']);assert.deepEqual(stopped.unprocessed,['second']);assert.equal(requests.length,1);assert.equal(requests[0].body.mode,'catalogue');
-  await assert.rejects(removeSelectedMedia({ids:['first'],mode:'permanent',api}),/Choose how/);assert.equal(requests.length,1);
+  await assert.rejects(removeSelectedMedia({ids:['first'],mode:'permanent',api}),/Válaszd ki, hogyan/);assert.equal(requests.length,1);
 });
 
 test('Needs sorting offers a disabled bulk remove button until selection, and opens a review before any removal',async()=>{
@@ -24,7 +24,7 @@ test('Needs sorting offers a disabled bulk remove button until selection, and op
   const $=key=>nodes.get(key)||null,$$=key=>key==='[data-bulk-action]'?buttons:[];
   const ui=installSorting({$,$$,getView:()=> 'inbox',esc:s=>s.replaceAll('<','&lt;'),action:fn=>fn,openDialog:(_title,body)=>{html=body;},api:async(...args)=>requests.push(args)});
   ui.setPage([{id:'first',relative_path:'one.png'},{id:'second',relative_path:'<two>.mp4'}],'/queue','page-1');ui.listing();const button=buttons.find(b=>b.dataset.bulkAction==='remove');assert.ok(button);assert.equal(button.disabled,true);
-  $('#select-visible').onclick();assert.equal(button.disabled,false);await button.onclick();assert.equal(requests.length,0);assert.match(html,/Only the 2 selected items on this page/);assert.match(html,/value="catalogue" checked/);assert.match(html,/value="file"/);assert.match(html,/&lt;two>/);assert.equal(typeof $('#bulk-remove-form').onsubmit,'function');
+  $('#select-visible').onclick();assert.equal(button.disabled,false);await button.onclick();assert.equal(requests.length,0);assert.match(html,/Csak az ezen az oldalon kijelölt 2 elem érintett/);assert.match(html,/value="catalogue" checked/);assert.match(html,/value="file"/);assert.match(html,/&lt;two>/);assert.equal(typeof $('#bulk-remove-form').onsubmit,'function');
   $('#clear-selected').onclick();assert.equal(button.disabled,true);ui.setPage([{id:'third',relative_path:'third.png'}],'/queue','page-2');await button.onclick();assert.equal(requests.length,0);
 });
 

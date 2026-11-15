@@ -1,0 +1,11 @@
+# Search tools (ripgrep and editors that read .ignore) skip media, backups and old project
+# copies, so a code search finds only the live source. Git is unaffected (see .gitignore).
+/00_SYSTEM/
+/10_CHARACTERS/
+/20_SHARED_MEDIA/
+/30_IMPORTS/
+/40_EXPORTS/
+/90_BACKUPS/
+/99_ARCHIVE/
+node_modules/
+__pycache__/

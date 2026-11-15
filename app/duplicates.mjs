@@ -59,7 +59,7 @@ export function installDuplicates({db,all,one,run,fail,safeFile,fingerprint,isBu
       }finally{running=false;}json({results});return true;
     }
     if(p==='/api/duplicates/visual'&&req.method==='POST'){
-      const m=active(body.id);if(!m||m.kind!=='image')throw fail('Choose an active image');
+      const m=typeof body.id==='string'?active(body.id):null;if(!m||m.kind!=='image')throw fail('Choose an active image');
       if(body.version!==visualVersion||! /^[0-9a-f]{16}$/.test(body.hash)||![body.width,body.height].every(n=>Number.isInteger(n)&&n>0&&n<=100000))throw fail('Invalid visual fingerprint');
       const cached=one('SELECT * FROM media_fingerprints WHERE media_id=?',m.id),current=await inspect(m);
       if(!cached||cached.signature!==body.signature||current.signature!==body.signature||cached.sha256!==body.sha256)throw fail('Image changed. Analyze it again.',409);
@@ -69,8 +69,11 @@ export function installDuplicates({db,all,one,run,fail,safeFile,fingerprint,isBu
       const mode=url.searchParams.get('mode')||'exact',threshold=Number(url.searchParams.get('threshold')||6),offset=Math.max(0,Number(url.searchParams.get('offset'))||0);
       if(!['exact','similar'].includes(mode)||!Number.isInteger(threshold)||threshold<0||threshold>12)throw fail('Invalid comparison options');
       const rows=all('SELECT m.*,f.signature,f.sha256,f.visual_hash,f.visual_version,f.width,f.height FROM active_media m JOIN media_fingerprints f ON f.media_id=m.id ORDER BY m.relative_path');
-      const valid=[];let stale=0;
-      for(const m of rows){try{if((await inspect(m)).signature!==m.signature){stale++;continue;}valid.push(m);}catch{stale++;}}
+      // Each fingerprint is still checked against its file, 32 at a time instead of one by one
+      // (661 OneDrive files took ~350 ms sequentially); the order of results stays the same.
+      const fresh=new Array(rows.length);
+      for(let i=0;i<rows.length;i+=32)await Promise.all(rows.slice(i,i+32).map(async(m,j)=>{try{fresh[i+j]=(await inspect(m)).signature===m.signature;}catch{fresh[i+j]=false;}}));
+      const valid=rows.filter((_,i)=>fresh[i]),stale=rows.length-valid.length;
       let groups,truncated=false;
       if(mode==='exact'){const map=new Map();for(const m of valid){if(!map.has(m.sha256))map.set(m.sha256,[]);map.get(m.sha256).push(m);}groups=[...map.values()].filter(g=>g.length>1).map(items=>({items}));}
       else{const result=similarPairs(valid.filter(m=>m.kind==='image'&&m.visual_version===visualVersion&&/^[0-9a-f]{16}$/.test(m.visual_hash)),threshold);groups=result.pairs;truncated=result.truncated;}

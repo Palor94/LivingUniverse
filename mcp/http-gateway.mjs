@@ -8,12 +8,13 @@ import {serve} from './server.mjs';
 import {MAX_MCP_RESPONSE_BYTES} from './original-images.mjs';
 import {createCatalogue} from './catalogue.mjs';
 import {createWriteClient} from './writes.mjs';
+import {createCallLog,callLogFile} from './call-log.mjs';
 
-export function createDispatcher({catalogue,refreshWriter}){
+export function createDispatcher({catalogue,refreshWriter,onCall=null}){
   return async request=>{
     const input=new PassThrough(),output=new PassThrough();let bytes=0,wire='';
     output.on('data',chunk=>{bytes+=chunk.length;if(bytes>MAX_MCP_RESPONSE_BYTES+65536){input.destroy();throw Error('Response bound');}wire+=chunk;});
-    const running=serve({catalogue,refreshWriter,input,output});
+    const running=serve({catalogue,refreshWriter,input,output,onCall});
     const lines=[];if(request?.method!=='initialize')lines.push({jsonrpc:'2.0',id:'_gateway_initialize',method:'initialize',params:{protocolVersion:'2025-06-18'}});lines.push(request);
     input.end(lines.map(JSON.stringify).join('\n')+'\n');await running;
     return wire.trim().split('\n').filter(Boolean).map(JSON.parse).find(item=>item.id!=='_gateway_initialize')??null;
@@ -85,9 +86,12 @@ export async function startGateway({configFile=process.env.LU_GROK_CONFIG,mcpCon
   const mcpFile=mcpConfigFile||path.join(local,'LivingUniverse','mcp-config.json'),mcp=JSON.parse(await readFile(mcpFile,'utf8'));
   const file=configFile||path.join(path.dirname(mcp.database),'grok-gateway.json');
   const config=JSON.parse(await readFile(file,'utf8'));if(config.enabled!==true)throw Error('Gateway disabled.');
-  const catalogue=await createCatalogue({database:mcp.database,mediaRoot:mcp.mediaRoot,allowAdminNotes:false});
+  // Private (creator-only) profile values: off unless the owner switches them on in the local
+  // gateway configuration ("allow_admin_notes": true; owner, 2026-11-14). Grok still has to ask for
+  // them with include_admin_notes:true; they never enter character prompts automatically.
+  const catalogue=await createCatalogue({database:mcp.database,mediaRoot:mcp.mediaRoot,allowAdminNotes:config.allow_admin_notes===true});
   const refreshWriter=async()=>{const latest=JSON.parse(await readFile(mcpFile,'utf8'));if(path.resolve(latest.database)!==path.resolve(mcp.database))throw Error('Catalogue changed.');return createWriteClient({...mcp,writeConfig:latest.writeConfig});};
-  const gateway=createGateway({config,dispatch:createDispatcher({catalogue,refreshWriter}),onEvent:event=>console.log('GATEWAY_EVENT '+JSON.stringify(event))});
+  const gateway=createGateway({config,dispatch:createDispatcher({catalogue,refreshWriter,onCall:createCallLog(callLogFile(mcp.database),{client:'grok'})}),onEvent:event=>console.log('GATEWAY_EVENT '+JSON.stringify(event))});
   const port=config.port??4320;if(!Number.isInteger(port)||port<1024||port>65535)throw Error('Invalid gateway port.');
   await new Promise((resolve,reject)=>{gateway.server.once('error',reject);gateway.server.listen(port,'127.0.0.1',resolve);});
   return {...gateway,close:()=>new Promise(resolve=>gateway.server.close(()=>{catalogue.close();resolve();}))};

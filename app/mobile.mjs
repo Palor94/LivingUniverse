@@ -1,9 +1,36 @@
-import http from 'node:http';
+﻿import http from 'node:http';
 import {randomBytes} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 
 const fields={aliases:1000,biography:30000,personality:30000,sexuality:30000,speech_style:30000,appearance:30000,notes:30000};
-export function createMobileServer({config,all,one,run,transaction,characterCrops=null,desktopOrigin=()=>null,characterRename=null,mcpChanges=null,ghostProfiles=null,mediaImports=null,imageGeneration=null,grokConnections=null,referencePreview=null,locationEditor=null,sorting=null,scan=null,scanRunning=()=>false,reconciliation=null,createCharacter=null,isBusy=()=>false}){
+const PLAY_CSP="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+// What the phone's play screen may reach on the desktop application. Uploads and scans of
+// backgrounds, sprites and scenes stay on the desktop.
+const PLAY_ASSETS=new Set(['/play.js','/play-map.js','/play-story.js','/play-town-map.js','/play-icons.js','/debug-trail.js','/layout-check.js','/play-debug.js','/sprite-cutout.js','/style.css','/theme.css']);
+export function isPlayRoute(p,method){
+  const read=method==='GET'||method==='HEAD';
+  if(read&&(PLAY_ASSETS.has(p)||/^\/(thumb|media)\/[^/]+$/.test(p)||/^\/api\/sprites\/[^/]+$/.test(p)&&p!=='/api/sprites/scan'))return true;
+  if(/^\/api\/play\/scenes\/(scan|upload)$/.test(p))return false;
+  return /^\/api\/play(?:\/|$)/.test(p)||/^\/api\/world-engine\/(levels|events\/[^/]+(?:\/[a-z-]+)?)$/.test(p);
+}
+const FORWARD_REQUEST=['content-type','content-length','accept','accept-encoding','if-none-match','range'];
+const FORWARD_RESPONSE=['content-type','content-length','content-encoding','etag','cache-control','vary','location','content-range','accept-ranges','last-modified'];
+// Streams one request to the desktop listener and its answer back (streamed talk included).
+function forward(req,res,target,securityHeaders){
+  return new Promise(resolve=>{
+    const headers={host:target.host};for(const h of FORWARD_REQUEST)if(req.headers[h]!==undefined)headers[h]=req.headers[h];
+    const out=http.request(target,{method:req.method,headers},answer=>{
+      const back={'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':securityHeaders['Content-Security-Policy']};
+      for(const h of FORWARD_RESPONSE)if(answer.headers[h]!==undefined)back[h]=answer.headers[h];
+      res.writeHead(answer.statusCode,back);answer.pipe(res);answer.on('end',resolve);answer.on('error',()=>{res.destroy();resolve();});
+    });
+    out.on('error',()=>{if(!res.headersSent){res.writeHead(502,{...securityHeaders,'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({error:'The desktop application did not answer. Retry shortly.'}));}else res.destroy();resolve();});
+    // A phone that hangs up ends the forward too (otherwise its promise waited forever).
+    res.on('close',()=>{out.destroy();resolve();});
+    req.pipe(out);
+  });
+}
+export function createMobileServer({config,play=true,all,one,run,transaction,characterCrops=null,desktopOrigin=()=>null,characterRename=null,mcpChanges=null,ghostProfiles=null,mediaImports=null,imageGeneration=null,grokConnections=null,referencePreview=null,locationEditor=null,sorting=null,scan=null,scanRunning=()=>false,reconciliation=null,createCharacter=null,isBusy=()=>false}){
   if(config?.enabled!==true)return null;
   const origin=new URL(config.origin);
   if(origin.protocol!=='https:'||!origin.hostname.endsWith('.ts.net')||origin.port||origin.pathname!=='/'||origin.search||origin.hash||origin.username||origin.password)throw Error('Mobile access requires one exact HTTPS .ts.net origin.');
@@ -37,13 +64,30 @@ export function createMobileServer({config,all,one,run,transaction,characterCrop
           if(req.method!=='PUT'||!operation)throw fail('Unsupported administrator crop action.',405);
           if(req.headers['x-lu-crop-csrf']!==csrf)throw fail('Reload the administrator session before saving.',403);
           if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||''))throw fail('Expected JSON.',415);
-          let raw='',size=0;for await(const chunk of req){size+=chunk.length;if(size>16384)throw fail('Crop request is too large.',413);raw+=chunk;}let args;try{args=JSON.parse(raw);}catch{throw fail('Invalid JSON.');}
+          const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>16384)throw fail('Crop request is too large.',413);chunks.push(chunk);}let args;try{args=JSON.parse(Buffer.concat(chunks,size).toString('utf8'));}catch{throw fail('Invalid JSON.');}
           if(isBusy())throw fail('A catalogue operation is active. Retry shortly.',409);
           return json(await characterCrops[operation](mid,cid,role,args,login));
         }
         throw fail('Unsupported administrator crop action.',405);
       }
       if(req.headers.origin&&req.headers.origin!==origin.origin)throw fail('Untrusted Origin.',403);
+      // Shared Hungarian interface text: wording only, no catalogue data.
+      if(req.method==='GET'&&p==='/i18n.js'){const content=await fs.readFile(new URL('./public/i18n.js',import.meta.url));res.writeHead(200,{...headers,'Content-Type':'text/javascript; charset=utf-8'});return res.end(content);}
+      // Play on the phone (2026-11-12): the play page is served here; its requests are forwarded
+      // to the desktop application, for the play routes and pictures only. Changes need this
+      // session's CSRF token and the exact Tailscale origin, like every other mobile edit.
+      // Only with a desktop application behind it; a bare mobile editor keeps its narrow surface.
+      if(play&&desktopOrigin()&&(p==='/play'||p==='/play-mobile.js'||isPlayRoute(p,req.method))){
+        if(req.headers['sec-fetch-site']==='cross-site'&&!(p==='/play'&&req.headers['sec-fetch-mode']==='navigate'))throw fail('Cross-site request blocked.',403);
+        if(p==='/play'||p==='/play-mobile.js'){
+          if(req.method!=='GET')throw fail('This operation is not available in the mobile editor.',405);
+          const page=p==='/play',content=await fs.readFile(new URL('./public/'+(page?'play-mobile.html':'play-mobile.js'),import.meta.url));
+          res.writeHead(200,{...headers,...(page?{'Content-Security-Policy':PLAY_CSP}:{}),'Content-Type':page?'text/html; charset=utf-8':'text/javascript'});return res.end(content);
+        }
+        if(!['GET','HEAD'].includes(req.method)&&(req.headers.origin!==origin.origin||req.headers['x-lu-csrf']!==csrf))throw fail('Reload the play page before continuing.',403);
+        const target=desktopOrigin();
+        return forward(req,res,new URL(url.pathname+url.search,target),headers);
+      }
       const reviewPage=/^\/mcp-change\/[0-9a-f-]{36}$/i.test(p),referenceReview=/^\/mcp-reference\/[0-9a-f-]{36}$/i.test(p);
       const importPage=/^\/media-import\/[0-9a-f-]{36}$/i.test(p),connectPage=/^\/grok-connect\/[0-9a-f]{32}$/i.test(p);
       const renamePage=p==='/character-rename.html';
@@ -60,7 +104,8 @@ export function createMobileServer({config,all,one,run,transaction,characterCrop
       if(upload&&req.method==='PUT'&&mediaImports){
         if(req.headers.origin!==origin.origin||req.headers['x-lu-csrf']!==csrf)throw fail('Reload the upload page before saving.',403);
         if(isBusy())throw fail('A catalogue file operation is running. Retry shortly.',409);
-        try{return json(await mediaImports.receive(upload[1],upload[2],req,{name:decodeURIComponent(req.headers['x-lu-filename']||'selected media'),contentType:req.headers['content-type'],expectedSha256:req.headers['x-lu-sha256']}));}
+        let uploadName;try{uploadName=decodeURIComponent(req.headers['x-lu-filename']||'selected media');}catch{throw fail('Invalid file name header.');}
+        try{return json(await mediaImports.receive(upload[1],upload[2],req,{name:uploadName,contentType:req.headers['content-type'],expectedSha256:req.headers['x-lu-sha256']}));}
         catch(e){return json({code:e.code||'IMPORT_UNAVAILABLE',error:e.status?e.message:'The upload could not finish. Retry this same file.'},e.status||500);}
       }
       let body={};
@@ -183,7 +228,7 @@ export function createMobileServer({config,all,one,run,transaction,characterCrop
       if(p==='/api/characters'&&req.method==='GET')return json({characters:all('SELECT c.id,c.name,c.aliases FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL')});
       const create=p.match(/^\/api\/characters\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/create$/i);
       if(create&&req.method==='PUT'){
-        if(Object.keys(body).some(k=>!['name','gender'].includes(k))||(body.gender!==undefined&&(!['férfi','nem-bináris'].includes(body.gender)))||typeof body.name!=='string'||!body.name.trim()||body.name.trim().length>200||/[\x00-\x1f\x7f]/.test(body.name))throw fail('Enter a character name of 1–200 characters. Only name and an optional non-female gender can be supplied.');
+        if(Object.keys(body).some(k=>!['name','gender'].includes(k))||(body.gender!==undefined&&(!['férfi','hím','nem-bináris'].includes(body.gender)))||typeof body.name!=='string'||!body.name.trim()||body.name.trim().length>200||/[\x00-\x1f\x7f]/.test(body.name))throw fail('Enter a character name of 1–200 characters. Only name and an optional non-female gender can be supplied.');
         if(!createCharacter)throw fail('Character folder creation is unavailable.',503);
         const name=body.name.trim().normalize('NFC'),folder=await createCharacter(create[1],name,body.gender);
         return json({...details(create[1]),...folder});

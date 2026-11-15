@@ -28,3 +28,15 @@ Primary capability sources: [DINOv2 feature extraction](https://huggingface.co/d
 Choose a model/provider and runtime with the user, then benchmark a deliberately small, manually labelled held-out set containing different scenes, lookalikes, unknown people, crops, and multiple characters. Use approved references only; keep test images out of that reference set. Measure false character suggestions, missed characters, abstentions, accepted/rejected counts, face consistency, body consistency, latency, and total cost. Do not turn similarity or a model's self-reported confidence into an invented identity percentage.
 
 An adapter should supply its method/model/preprocessing version, exact reference revision and hashes, evidence, uncertainty, and separate face/body results (nullable when unsupported) to the existing review boundary. Validate structured labels against the local vocabulary. Do not send biographies, private administrator notes, relationship secrets, or unrelated images. There must be an explicit preview of uploads and estimated cost before an external call. No provider, payment, automatic assignment, or training is enabled by this release.
+
+## Auto-canon and chosen engine
+
+Owner authorization for full machine visual-canon promotion is recorded in
+`DECISIONS.md` (2026-11-06) and specified in [AUTO_CANON.md](AUTO_CANON.md).
+Assisted sorting still only proposes depiction links unless a separate enabled
+auto-canon writer passes those gates. Multi-character pictures require per-person
+crops; whole-frame promotion is forbidden. Numeric accept thresholds remain unset
+until the held-out benchmark and owner lock-in above.
+
+Chosen stack: OpenAI **`gpt-6.1-sol`** for world-v1 tagging and identity-v1
+compare — see [VISION_ENGINE.md](VISION_ENGINE.md).

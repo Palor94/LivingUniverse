@@ -50,7 +50,8 @@ test('an existing tunnel stops a second launch before credentials are accessed',
 test('complete credential flow redacts client output and stores only encrypted test data',{skip:process.platform!=='win32'},async()=>{
   const temp=await mkdtemp(path.join(os.tmpdir(),'living-universe-launcher-'));
   try{
-    const fakeClient=path.join(temp,'fake-client.cmd');await writeFile(fakeClient,'@echo off\r\nif "%~1"=="doctor" (\r\necho RESULT ok\r\nexit /b 0\r\n)\r\necho key=%CONTROL_PLANE_API_KEY%\r\necho {"key":"%CONTROL_PLANE_API_KEY%"}\r\nexit /b 1\r\n');
+    const fakeClient=path.join(temp,'fake-client.cmd');await writeFile(fakeClient,'@echo off\r\nif "%~1"=="doctor" (\r\necho RESULT ok\r\nexit /b 0\r\n)\r\nif "%~1"=="admin" exit /b 0\r\necho key=%CONTROL_PLANE_API_KEY%\r\necho {"key":"%CONTROL_PLANE_API_KEY%"}\r\nexit /b 1\r\n');
+    await writeFile(path.join(temp,'living-universe.yaml'),'control_plane:\n  tunnel_id: "tunnel_'+('0'.repeat(32))+'"\n');
     const source=(await readFile(new URL('../mcp/run-tunnel.ps1',import.meta.url),'utf8')).replace('if($window.ShowDialog() -ne $true)',"$box.Password='sk-TEST-'+('x'*32); if($false)");
     const command='& {\n'+source+'\n} -SaveKey';
     let result;try{result=await exec(path.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe'),['-NoProfile','-NonInteractive','-STA','-OutputFormat','Text','-EncodedCommand',Buffer.from(command,'utf16le').toString('base64')],{windowsHide:true,timeout:20000,env:{...process.env,LOCALAPPDATA:temp,LU_MCP_NEW_KEY:'1',LU_MCP_SELF_TEST:'0',LU_MCP_TUNNEL_CLIENT:fakeClient,LU_MCP_PROFILE_DIRECTORY:temp,PSModulePath:path.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','Modules')}});}catch(err){result=err;}
@@ -58,4 +59,19 @@ test('complete credential flow redacts client output and stores only encrypted t
     assert.match(result.stdout,/key=\[redacted key\]/);assert.match(result.stdout,/"key":"\[redacted key\]"/);assert.doesNotMatch(result.stderr,/TUNNEL_START_FAILED/);
     const cipher=await readFile(path.join(temp,'LivingUniverse','mcp-tunnel-key.xml'),'utf8');assert.doesNotMatch(cipher,/sk-TEST-x/);
   }finally{assert.equal(path.dirname(path.resolve(temp)),path.resolve(os.tmpdir()));await rm(temp,{recursive:true,force:true});}
+});
+
+test('a replacement key rejected by the existing tunnel never overwrites the saved encrypted credential',{skip:process.platform!=='win32'},async()=>{
+  const temp=await mkdtemp(path.join(os.tmpdir(),'living-universe-key-denied-'));
+  try{
+    await mkdir(path.join(temp,'LivingUniverse'));
+    const saved=path.join(temp,'LivingUniverse/mcp-tunnel-key.xml');await writeFile(saved,'previous encrypted fixture');
+    const fakeClient=path.join(temp,'fake-client.cmd');await writeFile(fakeClient,'@echo off\r\nif "%~1"=="doctor" exit /b 0\r\nexit /b 1\r\n');
+    await writeFile(path.join(temp,'living-universe.yaml'),'control_plane:\n  tunnel_id: "tunnel_'+('0'.repeat(32))+'"\n');
+    const source=(await readFile(new URL('../mcp/run-tunnel.ps1',import.meta.url),'utf8')).replace('if($window.ShowDialog() -ne $true)',"$box.Password='sk-TEST-'+('x'*32); if($false)");
+    await assert.rejects(exec(path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-STA','-OutputFormat','Text','-EncodedCommand',Buffer.from('& {\n'+source+'\n} -SaveKey','utf16le').toString('base64')],{windowsHide:true,timeout:20000,env:{...process.env,LOCALAPPDATA:temp,LU_MCP_NEW_KEY:'1',LU_MCP_SELF_TEST:'0',LU_MCP_TUNNEL_CLIENT:fakeClient,LU_MCP_PROFILE_DIRECTORY:temp,PSModulePath:path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/Modules')}}),error=>{
+      assert.match(error.stderr,/stage=runtime_authorization/);assert.doesNotMatch(error.stdout+error.stderr,/sk-TEST-x/);return true;
+    });
+    assert.equal(await readFile(saved,'utf8'),'previous encrypted fixture');
+  }finally{await rm(temp,{recursive:true,force:true});}
 });

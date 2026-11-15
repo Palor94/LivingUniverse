@@ -1,5 +1,12 @@
 @echo off
 cd /d "%~dp0"
+rem Already running (e.g. started by the scheduled task)? Open it instead of starting a second copy.
+curl.exe -s -o nul -m 3 http://127.0.0.1:4317/ >nul 2>nul
+if not errorlevel 1 (
+  echo Living Universe already runs. Opening it in the browser.
+  start "" http://127.0.0.1:4317/
+  exit /b 0
+)
 rem Bootstrap the verified backup in the actual desktop environment. Never overwrite a catalogue.
 set "LIVING_UNIVERSE_DATA=%USERPROFILE%\AppData\Local\LivingUniverse\desktop-catalogue"
 set "LIVING_UNIVERSE_NODE=node"

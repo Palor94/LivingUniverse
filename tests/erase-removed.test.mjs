@@ -21,20 +21,26 @@ test('permanent erasure is confirmed, limited to removed items, preserves origin
     await call('/api/media/'+trash.id,{character_ids:[emptyAfterErasure.id]},'PUT');
     const erase=(m,extra={})=>request('/api/media/'+m.id+'/erase-item',{confirm:true,expected_path:m.relative_path,...extra});
     assert.equal((await erase(trash)).status,409);
+    // Play / media-director bookkeeping about the file must go with it (audit 2026-11-10).
+    for(const sql of ["INSERT INTO play_content VALUES(?,'nudity','x')","INSERT INTO media_signals(media_id,dhash,updated_at) VALUES(?,'0000000000000000','x')","INSERT INTO media_signal_distinct VALUES(?,'x')","INSERT INTO play_media_feedback VALUES(?,'scene','k',1,'x')"])app.db.prepare(sql).run(trash.id);
     await call('/api/media/'+trash.id+'/remove',{mode:'file'});
     const removed=(await call('/api/removed')).items.find(m=>m.id===trash.id),trashPath=path.join(root,removed.relative_path);
     assert.equal((await erase(removed,{confirm:false})).status,409);assert.equal(await fs.readFile(trashPath,'utf8'),'trash.png');
     assert.equal((await erase(removed,{expected_path:'another.png'})).status,409);
-    assert.equal((await erase(removed)).status,200);
+    const erased=await erase(removed);assert.equal(erased.status,200);assert.equal(erased.data.record_removed,true,'the file is gone, so the catalogue record goes too');
+    assert.equal((await request('/api/media/'+trash.id)).status,404);
+    for(const t of ['play_content','media_signals','media_signal_distinct','play_media_feedback'])assert.equal(app.db.prepare(`SELECT count(*) n FROM ${t} WHERE media_id=?`).get(trash.id).n,0,t+' cleaned');
     assert.equal((await call('/api/characters/'+emptyAfterErasure.id)).deletion_block,null);
     await call('/api/characters/'+emptyAfterErasure.id,undefined,'DELETE');
     assert.equal((await request('/api/characters/'+emptyAfterErasure.id)).status,404);
     assert.equal(await fs.stat(trashPath).then(()=>true,()=>false),false);
     assert.equal((await call('/api/removed')).items.some(m=>m.id===trash.id),false);
-    assert.equal((await request('/api/media/'+trash.id+'/restore-item',{})).status,409);
-    assert.equal((await erase(removed)).status,200);
+    assert.equal((await request('/api/media/'+trash.id+'/restore-item',{})).status,404);
+    assert.equal((await erase(removed)).status,404,'nothing left to erase');
     await call('/api/media/'+catalogue.id+'/remove',{mode:'catalogue'});
-    assert.equal((await erase(catalogue)).status,200);assert.equal(await fs.readFile(path.join(root,'catalogue.png'),'utf8'),'catalogue.png');
+    // Catalogue-only removal: the original stays on disk, so the record stays as a marker
+    // that keeps the next scan from importing it again.
+    const kept=await erase(catalogue);assert.equal(kept.status,200);assert.equal(kept.data.record_removed,false);assert.equal(await fs.readFile(path.join(root,'catalogue.png'),'utf8'),'catalogue.png');
     await call('/api/scan',{});assert.equal((await call('/api/media')).items.some(m=>m.id===catalogue.id),false);
     const c=await call('/api/characters',{name:'Protected identity'});
     await call('/api/media/'+reference.id,{character_ids:[c.id]},'PUT');
@@ -47,9 +53,9 @@ test('permanent erasure is confirmed, limited to removed items, preserves origin
     assert.equal(await fs.readFile(path.join(root,protectedItem.relative_path),'utf8'),'reference.png');
     assert.equal((await erase(protectedItem)).status,200);assert.equal(await fs.stat(path.join(root,protectedItem.relative_path)).then(()=>true,()=>false),false);
     assert.deepEqual(JSON.parse((await call('/api/characters/'+c.id)).history.find(row=>row.id===approved.id).references_json),[]);
-    const backup=await call('/api/export');assert.ok(backup.canon.some(r=>r.id===approved.id));assert.ok(backup.media.some(m=>m.id===trash.id));
-    assert.ok(backup.application_settings.some(s=>s.key==='erased_media:'+trash.id));
-    const deleted=JSON.parse(backup.application_settings.find(s=>s.key==='deleted_character:'+emptyAfterErasure.id).value);
-    assert.equal(deleted.erased_media_links[0].media_id,trash.id);
+    const backup=await call('/api/export');assert.ok(backup.canon.some(r=>r.id===approved.id));
+    assert.equal(backup.media.some(m=>m.id===trash.id||m.id===reference.id),false,'erased records are gone');
+    assert.ok(backup.media.some(m=>m.id===catalogue.id));assert.ok(backup.application_settings.some(s=>s.key==='erased_media:'+catalogue.id));
+    assert.ok(backup.application_settings.some(s=>s.key==='deleted_character:'+emptyAfterErasure.id));
   }finally{await app.close();assert.equal(path.dirname(path.resolve(temp)),path.resolve(os.tmpdir()));await fs.rm(temp,{recursive:true,force:true});}
 });

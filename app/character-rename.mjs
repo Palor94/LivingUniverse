@@ -8,7 +8,23 @@ const problem=(code,message,status=400)=>{throw Object.assign(new Error(message)
 const shape=(v,keys)=>{if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!keys.includes(k)))problem('INVALID_ARGUMENT','Érvénytelen átnevezési kérés.');};
 const q=s=>'"'+s.replaceAll('"','""')+'"';
 const prefix='rename:v1:';
-const fields={characters:['biography','personality','appearance','sexuality','speech_style','notes'],relationships:['description'],media_notes:['notes','tags'],locations:['name'],location_profiles:['english_name','category','description']};
+// Machine-derived tables with no text that can carry a name (face boxes and embeddings). Scanning
+// them only spends the size budget: identity_faces alone pushed the live search over the limit.
+const NAMELESS_TABLES=new Set(['identity_faces']);
+const fields={characters:['biography','personality','appearance','sexuality','speech_style','notes'],relationships:['description'],media_notes:['notes','tags'],locations:['name'],location_profiles:['english_name','category','description'],
+  // Living world and Play mode text (owner request 2026-11-10: a rename reaches the game logs too).
+  world_events:['title','summary'],world_messages:['text'],play_lines:['text'],character_memories:['text'],character_memory_revisions:['text'],
+  world_level_revisions:['reason'],world_places:['note'],play_items:['name'],play_generation_jobs:['note']};
+// Game JSON columns: which inner strings are story text that may follow a rename.
+const gameJson={
+  world_events:{payload_json:p=>p.length===3&&(p[0]==='memories'&&p[2]==='text'||p[0]==='level_changes'&&p[2]==='reason')},
+  play_conversations:{summary_json:p=>p.length===1&&['title','summary','character_memory','palor_memory','reason','milestone'].includes(p[0])},
+  play_generation_jobs:{brief_json:p=>p.length===1&&['prompt','name'].includes(p[0])||p.length===2&&p[0]==='save'&&p[1]==='folder'}
+};
+// The game only ever writes names of characters that exist in the catalogue, so a name that
+// no other character shares refers to this one even where the row is linked to someone else
+// (e.g. Bandi's memory about Sanyi).
+const gameTables=new Set(['world_events','world_messages','play_lines','play_conversations','character_memories','character_memory_revisions','world_level_revisions','world_places','play_items','play_generation_jobs']);
 const pathValue=(v,path)=>path.reduce((o,k)=>o[k],v);
 const setValue=(v,path,value)=>{let o=v;for(const k of path.slice(0,-1))o=o[k];o[path.at(-1)]=value;};
 const keyOK=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{8,128}$/.test(v);
@@ -25,16 +41,31 @@ export function installCharacterRename({db,all,one,run,transaction,isBusy=()=>fa
     const nameKey=v=>tagKey(v).replace(/\s+/gu,' '),normalized=nameKey(name);
     for(const c of all('SELECT id,name,aliases FROM characters WHERE id<>?',id))if([c.name,...c.aliases.split(/[,;\n]/u)].some(n=>nameKey(n)===normalized))problem('NAME_COLLISION','A név egy másik karakter neve vagy aliasa.',409);
   }
+  // Which characters a game row belongs to.
+  function gameLinks(table,row){
+    try{
+      if(table==='world_events')return JSON.parse(row.payload_json||'{}').character_ids||[];
+      if(table==='world_messages')return [row.from_character_id];
+      if(['play_conversations','character_memories','world_places','play_generation_jobs'].includes(table))return [row.character_id].filter(Boolean);
+      if(table==='play_lines')return [one('SELECT character_id FROM play_conversations WHERE id=?',row.conversation_id)?.character_id].filter(Boolean);
+      if(table==='character_memory_revisions')return [one('SELECT character_id FROM character_memories WHERE id=?',row.memory_id)?.character_id].filter(Boolean);
+      if(table==='world_level_revisions')return [row.source_id,row.target_id];
+      // A place belongs to the characters linked to it in the living world (his home, work…).
+      if(table==='locations'&&one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_places'"))return all('SELECT DISTINCT character_id FROM world_places WHERE location_id=?',row.id).map(r=>r.character_id);
+    }catch{}
+    return [];
+  }
   function capture(){
     const sources=[],snapshot=[];let bytes=0,rows=0;
     for(const {name:table} of all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")){
+      if(NAMELESS_TABLES.has(table))continue;
       const columns=all('PRAGMA table_info('+q(table)+')'),pk=columns.filter(c=>c.pk).sort((a,b)=>a.pk-b.pk).map(c=>c.name);
       if(!pk.length)problem('UNSUPPORTED_SCHEMA','Hiányzó stabil rekordkulcs: '+table,409);
       const data=all('SELECT * FROM '+q(table)+' ORDER BY '+pk.map(q).join(','));
       for(const row of data){
         if(table==='application_settings'&&row.key.startsWith(prefix))continue;
         if(table==='folder_changes'&&JSON.parse(row.manifest_json||'{}').character_rename===true)continue;
-        rows++;bytes+=Buffer.byteLength(JSON.stringify(row));if(rows>100000||bytes>40*1024*1024)problem('SCAN_LIMIT','A teljes keresés túl nagy; nem készítünk csonkolt előnézetet.',413);
+        rows++;bytes+=Buffer.byteLength(JSON.stringify(row,(k,v)=>v instanceof Uint8Array?v.length:v));if(rows>200000||bytes>96*1024*1024)problem('SCAN_LIMIT','A teljes keresés túl nagy; nem készítünk csonkolt előnézetet.',413);
         snapshot.push([table,row]);
         const locator={table,pk:Object.fromEntries(pk.map(k=>[k,row[k]]))};
         for(const c of columns){
@@ -46,7 +77,8 @@ export function installCharacterRename({db,all,one,run,transaction,isBusy=()=>fa
             let editable=!!fields[table]?.includes(c.name)&&!path.length;
             if(event&&c.name==='payload_json'&&current)editable=['title','summary','details','consequences'].includes(path[0])&&path.length===1||path[0]==='chronology'&&path[1]==='label'||path[0]==='participants'&&path[2]==='role'||path[0]==='tags';
             if(ghost)editable=path[0]==='values'&&['value','interpretation'].includes(path[2])&&path.length===3;
-            const links=table==='characters'?[row.id]:table==='relationships'?[row.source_id,row.target_id]:event?all('SELECT character_id FROM story_event_participants WHERE event_id=?',row.event_id).map(p=>p.character_id):table==='media_notes'?all('SELECT character_id FROM depictions WHERE media_id=?',row.media_id).map(p=>p.character_id):ghost?[row.key.slice('ghost:character:'.length)]:[];
+            if(path.length&&gameJson[table]?.[c.name])editable=gameJson[table][c.name](path);
+            const links=table==='characters'?[row.id]:table==='relationships'?[row.source_id,row.target_id]:event?all('SELECT character_id FROM story_event_participants WHERE event_id=?',row.event_id).map(p=>p.character_id):table==='media_notes'?all('SELECT character_id FROM depictions WHERE media_id=?',row.media_id).map(p=>p.character_id):ghost?[row.key.slice('ghost:character:'.length)]:gameLinks(table,row);
             sources.push({locator,column:c.name,path,text,editable,links,kind:event&&current?'event':ghost?'ghost':'row',reason:editable?null:'Védett történet, kánon, alias, eredetadat, azonosító vagy fájlútvonal; külön szerkesztést igényel.'});
           }
           function walk(v,path=[]){if(typeof v==='string')add(v,path);else if(v&&typeof v==='object')for(const [k,item] of Object.entries(v))walk(item,[...path,k]);}
@@ -85,18 +117,13 @@ export function installCharacterRename({db,all,one,run,transaction,isBusy=()=>fa
           // Homonyms and full-name contexts can refer to another catalogue person.
           const others=names.filter(n=>[n.name,...n.aliases.split(/[,;\n]/u)].some(v=>v.trim()&&v.toLocaleLowerCase('hu').includes(c.name.toLocaleLowerCase('hu'))));
           const other=others.some(n=>s.links.includes(n.id)||s.text.toLocaleLowerCase('hu').includes(n.name.toLocaleLowerCase('hu')));
-          const ambiguous=other||others.length>0||!s.links.includes(c.id)||mention.after===null;
+          const ambiguous=other||others.length>0||(!s.links.includes(c.id)&&!gameTables.has(s.locator.table))||mention.after===null;
           const editable=s.editable&&mention.after!==null;
           items.push({id:'hit-'+items.length,source,table:s.locator.table,record_key:s.locator.pk,field:[s.column,...s.path].join('.'),...mention,editable,classification:!editable?'protected':other?'other_person':ambiguous?'uncertain':'linked',reason:!editable?s.reason||'A toldalék vagy az új név ragozása külön kézi ellenőrzést igényel.':other?'Másik karakterre is utalhat.':ambiguous?'A szöveg személyazonossága nem bizonyítható; egyenként ellenőrizd.':'A rekord stabil ID-val kapcsolódik a karakterhez.',context:s.text.slice(Math.max(0,mention.start-90),mention.end+90)});
         }
       }
       items.unshift({id:'primary-name',source:-1,table:'characters',record_key:{id:c.id},field:'name',start:0,end:c.name.length,before:c.name,after:newName,editable:true,classification:'required',reason:'A karakter stabil ID-ja változatlan marad.'});
-      const aliases=c.aliases.split(/[,;\n]/u).map(v=>v.trim()).filter(Boolean);
-      if(!aliases.some(v=>tagKey(v)===tagKey(c.name))){
-        const next=[...aliases,c.name].join('; ');if(next.length>1000)problem('ALIAS_LIMIT','A korábbi név megőrzéséhez az aliaslista túl hosszú.');
-        const source=sources.push({locator:{table:'characters',pk:{id:c.id}},column:'aliases',path:[],text:c.aliases,kind:'row'})-1;
-        items.push({id:'previous-name-alias',source,table:'characters',record_key:{id:c.id},field:'aliases',start:0,end:c.aliases.length,before:c.aliases,after:next,editable:true,classification:'linked',reason:'A korábbi név kereshető aliasként megmarad.'});
-      }
+      // Renames are final (owner decision 2026-11-10): the old name is not kept as an alias.
       return savePlan({operation:'rename',character_id:c.id,old_name:c.name,new_name:newName,scope_version:captureData.version,sources,items},args,replay.requestHash);
     });
   }
@@ -110,7 +137,8 @@ export function installCharacterRename({db,all,one,run,transaction,isBusy=()=>fa
   function writeRow(s,before,after,actor){
     if(s.kind==='event'){
       const e=one('SELECT * FROM story_events WHERE id=?',before.event_id);if(e.version!==before.version)problem('STALE_PLAN','Az esemény közben változott.',409);
-      const version=e.version+1,status=before.status==='approved'?'proposed':before.status;
+      // Only the name changes, so an approved event stays approved (owner decision 2026-11-11).
+      const version=e.version+1,status=before.status;
       run('INSERT INTO story_event_revisions VALUES(?,?,?,?,?,?,?)',e.id,version,status,after.payload_json,actor,'Character rename; previous revision preserved.',new Date(clock()).toISOString());run('UPDATE story_events SET version=? WHERE id=?',version,e.id);
       const payload=JSON.parse(after.payload_json);for(const p of payload.participants)run('UPDATE story_event_participants SET role=? WHERE event_id=? AND character_id=?',p.role,e.id,p.character_id);
       return {locator:{table:s.locator.table,pk:{event_id:e.id,version}},after:one('SELECT * FROM story_event_revisions WHERE event_id=? AND version=?',e.id,version)};

@@ -4,6 +4,7 @@ import path from 'node:path';
 
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const secret=()=>randomBytes(32).toString('base64url');
+const REFRESH_GRACE_MS=10*60*1000;
 export const equalSecret=(a,b)=>{const x=Buffer.from(String(a??'')),y=Buffer.from(String(b??''));return x.length===y.length&&timingSafeEqual(x,y);};
 export class OAuthError extends Error{constructor(code,status=400){super(code);this.code=code;this.status=status;}}
 export function createAuthorization({file,publicOrigin,privateOrigin,redirectHosts=['grok.com'],clock=()=>Date.now(),secureCookies=true}){
@@ -64,11 +65,18 @@ export function createAuthorization({file,publicOrigin,privateOrigin,redirectHos
     client(body.client_id);if(body.resource&&body.resource!==resource)throw new OAuthError('invalid_target');
     if(body.grant_type==='authorization_code'){
       const code=state.codes[hash(body.code||'')];
-      if(!code||code.expires<=clock()||code.client_id!==body.client_id||code.redirect_uri!==body.redirect_uri||!/^[A-Za-z0-9._~-]{43,128}$/.test(body.code_verifier||'')||createHash('sha256').update(body.code_verifier).digest('base64url')!==code.challenge)throw new OAuthError('invalid_grant');
+      // The stored callback is normalized (URL.href); compare the request's in the same form.
+      let callback=null;try{callback=redirect(body.redirect_uri);}catch{}
+      if(!code||code.expires<=clock()||code.client_id!==body.client_id||code.redirect_uri!==callback||!/^[A-Za-z0-9._~-]{43,128}$/.test(body.code_verifier||'')||createHash('sha256').update(body.code_verifier).digest('base64url')!==code.challenge)throw new OAuthError('invalid_grant');
       delete state.codes[hash(body.code)];return issue(body.client_id);
     }
     if(body.grant_type==='refresh_token'){
-      const refresh=state.refresh[hash(body.refresh_token||'')];if(!refresh||refresh.expires<=clock()||refresh.client_id!==body.client_id||refresh.audience!==resource)throw new OAuthError('invalid_grant');delete state.refresh[hash(body.refresh_token)];return issue(body.client_id,refresh.grant_id);
+      const refresh=state.refresh[hash(body.refresh_token||'')];if(!refresh||refresh.expires<=clock()||refresh.client_id!==body.client_id||refresh.audience!==resource)throw new OAuthError('invalid_grant');
+      // Rotation with a short grace (2026-11-11): the used token stays valid for 10 more minutes,
+      // so a lost response (sleep, network drop) does not strand the client. Revoking the grant
+      // still removes the whole family at once.
+      if(!refresh.rotated_at){refresh.rotated_at=clock();refresh.expires=Math.min(refresh.expires,clock()+REFRESH_GRACE_MS);}
+      return issue(body.client_id,refresh.grant_id);
     }
     throw new OAuthError('unsupported_grant_type');
   }

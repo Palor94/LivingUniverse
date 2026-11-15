@@ -33,12 +33,13 @@ test('one trusted MCP request renames primary name, Hungarian references and own
  const f=await fixture({organized:true});try{
   const canon=f.one('SELECT * FROM canon'),args={request_key:'complete_rename_01',character_id:f.cid,new_name:'Ábel'},result=await f.call('rename_character',args);
   assert.equal(result.status,'applied');assert.equal(result.result.folder.destination,f.next);assert.equal(f.one('SELECT name FROM characters WHERE id=?',f.cid).name,'Ábel');assert.match(f.one('SELECT biography FROM characters WHERE id=?',f.cid).biography,/Ábellel.*Ábelhez/);
-  assert.equal(f.one('SELECT description FROM relationships').description,'Ábellel barátok.');assert.equal(f.one('SELECT target_id FROM relationships').target_id,f.cid);assert.match(f.one('SELECT aliases FROM characters WHERE id=?',f.cid).aliases,/Áron/);
+  assert.equal(f.one('SELECT description FROM relationships').description,'Ábellel barátok.');assert.equal(f.one('SELECT target_id FROM relationships').target_id,f.cid);assert.doesNotMatch(f.one('SELECT aliases FROM characters WHERE id=?',f.cid).aliases||'',/Áron/,'final rename keeps no old-name alias');
   assert.equal(await fs.readFile(path.join(f.root,f.next,'nested','x.png'),'utf8'),'unchanged fixture image bytes');assert.equal(await fs.readFile(path.join(f.root,f.next,'companion.txt'),'utf8'),'uncatalogued companion');await assert.rejects(fs.stat(path.join(f.root,f.old)));
   assert.equal(f.one('SELECT relative_path FROM media WHERE id=?',f.mid).relative_path,path.join(f.next,'nested','x.png'));assert.equal(f.one('SELECT character_id FROM sorted_folders WHERE folder=?',f.next).character_id,f.cid);assert.deepEqual(f.one('SELECT * FROM canon'),canon);assert.ok((await fs.stat(result.backup)).isFile());
-  assert.equal((await f.call('rename_character',args)).plan_id,result.plan_id);assert.equal(f.one('SELECT COUNT(*) n FROM folder_changes').n,1);
-  await f.stop();await f.boot();assert.equal((await f.call('rename_character',args)).plan_id,result.plan_id);
-  const undone=await f.call('undo_character_rename',{plan_id:result.plan_id,request_key:'complete_undo_01'});assert.equal(undone.status,'applied');assert.equal(f.one('SELECT name FROM characters WHERE id=?',f.cid).name,'Áron');assert.equal(await fs.readFile(path.join(f.root,f.old,'nested','x.png'),'utf8'),'unchanged fixture image bytes');assert.deepEqual(f.one('SELECT * FROM canon'),canon);
+  // Final rename: its records are gone, so the same request is simply "already this name"; no undo.
+  await assert.rejects(f.call('rename_character',args),{code:'NO_CHANGE'});assert.equal(f.one('SELECT COUNT(*) n FROM folder_changes').n,1);
+  await f.stop();await f.boot();await assert.rejects(f.call('rename_character',args),{code:'NO_CHANGE'});
+  await assert.rejects(f.call('undo_character_rename',{plan_id:result.plan_id,request_key:'complete_undo_01'}),{code:'IRREVERSIBLE'});assert.equal(f.one('SELECT name FROM characters WHERE id=?',f.cid).name,'Ábel');assert.deepEqual(f.one('SELECT * FROM canon'),canon);
  }finally{await f.close();}
 });
 
@@ -64,11 +65,11 @@ test('failure after physical rename rolls every selected database edit back and 
  }finally{await f.close();}
 });
 
-test('stale file content or catalogue changes refuse the whole operation; later edits block undo',async()=>{
+test('stale file content or catalogue changes refuse the whole operation; an applied rename cannot be undone',async()=>{
  const f=await fixture();try{
   let p=await f.prepare();await fs.writeFile(path.join(f.root,f.old,'new.txt'),'new');await assert.rejects(f.apply(p),{code:'STALE_FOLDER'});assert.equal(f.one('SELECT name FROM characters WHERE id=?',f.cid).name,'Áron');
   p=await f.prepare();f.run('UPDATE characters SET notes=? WHERE id=?','later note',f.cid);await assert.rejects(f.apply(p),{code:'STALE_PLAN'});assert.ok((await fs.stat(path.join(f.root,f.old))).isDirectory());
-  p=await f.prepare();await f.apply(p);f.run('UPDATE characters SET notes=? WHERE id=?','newer note',f.cid);await assert.rejects(f.app.characterRename.prepareUndo({plan_id:p.plan_id,request_key:'later_undo_01'}),{code:'UNDO_CONFLICT'});
+  p=await f.prepare();await f.apply(p);f.run('UPDATE characters SET notes=? WHERE id=?','newer note',f.cid);await assert.rejects(f.app.characterRename.prepareUndo({plan_id:p.plan_id,request_key:'later_undo_01'}),{code:'IRREVERSIBLE'});
  }finally{await f.close();}
 });
 
@@ -76,7 +77,7 @@ test('no existing character folder creates an ID-owned folder without moving sha
  const f=await fixture({organized:true,folder:false});try{
   await fs.mkdir(path.join(f.root,'20_SHARED_MEDIA','Unassigned'),{recursive:true});await fs.writeFile(path.join(f.root,'20_SHARED_MEDIA','Unassigned','shared.png'),'shared bytes');
   const p=await f.prepare();assert.equal(p.folder.mode,'create');const result=await f.apply(p);assert.equal(result.status,'applied');assert.ok((await fs.stat(path.join(f.root,f.next))).isDirectory());assert.equal(await fs.readFile(path.join(f.root,'20_SHARED_MEDIA','Unassigned','shared.png'),'utf8'),'shared bytes');
-  const undo=await f.app.characterRename.prepareUndo({plan_id:p.plan_id,request_key:'created_folder_undo'});await f.app.characterRename.applyApproved({plan_id:undo.plan_id,plan_hash:undo.plan_hash},'fixture-human');assert.ok((await fs.stat(path.join(f.root,f.old))).isDirectory());
+  await assert.rejects(f.app.characterRename.prepareUndo({plan_id:p.plan_id,request_key:'created_folder_undo'}),{code:'IRREVERSIBLE'});assert.ok((await fs.stat(path.join(f.root,f.next))).isDirectory());
  }finally{await f.close();}
 });
 

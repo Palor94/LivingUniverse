@@ -90,7 +90,7 @@ export function installFolderSync({db,root,dataDir,all,one,run,transaction,fail,
       validate();full=await checked(folder,false);
       try{await fs.mkdir(full);created=true;}catch(e){if(e.code!=='EEXIST')throw e;}
       await checked(folder);const stat=await fs.lstat(full);if(!stat.isDirectory())throw fail('A file already uses this name. Choose a distinct character name.',409);if(created)createdStat=stat;
-      transaction(()=>{const existing=validate();if(!existing)run('INSERT INTO characters(id,name,biography,created_at) VALUES(?,?,?,?)',cid,name,gender?'Nem: '+String(gender)+'.':'',now());run('INSERT INTO sorted_folders VALUES(?,?) ON CONFLICT(folder) DO NOTHING',folder,cid);});
+      transaction(()=>{const existing=validate();if(!existing)run('INSERT INTO characters(id,name,biography,created_at) VALUES(?,?,?,?)',cid,name,'Nem: '+(gender?String(gender):'férfi')+'.',now());run('INSERT INTO sorted_folders VALUES(?,?) ON CONFLICT(folder) DO NOTHING',folder,cid);});
       return {folder,folder_created:created};
     }catch(e){
       // Only remove our own still-empty directory after a database failure.

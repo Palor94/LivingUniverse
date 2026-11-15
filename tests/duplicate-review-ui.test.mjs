@@ -57,5 +57,5 @@ test('duplicate comparison wires one-click file removal and leaves the remaining
   assert.equal(typeof $('trash:other').onclick,'function');
   $('#duplicate-group-prev').onclick();
   assert.equal($('trash:keep').disabled,true);
-  assert.match(messages.at(-1)[0],/recoverable trash/);
+  assert.match(messages.at(-1)[0],/visszaállítható lomtárba/);
 });

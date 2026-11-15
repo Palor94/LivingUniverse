@@ -30,6 +30,11 @@ node ops/backup/backup.mjs restore --snapshot "D:\LivingUniverse Backups\snapsho
 
 A SQLite-pillanatkép a Node beépített online backup API-jával készül, a nyitott WAL-ban lévő, már véglegesített tranzakciókkal együtt. A mentett adatbázison teljes integrity_check, foreign_key_check és táblánkénti rekordszámlálás fut. A JSON és a séma ugyanebből a lezárt másolatból származik. Az SQLite önmagában konzisztens; a külön JSON-tervek, beállítások és külső média megfigyelései nem közös, minden fájlt egyszerre lezáró tranzakcióból származnak.
 
+## Automatikus biztonsági hálók (2026-11-10)
+
+- **Napi katalógus-pillanatkép:** amíg az alkalmazás fut, naponta egyszer ellenőrzött SQLite-másolat készül a helyi adatmappa `auto-snapshots` alkönyvtárába (OneDrive-on kívül). A legutóbbi 7 marad meg; a program csak a saját `auto-*.sqlite` fájljait forgatja. Ez nem helyettesíti a fenti, szándékos mentést. Visszaállításnál ugyanúgy új, külön adatmappába másold.
+- **Kód-ellenőrzőpontok:** `node ops/code-checkpoint.mjs create --label név` a forráskódot (média, adatbázis és kulcs nélkül) a `%LOCALAPPDATA%\LivingUniverse\code-checkpoints` alá menti. `list`, `diff <azonosító>` megmutatja a változást; `restore <azonosító> --to <új mappa>` csak új mappába ír, az élő projektmappába soha.
+
 ## Helyreállítás hiba esetén
 
 1. Egy segítő chatnek add meg ezt a repositoryt és a `RECOVERY.md` útvonalat. Ha a Living Universe bővítmény hibás, a GitHub-csatlakozón keresztül még lekérhető a forrás és az útmutató. Ehhez a megfelelő GitHub-fiók/repository-hozzáférés szükséges. Nem támaszkodunk arra, hogy egy későbbi chat emlékezni fog a helyi útvonalakra vagy önállóan eléri a számítógépet.

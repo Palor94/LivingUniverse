@@ -19,8 +19,13 @@ test('reference preview is a single static resource and only verified image resu
   assert.equal(replies[3].error.code,-32601);assert.equal(replies[4].error.code,-32601);
   const image=replies[5].result;assert.deepEqual(image.content[1],jpeg);assert.deepEqual(image._meta.referencePreview,{mimeType:'image/jpeg',role:'body',revision_id:'canon-id',representation:'original'});
   assert.equal(JSON.stringify(image.structuredContent).includes(jpeg.data),false);
-  assert.equal(replies[6].result._meta,undefined);assert.equal(replies[7].result._meta,undefined);assert.equal(wire.includes('private path'),false);
-  assert.equal(tools.length,11);assert.equal(tools.find(t=>t.name==='get_approved_references')._meta.ui.resourceUri,REFERENCE_VIEW_URI);
+  // Every answer names the program version (debugging package); only image results carry pixels.
+  assert.equal(replies[6].result._meta?.referencePreview,undefined);assert.equal(replies[7].result._meta?.referencePreview,undefined);
+  assert.match(replies[6].result._meta['living-universe/program'],/^\d{4}-\d\d-\d\dT|unknown/);assert.equal(wire.includes('private path'),false);
+  // 16 read-only tools since the 2026-11-06 living-world streak (scene pack, memories, story
+  // clock, next scenes, reference coverage). Update deliberately when tools are added.
+  assert.equal(tools.length,16);assert.equal(tools.find(t=>t.name==='get_approved_references')._meta.ui.resourceUri,REFERENCE_VIEW_URI);
+  assert.deepEqual(tools.filter(t=>t._meta?.ui?.resourceUri).map(t=>t.name),['get_approved_references'],'only the reference tool opens the picture viewer');
 });
 
 test('preview rejects foreign messages and remote images, renders literal text and clears stale images on error',()=>{

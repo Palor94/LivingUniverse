@@ -12,6 +12,7 @@ test('online WAL backup restores catalogue, sidecars and local originals without
   for(const dir of [path.join(root,'app'),media,live,path.join(live,'image-originals')])await fs.mkdir(dir,{recursive:true});
   await fs.writeFile(path.join(root,'app','example.mjs'),'export const a=1;');await fs.writeFile(path.join(root,'.env'),'SECRET=never-copy');await fs.writeFile(path.join(root,'.env.example'),'OPENAI_API_KEY=\n');await fs.mkdir(path.join(root,'config-templates'));await fs.writeFile(path.join(root,'config-templates','fixture.example.json'),'{"enabled":false}');await fs.mkdir(path.join(root,'.agents','skills','fixture'),{recursive:true});await fs.writeFile(path.join(root,'.agents','skills','fixture','SKILL.md'),'Fixture source guidance');
   await fs.writeFile(path.join(media,'one.png'),'fixture-original');await fs.writeFile(path.join(live,'image-originals','before.png'),'recover-before-crop');
+  await fs.mkdir(path.join(root,'mcp'));await fs.writeFile(path.join(root,'mcp','run-hidden.vbs'),'WScript.Quit 0');
   await fs.writeFile(path.join(live,'location-canvas.json'),'{"schema":1,"head":"fixture"}');
   const database=path.join(live,'universe.sqlite');db=new DatabaseSync(database);
   db.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE characters(id TEXT PRIMARY KEY); CREATE TABLE media(id TEXT PRIMARY KEY,relative_path TEXT,kind TEXT,size INTEGER); INSERT INTO characters VALUES('stable-id'); INSERT INTO media VALUES('media-id','one.png','image',16);");
@@ -20,6 +21,7 @@ test('online WAL backup restores catalogue, sidecars and local originals without
   assert.equal(await fs.readFile(path.join(media,'one.png'),'utf8'),'fixture-original');
   const capturedSources=await sourceFiles(root);assert.ok(!capturedSources.includes('.env'));assert.ok(capturedSources.includes('.env.example'));assert.ok(capturedSources.includes('config-templates/fixture.example.json'));assert.ok(capturedSources.includes('.agents/skills/fixture/SKILL.md'));
   const restored=path.join(base,'new-recovery');await restoreSnapshot(result.snapshot,restored);
+  assert.equal(await fs.readFile(path.join(restored,'source','mcp','run-hidden.vbs'),'utf8'),'WScript.Quit 0','hidden startup runner survives a complete backup/restore');
   assert.equal(await fs.readFile(path.join(restored,'data','image-originals','before.png'),'utf8'),'recover-before-crop');
   assert.equal(JSON.parse(await fs.readFile(path.join(restored,'data','location-canvas.json'),'utf8')).head,'fixture');
   const check=new DatabaseSync(path.join(restored,'data','universe.sqlite'),{readOnly:true});assert.equal(check.prepare('SELECT id FROM characters').get().id,'stable-id');check.close();

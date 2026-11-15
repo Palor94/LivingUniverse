@@ -24,14 +24,21 @@ function conforms(value,schema){
   if(type==='number'||type==='integer')return Number.isFinite(value)&&value>=(schema.minimum??-Infinity)&&value<=(schema.maximum??Infinity);
   return true;
 }
-const invalid=()=>{throw Object.assign(Error('Érvénytelen strukturált jelenetmegfigyelés.'),{code:'INVALID_RESULT',status:502});};
-export function validateSceneDetails(value,backgroundKind){
-  if(!conforms(value,sceneDetailsSchema))invalid();
-  const people=new Set();for(const p of value.participants){if(people.has(p.id))invalid();people.add(p.id);if(p.region&&(!p.region.width||!p.region.height||p.region.x+p.region.width>1||p.region.y+p.region.height>1))invalid();}
-  const acts=new Set();for(const a of value.activities){if(acts.has(a.id))invalid();acts.add(a.id);const used=new Set();for(const r of a.roles){if(!people.has(r.participant_id)||used.has(r.participant_id))invalid();used.add(r.participant_id);}}
-  if(backgroundKind==='neutral'&&(value.compatible_settings.length||value.simulation_use.suggested_scope!=='character_introduction'||!value.simulation_use.narration_only))invalid();
-  if(value.simulation_use.suggested_scope==='character_introduction'&&!value.simulation_use.narration_only)invalid();
-  return structuredClone(value);
+// detail names the failed rule (no content), so a billed but rejected answer can be diagnosed.
+const invalid=(detail='schema')=>{throw Object.assign(Error('Érvénytelen strukturált jelenetmegfigyelés.'),{code:'INVALID_RESULT',status:502,detail});};
+export function validateSceneDetails(input,backgroundKind){
+  if(!conforms(input,sceneDetailsSchema))invalid('schema');
+  const value=structuredClone(input);
+  // A person cut off by the frame may get a box reaching past the edge (or rounding a hair
+  // over 1): the box is clipped to the visible picture instead of discarding the analysis.
+  const people=new Set();for(const p of value.participants){if(people.has(p.id))invalid('duplicate_participant');people.add(p.id);
+    if(p.region){const r=p.region;r.width=Math.min(r.width,1-r.x);r.height=Math.min(r.height,1-r.y);if(!(r.width>0)||!(r.height>0))invalid('empty_region');}}
+  const acts=new Set();for(const a of value.activities){if(acts.has(a.id))invalid('duplicate_activity');acts.add(a.id);// One person may hold two different roles in one activity (e.g. giving oral and receiving
+    // manual at once); only the very same role twice is a fault.
+    const used=new Set();for(const r of a.roles){if(!people.has(r.participant_id))invalid('role_unknown_participant');const k=r.participant_id+'|'+r.role;if(used.has(k))invalid('role_repeated_participant');used.add(k);}}
+  if(backgroundKind==='neutral'&&(value.compatible_settings.length||value.simulation_use.suggested_scope!=='character_introduction'||!value.simulation_use.narration_only))invalid('neutral_backdrop_rules');
+  if(value.simulation_use.suggested_scope==='character_introduction'&&!value.simulation_use.narration_only)invalid('introduction_not_narration');
+  return value;
 }
 export function responseUsage(value){
   if(!value||typeof value!=='object')return null;

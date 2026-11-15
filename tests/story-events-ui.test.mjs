@@ -11,7 +11,7 @@ test('event editor opens with several sources and remove/add controls without su
   const api=async(route,body)=>{if(body)writes++;if(route==='/api/location-editor')return {items:[]};return {items:[],total:0,next_offset:null};};
   const timeline=installEventTimeline({$:selector=>selector==='#event-discard-draft'?null:node(selector),$$:selector=>selector==='[data-remove-source]'?removeButtons:[],esc:v=>String(v??'').replaceAll('<','&lt;'),api,action:fn=>fn,toast:()=>{},openDialog:(title,html)=>{dialog=html;},getState:()=>({characters:[{id:'fixture',name:'Fixture character'}]}),openCharacter:()=>{}});
   await timeline.render({id:'fixture'});await node('#event-new').onclick();
-  assert.match(dialog,/data-source="system"/);assert.match(dialog,/Original source excerpt/);assert.match(dialog,/Knows event/);assert.equal(typeof form.onsubmit,'function');assert.equal(typeof removeButtons[0].onclick,'function');assert.equal(typeof removeButtons[1].onclick,'function');assert.equal(typeof node('#event-add-source').onclick,'function');assert.equal(writes,0);
+  assert.match(dialog,/data-source="system"/);assert.match(dialog,/Eredeti forrásrészlet/);assert.match(dialog,/Tud az eseményről/);assert.equal(typeof form.onsubmit,'function');assert.equal(typeof removeButtons[0].onclick,'function');assert.equal(typeof removeButtons[1].onclick,'function');assert.equal(typeof node('#event-add-source').onclick,'function');assert.equal(writes,0);
 });
 
 test('source form collection retains each source and its exact excerpt, locator and checksum',()=>{

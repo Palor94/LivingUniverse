@@ -18,7 +18,7 @@ function Add-PrivateFile([string]$File,[string]$Logical){
   $entries.Add(@{path=$Logical;bytes=[Convert]::ToBase64String($bytes)})
 }
 foreach($name in @('mcp-config.json','mcp-tunnel-key.xml')){Add-PrivateFile (Join-Path $LocalBase $name) ('local-base/'+$name)}
-foreach($name in @('grok-gateway.json','mcp-writes.json','mobile-access.json','image-generation.json','character-policy.json','sogni-key.dpapi')){Add-PrivateFile (Join-Path $DataDir $name) ('data-dir/'+$name)}
+foreach($name in @('grok-gateway.json','mcp-writes.json','mobile-access.json','image-generation.json','character-policy.json','sogni-key.dpapi','xai-key.dpapi')){Add-PrivateFile (Join-Path $DataDir $name) ('data-dir/'+$name)}
 foreach($pair in @(@((Join-Path $LocalBase 'mcp-runtime\profiles'),'local-base/mcp-runtime/profiles'),@((Join-Path $DataDir 'grok-runtime'),'data-dir/grok-runtime'))){
   if(Test-Path -LiteralPath $pair[0]){foreach($file in Get-ChildItem -LiteralPath $pair[0] -Recurse -File -Force){
     if($file.Extension -in @('.json','.yaml','.yml','.xml','.dpapi')){Add-PrivateFile $file.FullName ($pair[1]+'/'+$file.FullName.Substring($pair[0].Length+1).Replace('\','/'))}

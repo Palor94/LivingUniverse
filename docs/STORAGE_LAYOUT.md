@@ -45,3 +45,14 @@ Stop all writers before rollback; restore source/profile/task changes, reverse
 the file journal without overwrites, and restore the matching database snapshot.
 Never restore an old catalogue over newer user edits. Missing originals remain
 recorded and are never replaced by guessed filename or identity matches.
+
+## Media placement rule (2026-11-11)
+
+One character in the picture (Palor not counted) → `10_CHARACTERS/<character>/`.
+Two or more characters → `20_SHARED_MEDIA/Scenes/<A + B>/`. Place-only pictures →
+`20_SHARED_MEDIA/Locations/`. Unknown people and new imports → `20_SHARED_MEDIA/Unassigned/`.
+Game assets keep their own folders under `20_SHARED_MEDIA`.
+
+### "Új képek" drop folder (2026-11-12)
+
+New pictures go to `20_SHARED_MEDIA/Új képek/`, named `Szereplő + Szereplő - Helyszín - tartalom - bármi.png` or put into a sub-folder named after the people. The home task links them and moves them by the rule above. See `docs/UJ_KEPEK_UTMUTATO.md`.

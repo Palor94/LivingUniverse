@@ -31,7 +31,94 @@ export function normalizeCanvas(value){
   return{schema:1,types:types.sort((a,b)=>a.id.localeCompare(b.id)),nodes:nodes.sort((a,b)=>a.id.localeCompare(b.id))};
 }
 export function canvasChildren(state,parentId){return state.nodes.filter(n=>!n.archived&&n.placed&&n.parent_id===parentId).sort((a,b)=>a.order-b.order||a.name.localeCompare(b.name,'hu')||a.id.localeCompare(b.id));}
-export function descendants(state,id){const found=new Set([id]),pending=[id];while(pending.length){const parent=pending.pop();for(const n of canvasChildren(state,parent)){if(found.has(n.id))bad('Kör a helyszínfában.');found.add(n.id);pending.push(n.id);}}return found;}
+// Builds the parent→children index once (linear), instead of rescanning and sorting all nodes per visited node.
+export function descendants(state,id){
+  const kids=new Map();
+  for(const n of state.nodes){if(n.archived||!n.placed||!n.parent_id)continue;if(!kids.has(n.parent_id))kids.set(n.parent_id,[]);kids.get(n.parent_id).push(n.id);}
+  const found=new Set([id]),pending=[id];
+  while(pending.length){for(const child of kids.get(pending.pop())??[]){if(found.has(child))bad('Kör a helyszínfában.');found.add(child);pending.push(child);}}
+  return found;
+}
+// Tidy-up suggestions (nothing is changed here): a place whose name starts with another place's
+// full name ("Sárbogárd - Gimnázium", "Sanyi háza - nagyszoba") belongs under that place, unless
+// it already sits somewhere inside it. Same-named places under one parent are listed as possible
+// duplicates for the owner to look at.
+export function cleanupSuggestions(state){
+  const live=state.nodes.filter(n=>n.kind==='place'&&!n.archived),byId=new Map(state.nodes.map(n=>[n.id,n]));
+  const key=s=>String(s).normalize('NFC').toLocaleLowerCase('hu').replace(/\s+/g,' ').trim();
+  const byName=new Map();for(const n of live)if(n.placed){const k=key(n.name);if(!byName.has(k))byName.set(k,[]);byName.get(k).push(n);}
+  const inside=(ancestorId,id)=>{for(let x=byId.get(id),i=0;x&&i<200;x=x.parent_id?byId.get(x.parent_id):null,i++)if(x.id===ancestorId)return true;return false;};
+  // Every dash-separated part is one level (owner rule 2026-11-10): "Káloz - Szomszéd ház -
+  // Nappali" goes under Káloz › Szomszéd ház, not straight under Káloz. A level is found as a
+  // child named by its own part ("Szomszéd ház") or by the full prefix ("Káloz - Szomszéd ház");
+  // a missing level is proposed as a new place (create), shared by all rooms that need it.
+  const children=new Map();for(const c of live)if(c.placed&&c.parent_id){if(!children.has(c.parent_id))children.set(c.parent_id,[]);children.get(c.parent_id).push(c);}
+  const planned=new Map();// parent id → [{id,name,full}] places that suggestions will add or move there
+  const childNamed=(parentId,part,full)=>{const want=[key(part),key(full)];
+    const real=(children.get(parentId)||[]).filter(c=>want.includes(key(c.name)));if(real.length===1)return {id:real[0].id,name:real[0].name};if(real.length>1)return null;
+    const plan=(planned.get(parentId)||[]).filter(c=>want.includes(key(c.name))||key(c.full)===key(full));return plan.length===1?plan[0]:undefined;};
+  const plan=(parentId,entry)=>{if(!planned.has(parentId))planned.set(parentId,[]);planned.get(parentId).push(entry);};
+  const suggestions=[];let fresh=0;
+  // Shorter names first, so a place placed by a suggestion can take its own rooms
+  // ("Budapest - Milán lakása" before "Budapest - Milán lakása - Erkély").
+  for(const n of [...live].sort((a,b)=>a.name.split(/\s+-\s+/).length-b.name.split(/\s+-\s+/).length)){
+    const parts=n.name.split(/\s+-\s+/);if(parts.length<2)continue;
+    // Anchor: the longest prefix that is a place's full name ("Káloz", or "Budapest - Milán lakása").
+    let anchor=null,depth=0;
+    for(let i=parts.length-1;i>=1&&!anchor;i--){const hits=(byName.get(key(parts.slice(0,i).join(' - ')))||[]).filter(p=>p.id!==n.id&&!inside(n.id,p.id));if(hits.length===1){anchor=hits[0];depth=i;}}
+    if(!anchor)continue;
+    // Walk down the remaining middle parts; a level that does not exist is created.
+    let target={id:anchor.id,name:anchor.name},path=[anchor.name],create=[],unclear=false;
+    for(let j=depth;j<parts.length-1;j++){
+      const found=childNamed(target.id,parts[j],parts.slice(0,j+1).join(' - '));
+      if(found===null){unclear=true;break;}
+      // A level another suggestion creates is part of this one too (made once when applied).
+      if(found){if(found.create)create.push(found);target=found;path.push(found.name+(found.create?' (új)':''));continue;}
+      const made={id:'tidy-new-'+(++fresh),name:parts[j],full:parts.slice(0,j+1).join(' - '),parent_id:target.id,create:true};plan(target.id,made);create.push(made);target=made;path.push(made.name+' (új)');
+    }
+    if(unclear)continue;// two same-named children: the owner decides by hand
+    // A place the owner already put somewhere inside the anchor keeps that home: no new levels
+    // are invented beside a differently named existing one ("Kálozi cigánytelep").
+    if(create.length&&n.placed&&n.parent_id&&inside(anchor.id,n.parent_id))continue;
+    if(target.id===n.id||(!create.length&&n.placed&&n.parent_id&&(n.parent_id===target.id||inside(target.id,n.parent_id))))continue;// already there
+    // Placing a lost place is safe (ticked); moving a placed one is the owner's call (unticked).
+    suggestions.push({node_id:n.id,name:n.name,from:n.placed?byId.get(n.parent_id)?.name||null:null,to_id:target.id,to:path.join(' › '),create:create.map(({id,name,parent_id})=>({id,name,parent_id})),unplaced:!n.placed,recommended:!n.placed});
+    plan(target.id,{id:n.id,name:n.name,full:n.name});
+    if(!n.placed){const k=key(n.name);if(!byName.has(k))byName.set(k,[]);byName.get(k).push(n);}
+  }
+  const duplicates=[];
+  for(const list of byName.values()){const groups=new Map();for(const n of list)groups.set(n.parent_id||'',[...(groups.get(n.parent_id||'')||[]),n]);for(const g of groups.values())if(g.length>1)duplicates.push({name:g[0].name,node_ids:g.map(n=>n.id),parent:byId.get(g[0].parent_id)?.name||null});}
+  return {suggestions,duplicates};
+}
+// Applies the chosen tidy-up suggestions to a plan copy: first the new middle places they need
+// (each made once, even when several rooms share it), then the moves. Returns the counts.
+export function applyTidy(state,chosen,newId=()=>'place-'+crypto.randomUUID()){
+  const made=new Map();let created=0,moved=0;
+  const real=id=>made.get(id)||id;
+  for(const s of chosen){
+    for(const c of s.create||[]){if(made.has(c.id))continue;const parent=real(c.parent_id),id=newId();
+      state.nodes.push({id,name:c.name,parent_id:parent,kind:'place',source_id:null,type_ids:[],placed:true,archived:false,order:Math.max(-1,...canvasChildren(state,parent).map(n=>n.order))+1,note:'Rendrakás: a kötőjeles helynevekből létrehozott szint.',x:null,y:null});
+      made.set(c.id,id);created++;}
+    try{reparentCanvas(state,s.node_id,real(s.to_id));moved++;}catch{}
+  }
+  return {created,moved};
+}
+// Merging same-named duplicates (2026-11-11): one place is kept, the others' sub-places move
+// under it and the others are archived (never deleted, so their IDs and history stay).
+// The kept one: a place still in the catalogue, then the one with most sub-places, then the first.
+export function pickDuplicateKeeper(state,nodeIds,catalogueIds=new Set()){
+  const nodes=nodeIds.map(id=>state.nodes.find(n=>n.id===id)).filter(Boolean);
+  const kids=id=>state.nodes.filter(n=>n.parent_id===id&&!n.archived).length;
+  return [...nodes].sort((a,b)=>(catalogueIds.has(b.source_id)-catalogueIds.has(a.source_id))||(kids(b.id)-kids(a.id)))[0]?.id||null;
+}
+export function mergeDuplicates(state,nodeIds,keepId){
+  if(!nodeIds.includes(keepId))bad('A megtartott hely nincs az ismétlődések között.');
+  let moved=0,archived=0;
+  for(const id of nodeIds){if(id===keepId)continue;
+    for(const child of state.nodes.filter(n=>n.parent_id===id&&!n.archived)){reparentCanvas(state,child.id,keepId);moved++;}
+    const n=state.nodes.find(x=>x.id===id);if(n&&!n.archived){n.archived=true;n.placed=false;n.parent_id=null;n.x=null;n.y=null;archived++;}}
+  return {moved,archived};
+}
 export function reparentCanvas(state,childId,parentId){
   if(childId===WORLD_ROOT)bad('A világ gyökere nem mozgatható más hely alá.');
   const child=state.nodes.find(n=>n.id===childId),parent=state.nodes.find(n=>n.id===parentId);

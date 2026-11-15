@@ -1,3 +1,4 @@
+import {t} from './i18n.js';
 // Reuse the actual input across a results redraw. Capture at the last moment so
 // typing or selection changes during an outstanding request are retained too.
 export function retainMediaSearch(input){
@@ -19,13 +20,15 @@ export function mediaFormValues(data,complete){
 
 export async function mediaFormPayload(form,complete){
   const seen=new Set();
-  for(;;){const pending=[form._pendingTagCreation,form._pendingLocationCreation,form._pendingCharacterCreation].filter(p=>p&&!seen.has(p));if(!pending.length)break;for(const p of pending)seen.add(p);if((await Promise.all(pending)).some(result=>result===false))throw Error('The new tag, location, or character could not be created. Check the inline message and retry.');}
+  for(;;){const pending=[form._pendingTagCreation,form._pendingLocationCreation,form._pendingCharacterCreation].filter(p=>p&&!seen.has(p));if(!pending.length)break;for(const p of pending)seen.add(p);if((await Promise.all(pending)).some(result=>result===false))throw Error(t('form.pendingCreateFailed'));}
   return mediaFormValues(new FormData(form),complete);
 }
 
 // Refresh assignment-dependent controls without rebuilding the viewer or
 // discarding an in-progress appearance review. Saving is never canon approval.
 export function refreshMediaReviewControls(root,media){
+  // The viewer may already be closed or replaced (e.g. by the reference dialog) when a save ends.
+  if(!root?.querySelector)return;
   const characters=media.characters||[],select=root.querySelector('#review-form select[name="character_id"]');
   if(select){const previous=select.value;select.replaceChildren();for(const c of characters){const option=select.ownerDocument.createElement('option');option.value=c.id;option.textContent=c.name;select.append(option);}if(characters.some(c=>c.id===previous))select.value=previous;}
   const review=root.querySelector('#review-form button');if(review)review.disabled=!characters.length;

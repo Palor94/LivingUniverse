@@ -15,6 +15,7 @@ export async function launch({selfTest=false,newKey=false,unattended=false,onOut
   const source=await readFile(new URL('./run-tunnel.ps1',import.meta.url),'utf8');
   const command='& {\n'+source+'\n} -SaveKey';
   const env={...process.env,PSModulePath:path.join(systemRoot,'System32','WindowsPowerShell','v1.0','Modules'),LU_MCP_TUNNEL_CLIENT:client,LU_MCP_PROFILE_DIRECTORY:path.join(base,'profiles'),LU_MCP_SELF_TEST:selfTest?'1':'0',LU_MCP_NEW_KEY:newKey?'1':'0'};
+  env.HEALTH_URL_FILE=path.join(base,'health.url');
   for(const key of ['CONTROL_PLANE_API_KEY','OPENAI_API_KEY','OPENAI_ADMIN_KEY','XAI_API_KEY','SOGNI_API_KEY'])delete env[key];
   env.LU_MCP_UNATTENDED=unattended?'1':'0';
   const child=spawn(powershell,['-NoProfile','-NonInteractive','-STA','-OutputFormat','Text','-EncodedCommand',Buffer.from(command,'utf16le').toString('base64')],{env,windowsHide:true,stdio:['ignore','pipe','pipe']});

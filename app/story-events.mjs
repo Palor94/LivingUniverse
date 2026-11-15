@@ -184,5 +184,5 @@ export function installStoryEvents({db,transaction}){
     else throw error('Event operation not available.',405);
     return true;
   }
-  return {handle,reader,validateRestore};
+  return {handle,reader,create,validateRestore};
 }

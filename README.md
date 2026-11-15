@@ -133,7 +133,7 @@ Media browsing opens on **Pictures**, with a separate **Videos** tab. Video thum
 
 **Name suggestions** offers Hungarian first names for descriptive working titles. Accepting a suggestion keeps the previous title as an alias. Nothing is automatically renamed. Treat unnamed background truckers as scene extras: assign Palor if he appears and add a category such as `névtelen kamionos`. Create a distinct recurring character only when you choose that individual; a group label does not imply everyone in the group has one shared identity.
 
-**Merge Tibor / Palor** combines the collection under Palor, keeps Tibor as an alias and archives the former source character record without deleting its identity history. It moves catalogued files from Tibor into Palor, gives colliding filenames a unique suffix, and makes Palor the default relationship target. A pre-merge catalogue backup is written in the local data folder. Approved identity histories are not automatically promoted or combined into a new canon.
+**Tibor and Palor are separate identities.** Tibor is the admin and app owner, not a character. Palor is a fictional, 32-year-old character and the playable protagonist whom whoever uses the program plays as. The player is not Palor, and Palor is not the admin, nor Tibor's in-world identity, avatar, or alias. The app does not offer or perform an identity merge of the two. Palor's deceased in-world father, also named Tibor, is a separate fictional character and is not the admin. Palor is the default in-world relationship target because he is the playable protagonist, not because he represents the owner or any player.
 
 ### Move originals into OneDrive folders
 
@@ -143,7 +143,7 @@ A shared item has one physical location and may belong to many characters in the
 
 ## Storage and backups
 
-The live catalogue is stored outside OneDrive at `%LOCALAPPDATA%\LivingUniverse\universe.sqlite`. Set `LIVING_UNIVERSE_DATA` to use a different local directory. Do not put a live database in OneDrive. The catalogue records paths relative to this project/resource folder; moving the whole project together preserves those paths. Individual file moves are not reconciled automatically in this version.
+The desktop launcher stores the live catalogue outside OneDrive at `%LOCALAPPDATA%\LivingUniverse\desktop-catalogue\universe.sqlite`. The empty file at `%LOCALAPPDATA%\LivingUniverse\universe.sqlite` is not this catalogue; do not import, merge, or point tools at it. Set `LIVING_UNIVERSE_DATA` to use a different local directory. Do not put a live database in OneDrive. The catalogue records paths relative to this project/resource folder; moving the whole project together preserves those paths. Individual file moves are not reconciled automatically in this version.
 
 **Export catalogue** downloads a versioned JSON snapshot including profiles, assignments, notes, reviews, relationships, and canon history. Store dated exports in your synchronized backup location. Original pictures and videos are not in the export: keep their separate OneDrive backup. **Restore catalogue** imports an export into an empty catalogue only, preserving IDs and history. Media must have the same relative folder layout. The automated integration check verifies export/restore with fixture media; your actual OneDrive backup still needs a personal restore rehearsal before relying on it.
 

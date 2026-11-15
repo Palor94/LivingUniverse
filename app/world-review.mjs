@@ -79,21 +79,37 @@ export function installWorldReview({db,root,isBusy=()=>false,availability=cloudA
   const doc=document(row),characters=all('SELECT c.id,c.name,CASE WHEN d.media_id IS NOT NULL THEN 1 ELSE 0 END assigned FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id LEFT JOIN depictions d ON d.character_id=c.id AND d.media_id=? WHERE u.merged_into IS NULL ORDER BY c.name',row.media_id);
   return {source_id:id,media_id:row.media_id,filename:path.win32.basename(active(row.media_id).relative_path),source_sha256:row.source_sha256,version:d.version,document:doc,fields:reviewFields(raw,doc),description:raw.description,background:raw.background,purpose:describeMediaPurpose(row.source_path,raw),provenance:parse(row.provenance_json),characters,stale,csrf,camera_options:cameraOptions,role_options:sceneRoles,changes:all('SELECT id,version,operation,created_at FROM world_review_changes WHERE source_id=? ORDER BY version DESC LIMIT 10',id)};
  }
+ const summaries=new Map();
+ function summaryOf(row){
+  const key=row.id+'|'+row.version+'|'+row.relative_path,hit=summaries.get(key);if(hit)return hit;
+  const full=one('SELECT s.raw_json,s.source_path,d.document_json FROM world_review_sources s JOIN world_review_documents d ON d.source_id=s.id WHERE s.id=?',row.id);
+  const raw=parse(full.raw_json),doc=parse(full.document_json),fields=effectiveReviewFields(raw,doc),people=doc.participants.filter(p=>!p.ignored),kind=describeMediaPurpose(full.source_path,raw).kind;
+  const counts={pending:0,accepted:0,rejected:0};fields.forEach(f=>counts[f.state]++);
+  const s={kind,counts,state:counts.pending===fields.length?'pending':counts.accepted===fields.length?'accepted':counts.rejected===fields.length?'rejected':'partial',
+   scope:fields.find(f=>f.id==='simulation').value.scope,participants:people.length,uncertain:fields.some(f=>f.uncertain),identity_reviewed:doc.identity_reviewed,description:raw.description.hu,
+   reviewedCharacters:doc.identity_reviewed?people.filter(p=>p.identity_state==='reviewed'&&p.character_id).map(p=>p.character_id):[],
+   haystack:[row.relative_path,raw.description.hu,raw.description.en,...fields.filter(f=>f.state!=='rejected').flatMap(f=>Object.values(factText(f)))].join(' ').normalize('NFD').replace(/\p{M}/gu,'').toLocaleLowerCase()};
+  // Old versions pile up only slowly; past the library size the map simply starts over.
+  if(summaries.size>5000)summaries.clear();
+  summaries.set(key,s);return s;
+ }
  function list({character_id='',multiple=false,uncertain=false,state='',purpose='',trial=false,query='',offset=0,limit=24}={}){
   if(!['','pending','accepted','rejected','partial'].includes(state)||!['','catalogue_media','generation_plan','character_introduction','scene_illustration','review_required'].includes(purpose)||typeof query!=='string'||query.length>200||!Number.isInteger(offset)||offset<0||offset>20000)throw error('INVALID_ARGUMENT','Érvénytelen szűrő.');
-  const rows=all("SELECT s.*,d.version,d.document_json,m.relative_path FROM world_review_sources s JOIN active_media m ON m.id=s.media_id JOIN world_review_documents d ON d.source_id=s.id WHERE s.rowid=(SELECT max(s2.rowid) FROM world_review_sources s2 WHERE s2.media_id=s.media_id) AND NOT EXISTS(SELECT 1 FROM world_review_tombstones t WHERE t.media_id=s.media_id) ORDER BY s.media_id");
-  const found=[];
+  // Light rows first; the parsed summary of each review is kept per document version
+  // (2026-11-12: every list request parsed all ~1,400 reviews again, ~300 ms).
+  const rows=all("SELECT s.id,s.media_id,d.version,m.relative_path FROM world_review_sources s JOIN active_media m ON m.id=s.media_id JOIN world_review_documents d ON d.source_id=s.id WHERE s.rowid=(SELECT max(s2.rowid) FROM world_review_sources s2 WHERE s2.media_id=s.media_id) AND NOT EXISTS(SELECT 1 FROM world_review_tombstones t WHERE t.media_id=s.media_id) ORDER BY s.media_id");
+  const found=[],words=query.normalize('NFD').replace(/\p{M}/gu,'').toLocaleLowerCase().split(/\s+/u).filter(Boolean);
   for(const row of rows){
    if(trial&&!one('SELECT 1 FROM world_review_trial WHERE media_id=?',row.media_id))continue;
-   const raw=parse(row.raw_json),doc=parse(row.document_json),fields=effectiveReviewFields(raw,doc),people=doc.participants.filter(p=>!p.ignored),kind=describeMediaPurpose(row.source_path,raw).kind;
-   if(character_id&&!one('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?',row.media_id,character_id)&&!people.some(p=>doc.identity_reviewed&&p.identity_state==='reviewed'&&p.character_id===character_id)||multiple&&people.length<2||uncertain&&!fields.some(f=>f.uncertain))continue;
-   const counts={pending:0,accepted:0,rejected:0};fields.forEach(f=>counts[f.state]++);const status=counts.pending===fields.length?'pending':counts.accepted===fields.length?'accepted':counts.rejected===fields.length?'rejected':'partial';
-   const usage=fields.find(f=>f.id==='simulation'),effectiveScope=usage.value.scope;if(state&&state!==status||purpose&&purpose!==(kind==='generation_plan'?kind:purpose==='catalogue_media'?kind:effectiveScope))continue;
-   const haystack=[row.relative_path,raw.description.hu,raw.description.en,...fields.filter(f=>f.state!=='rejected').flatMap(f=>Object.values(factText(f)))].join(' ').normalize('NFD').replace(/\p{M}/gu,'').toLocaleLowerCase();
-   if(query.normalize('NFD').replace(/\p{M}/gu,'').toLocaleLowerCase().split(/\s+/u).filter(Boolean).some(q=>!haystack.includes(q)))continue;
-   found.push({source_id:row.id,media_id:row.media_id,filename:path.win32.basename(row.relative_path),description:raw.description.hu,participants:people.length,identity_reviewed:doc.identity_reviewed,state:status,counts,purpose:kind,scope:effectiveScope,version:row.version,characters:all('SELECT c.id,c.name FROM characters c JOIN depictions d ON d.character_id=c.id WHERE d.media_id=?',row.media_id)});
+   const s=summaryOf(row);
+   if(character_id&&!one('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?',row.media_id,character_id)&&!s.reviewedCharacters.includes(character_id)||multiple&&s.participants<2||uncertain&&!s.uncertain)continue;
+   if(state&&state!==s.state||purpose&&purpose!==(s.kind==='generation_plan'?s.kind:purpose==='catalogue_media'?s.kind:s.scope))continue;
+   if(words.some(q=>!s.haystack.includes(q)))continue;
+   found.push({source_id:row.id,media_id:row.media_id,filename:path.win32.basename(row.relative_path),description:s.description,participants:s.participants,identity_reviewed:s.identity_reviewed,state:s.state,counts:s.counts,purpose:s.kind,scope:s.scope,version:row.version});
   }
-  const n=Math.max(1,Math.min(50,limit));return {total:found.length,items:found.slice(offset,offset+n),next_offset:offset+n<found.length?offset+n:null,csrf};
+  // Linked characters only for the page shown (was one query per match, ~1,400 per request).
+  const n=Math.max(1,Math.min(50,limit)),page=found.slice(offset,offset+n).map(item=>({...item,characters:all('SELECT c.id,c.name FROM characters c JOIN depictions d ON d.character_id=c.id WHERE d.media_id=?',item.media_id)}));
+  return {total:found.length,items:page,next_offset:offset+n<found.length?offset+n:null,csrf};
  }
  async function save(body,{undo=false}={}){
   if(isBusy())throw error('BUSY','Más katalógusművelet fut. Próbáld újra később.',409);
@@ -139,11 +155,13 @@ export function installWorldReview({db,root,isBusy=()=>false,availability=cloudA
  function registerManifest(manifest){if(!manifest||Buffer.byteLength(JSON.stringify(manifest))>262144)throw error('INVALID_IMPORT','Érvénytelen futásleírás.');const id=digest(manifest);run('INSERT OR IGNORE INTO world_review_manifests VALUES(?,?,?)',id,JSON.stringify(manifest),now());return id;}
  async function handle({p,body,req,url,json}){
   if(!p.startsWith('/api/world-review'))return false;
+  // A malformed %-escape is a missing item, not a server error.
+  const decodeParam=s=>{try{return decodeURIComponent(s);}catch{throw error('NOT_FOUND','Ehhez a képhez nincs mentett world-v1 elemzés.',404);}};
   try{
    if(req.method==='GET'){
     if(p==='/api/world-review'){const q=url.searchParams;json(list({query:q.get('q')||'',character_id:q.get('character_id')||'',state:q.get('state')||'',purpose:q.get('purpose')||'',multiple:q.get('multiple')==='1',uncertain:q.get('uncertain')==='1',trial:q.get('trial')==='1',offset:Number(q.get('offset')||0)}));return true;}
-    const summary=p.match(/^\/api\/world-review\/media\/([^/]+)\/summary$/u);if(summary){const mid=decodeURIComponent(summary[1]);json({available:!!active(mid)&&!tombstoned(mid)&&!!one('SELECT 1 FROM world_review_sources WHERE media_id=?',mid)});return true;}
-    const media=p.match(/^\/api\/world-review\/media\/([^/]+)$/u);if(media){const row=one('SELECT id FROM world_review_sources WHERE media_id=? ORDER BY rowid DESC LIMIT 1',decodeURIComponent(media[1]));if(!row)throw error('NOT_FOUND','Ehhez a képhez nincs mentett world-v1 elemzés.',404);json(await view(row.id));return true;}
+    const summary=p.match(/^\/api\/world-review\/media\/([^/]+)\/summary$/u);if(summary){const mid=decodeParam(summary[1]);json({available:!!active(mid)&&!tombstoned(mid)&&!!one('SELECT 1 FROM world_review_sources WHERE media_id=?',mid)});return true;}
+    const media=p.match(/^\/api\/world-review\/media\/([^/]+)$/u);if(media){const row=one('SELECT id FROM world_review_sources WHERE media_id=? ORDER BY rowid DESC LIMIT 1',decodeParam(media[1]));if(!row)throw error('NOT_FOUND','Ehhez a képhez nincs mentett world-v1 elemzés.',404);json(await view(row.id));return true;}
     const item=p.match(/^\/api\/world-review\/sources\/([a-f0-9]{64})$/u);if(item){json(await view(item[1]));return true;}
    }
    if(req.method!=='POST')throw error('METHOD_NOT_ALLOWED','Nem támogatott művelet.',405);guard(req);

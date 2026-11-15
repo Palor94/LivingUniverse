@@ -3,6 +3,7 @@ import {promises as fs,constants} from 'node:fs';
 import path from 'node:path';
 import {cloudAvailability} from './duplicates.mjs';
 import {thumbnail,dimensions,MAX_SOURCE_BYTES,MAX_IMAGE_BYTES,MAX_EDGE} from '../mcp/images.mjs';
+import {notPlanningSQL,playAssetFilter} from './media-purpose.mjs';
 
 // Called only after the mobile listener's identity, Origin and CSRF checks.
 export function createMobileSorting({root,all,one,run,transaction,catalogue,taxonomy,locations,availability=cloudAvailability,makeThumbnail=thumbnail}){
@@ -19,7 +20,7 @@ export function createMobileSorting({root,all,one,run,transaction,catalogue,taxo
     const scope=url.searchParams.get('scope')||'needs';if(!['needs','all'].includes(scope))throw fail('Choose needs sorting or all images.');
     const q=url.searchParams.get('q')||'';if(q.length>200)throw fail('Search is too long.');
     const where=["m.kind='image'"],args=[];
-    if(scope==='needs')where.push('NOT EXISTS(SELECT 1 FROM media_categorization s WHERE s.media_id=m.id AND s.complete=1) AND NOT '+catalogue.locationSQL);
+    if(scope==='needs')where.push('NOT EXISTS(SELECT 1 FROM media_categorization s WHERE s.media_id=m.id AND s.complete=1) AND NOT '+catalogue.locationSQL+' AND '+notPlanningSQL+' AND '+playAssetFilter(one));
     if(q){where.push("(m.relative_path LIKE ? ESCAPE '\\')");args.push('%'+q.replace(/[\\%_]/g,'\\$&')+'%');}
     const unavailable="EXISTS(SELECT 1 FROM media_scan_state st WHERE st.media_id=m.id AND st.state IN ('missing','unavailable'))";
     const unavailableTotal=one('SELECT COUNT(*) n FROM active_media m WHERE '+where.join(' AND ')+' AND '+unavailable,...args).n;

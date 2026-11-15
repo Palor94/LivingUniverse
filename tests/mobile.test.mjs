@@ -27,7 +27,7 @@ test('remote editor requires exact identity/origin, restricts actions, shares SQ
     assert.equal((await request(remote,'/',null,'GET',{...auth,'Sec-Fetch-Site':'cross-site','Sec-Fetch-Mode':'navigate','Sec-Fetch-Dest':'document'})).status,200);
     const session=await request(remote,'/api/session',null,'GET',auth);assert.equal(session.status,200);assert.ok(session.data.csrf);
     const write={...auth,Origin:origin,'X-LU-CSRF':session.data.csrf};
-    const edit={fields:{biography:'Written on iPad',notes:'Private admin notes',sexuality:'User-written sexuality',speech_style:'Direct. Example: Szia!'},expected:{biography:'',notes:'',sexuality:'',speech_style:''}};
+    const edit={fields:{biography:'Written on iPad',notes:'Private admin notes',sexuality:'User-written sexuality',speech_style:'Direct. Example: Szia!'},expected:{biography:'Nem: férfi.',notes:'',sexuality:'',speech_style:''}};
     assert.equal((await request(remote,'/api/characters/'+c.id+'/fields',edit,'PATCH',auth)).status,403);
     assert.equal((await request(remote,'/api/characters/'+c.id+'/fields',edit,'PATCH',{...write,Origin:'https://other.ts.net'})).status,403);
     assert.equal((await request(remote,'/api/characters/'+c.id+'/fields',edit,'PATCH',write)).status,200);

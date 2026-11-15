@@ -25,7 +25,8 @@ try {
         Add-Type -AssemblyName PresentationFramework
         $window=New-Object Windows.Window
         $window.Title='Living Universe - Private tunnel key'
-        $window.Width=490;$window.Height=255;$window.ResizeMode='NoResize';$window.WindowStartupLocation='CenterScreen';$window.Topmost=$false
+        $window.Width=490;$window.Height=255;$window.ResizeMode='NoResize';$window.WindowStartupLocation='CenterScreen';$window.Topmost=$true
+        $window.ShowInTaskbar=$true;$window.ShowActivated=$true
         $panel=New-Object Windows.Controls.StackPanel;$panel.Margin='20'
         $label=New-Object Windows.Controls.TextBlock;$label.Text='Paste the NEW restricted tunnel key below.';$label.Margin='0,0,0,12'
         $box=New-Object Windows.Controls.PasswordBox;$box.Height=32;$box.MaxLength=512
@@ -41,7 +42,7 @@ try {
             if($roundtrip -isnot [Security.SecureString]){throw 'Secure input test failed.'}
             $box.Clear();$testSecret.Dispose();$roundtrip.Dispose();[Console]::Out.WriteLine('SECURE_INPUT_SELF_TEST_OK');exit 0
         }
-        $window.Add_ContentRendered({$box.Focus()|Out-Null})
+        $window.Add_ContentRendered({$window.Activate()|Out-Null;$box.Focus()|Out-Null})
         if($window.ShowDialog() -ne $true){[Console]::Out.WriteLine('Key entry cancelled. No key was saved.');exit 0}
         $secret=$box.SecurePassword.Copy();$box.Clear()
     }
@@ -57,6 +58,23 @@ try {
     $doctorExit=$LASTEXITCODE
     $ErrorActionPreference='Stop'
     if($doctorExit -ne 0){throw 'Tunnel health check failed.'}
+    if($env:LU_MCP_NEW_KEY -eq '1'){
+        # Doctor checks local configuration only. Verify the replacement key's
+        # access to this exact existing tunnel before replacing the saved key.
+        $stage='runtime_authorization'
+        $profileFile=Join-Path $ProfileDirectory ($TunnelProfile+'.yaml')
+        $profileText=[IO.File]::ReadAllText($profileFile)
+        $tunnelId=[regex]::Match($profileText,'(?m)^\s*tunnel_id:\s*"?(tunnel_[a-f0-9]{32})').Groups[1].Value
+        if(-not $tunnelId){throw 'Existing tunnel identity unavailable. Saved credential unchanged.'}
+        $ErrorActionPreference='Continue'
+        $authorizationOutput=(& $TunnelClient admin --json tunnels get $tunnelId 2>&1 | Out-String)
+        $authorizationExit=$LASTEXITCODE
+        $authorizationStatus=[regex]::Match($authorizationOutput,'\b(401|403|404|429)\b').Value
+        $authorizationCode=[regex]::Match($authorizationOutput,'\b(invalid_api_key|insufficient_permissions|permission_denied|tunnel_not_found)\b').Value
+        $authorizationOutput=$null
+        $ErrorActionPreference='Stop'
+        if($authorizationExit -ne 0){throw ('The new key cannot access the existing tunnel. HTTP '+$authorizationStatus+' '+$authorizationCode+'. Saved credential unchanged.')}
+    }
     $stage='encrypted_key_storage'
     if($SaveKey){New-Item -ItemType Directory -Path (Split-Path -Parent $keyFile) -Force|Out-Null;$secret|Export-Clixml -LiteralPath $keyFile}
     $ErrorActionPreference='Continue'

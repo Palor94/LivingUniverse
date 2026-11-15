@@ -24,6 +24,7 @@ export async function backupBeforeImageGeneration(db,dataDir){
 
 export function installImageGeneration({db,root,dataDir,one,all,run,transaction,mediaImports,characterPolicy,writeConfig,config={},isBusy=()=>false,clock=()=>Date.now(),availability=cloudAvailability,decodeImage,generate=generateProviderImage,env=process.env}){
   db.exec(readFileSync(new URL('./migrations/018-image-generation.up.sql',import.meta.url),'utf8'));
+  db.exec(readFileSync(new URL('./migrations/025-mcp-living-world.up.sql',import.meta.url),'utf8'));
   const active=new Map();let preparing=false;
   const now=()=>new Date(clock()).toISOString();
   const event=(rid,type,actor='service',detail=null)=>run('INSERT INTO image_generation_events VALUES(?,?,?,?,?,?)',randomUUID(),rid,type,actor,detail,now());
@@ -83,6 +84,8 @@ export function installImageGeneration({db,root,dataDir,one,all,run,transaction,
       const bindings=args.characters.map((b,slot)=>{
         shape(b,['character_id','revision_id','reference_ids']);id(b.character_id);id(b.revision_id);
         if(seen.has(b.character_id))fail('INVALID_ARGUMENT','Each character needs one distinct binding.');seen.add(b.character_id);
+        // A group record mixes several people's faces; generating "it" would blend identities.
+        if(one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='character_groups'")&&one('SELECT 1 FROM character_groups WHERE character_id=?',b.character_id))fail('GROUP_CHARACTER','Groups cannot be used for image generation. Create the individual person as a character first.');
         if(!Array.isArray(b.reference_ids)||!b.reference_ids.length||b.reference_ids.length>16||new Set(b.reference_ids).size!==b.reference_ids.length)fail('INVALID_ARGUMENT','Select 1–16 distinct approved reference IDs for each character.');
         const {c,canon}=currentBinding({...b,references:[]}),refs=JSON.parse(canon.references_json);
         return {slot:slot+1,character_id:c.id,name:c.name,revision_id:canon.id,appearance:canon.appearance,references:b.reference_ids.map(mid=>{id(mid);const r=refs.find(r=>referenceKey(r)===mid)||((refs.filter(r=>r.media_id===mid).length===1)?refs.find(r=>r.media_id===mid):null);if(!r||!/^[a-f0-9]{64}$/.test(r.sha256)||!['face','body','detail','general'].includes(r.role))fail('REFERENCE_NOT_APPROVED','Use fingerprinted references from the exact approved revision.');return {input_index:++index,media_id:r.media_id,...(r.reference_id?{reference_id:r.reference_id}:{}),role:r.role,sha256:r.sha256,...(r.crop?{crop:referenceCrop(r.crop)}:{})};})};
@@ -158,5 +161,39 @@ export function installImageGeneration({db,root,dataDir,one,all,run,transaction,
     transaction(()=>{if(hide){run('INSERT OR IGNORE INTO media_hidden VALUES(?,?,0,?)',m.id,m.relative_path,now());run('UPDATE characters SET cover_id=NULL WHERE cover_id=?',m.id);}run("UPDATE image_generation_runs SET status='withdrawn' WHERE id=?",rid);event(rid,hide?'withdrawn_media_to_catalogue_trash':'withdrawn_shared_media_retained',actor);});return view(rid);
   }
   async function previewReference(rid,cid,mid,referenceId){const manifest=view(rid).manifest,binding=manifest.characters.find(b=>b.character_id===cid),ref=binding?.references.find(r=>r.media_id===mid&&(!referenceId||referenceKey(r)===referenceId));if(!ref)fail('NOT_FOUND','Reference not found in this plan.',404);currentBinding(binding);const input=await source(ref);currentBinding(binding);return {bytes:input.bytes,mimeType:input.contentType,sha256:hash(input.bytes)};}
-  return {capabilities,prepare,view,decide,execute,withdraw,previewReference,isBusy:()=>preparing||active.size>0,settle:()=>Promise.allSettled([...active.values()])};
+  function summary(args={}){
+    enabled();shape(args,['character_id','limit','offset']);
+    const page=(v,f,max)=>{if(v===undefined)return f;if(!Number.isInteger(v)||v<0||v>max)fail('INVALID_ARGUMENT','Pagination is outside the allowed range.');return v;};
+    const limit=page(args.limit,20,50),offset=page(args.offset,0,100000);if(!limit)fail('INVALID_ARGUMENT','Limit must be positive.');
+    if(args.character_id!==undefined)id(args.character_id);
+    const rows=all('SELECT id,status,manifest_json,created_at,error_code FROM image_generation_runs ORDER BY rowid DESC');
+    const matched=[];for(const row of rows){const manifest=JSON.parse(row.manifest_json);if(args.character_id&&!(manifest.characters||[]).some(c=>c.character_id===args.character_id))continue;matched.push({row,manifest});}
+    const by_status={};let estimated=0,actual=0,estimated_known=0,actual_known=0;
+    for(const {row,manifest} of matched){by_status[row.status]=(by_status[row.status]||0)+1;if(typeof manifest.estimated_cost_usd==='number'){estimated+=manifest.estimated_cost_usd;estimated_known++;}const output=one('SELECT receipt_json FROM image_generation_outputs WHERE run_id=?',row.id);if(output){const receipt=JSON.parse(output.receipt_json);if(typeof receipt.actual_cost_usd==='number'){actual+=receipt.actual_cost_usd;actual_known++;}else if(typeof manifest.actual_cost_usd==='number'){actual+=manifest.actual_cost_usd;actual_known++;}}}
+    const pageRows=matched.slice(offset,offset+limit).map(({row,manifest})=>{const output=one('SELECT media_id,sha256,size,receipt_json,created_at FROM image_generation_outputs WHERE run_id=?',row.id);return {run_id:row.id,status:row.status,created_at:row.created_at,error_code:row.error_code,provider:manifest.provider||null,model:manifest.model||null,estimated_cost_usd:typeof manifest.estimated_cost_usd==='number'?manifest.estimated_cost_usd:null,characters:(manifest.characters||[]).map(c=>({character_id:c.character_id,revision_id:c.revision_id})),output:output?{media_id:output.media_id,sha256:output.sha256,size:output.size,created_at:output.created_at,actual_cost_usd:JSON.parse(output.receipt_json).actual_cost_usd??null}:null};});
+    return {total_runs:matched.length,by_status,estimated_cost_usd_total:estimated,estimated_cost_runs:estimated_known,actual_cost_usd_total:actual,actual_cost_runs:actual_known,currency:'USD',canon_approved:false,paid_calls_made:false,runs:pageRows,next_offset:matched.length>offset+limit?offset+limit:null};
+  }
+  function feedback(args){
+    enabled();shape(args,['request_key','media_id','character_id','run_id','decision','rating','face_verdict','body_verdict','notes']);
+    const requestKey=typeof args.request_key==='string'?args.request_key:'';if(!/^[A-Za-z0-9_-]{8,128}$/.test(requestKey))fail('INVALID_ARGUMENT','Use an 8–128 character idempotency key for this intent.');
+    const mediaId=id(args.media_id),characterId=id(args.character_id);if(!['approved','rejected','unreviewed'].includes(args.decision))fail('INVALID_ARGUMENT','Choose approved, rejected, or unreviewed.');
+    const rating=args.rating===undefined||args.rating===null?null:args.rating;if(rating!==null&&(!Number.isInteger(rating)||rating<1||rating>5))fail('INVALID_ARGUMENT','Rating must be 1–5 or null.');
+    const face=args.face_verdict??'unknown',body=args.body_verdict??'unknown';if(!['unknown','matches','mismatch','uncertain'].includes(face)||!['unknown','matches','mismatch','uncertain'].includes(body))fail('INVALID_ARGUMENT','Invalid face or body verdict.');
+    const notes=typeof args.notes==='string'?args.notes:'';if(notes.length>5000)fail('INVALID_ARGUMENT','Keep feedback under 5,000 characters.');
+    if(args.run_id!==undefined)id(args.run_id);
+    const requestHash=digest({operation:'feedback',args});
+    const duplicate=one('SELECT * FROM generation_feedback WHERE request_key=?',requestKey);if(duplicate){if(duplicate.request_hash!==requestHash)fail('IDEMPOTENCY_CONFLICT','This request key already belongs to different feedback.',409);return viewFeedback(duplicate);}
+    if(!one('SELECT 1 FROM active_media WHERE id=?',mediaId)||!one('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?',mediaId,characterId))fail('MEDIA_NOT_ASSIGNED','Feedback requires active media assigned to the character.',409);
+    if(args.run_id){const output=one('SELECT media_id FROM image_generation_outputs WHERE run_id=?',args.run_id);if(!output||output.media_id!==mediaId)fail('RUN_MISMATCH','run_id must match the feedback media output.',409);}
+    if(characterPolicy)characterPolicy.assertGeneration(characterId);
+    return transaction(()=>{
+      const existing=one('SELECT * FROM generation_feedback WHERE request_key=?',requestKey);if(existing){if(existing.request_hash!==requestHash)fail('IDEMPOTENCY_CONFLICT','This request key already belongs to different feedback.',409);return viewFeedback(existing);}
+      const fid=randomUUID(),created=now();
+      run('INSERT INTO generation_feedback VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',fid,requestKey,requestHash,mediaId,characterId,args.run_id??null,args.decision,rating,face,body,notes,created);
+      run('INSERT INTO reviews VALUES(?,?,?,?,?,?,?)',randomUUID(),mediaId,characterId,args.decision,rating,notes,created);
+      return viewFeedback(one('SELECT * FROM generation_feedback WHERE id=?',fid));
+    });
+  }
+  function viewFeedback(row){return {feedback_id:row.id,request_key:row.request_key,media_id:row.media_id,character_id:row.character_id,run_id:row.run_id,decision:row.decision,rating:row.rating,face_verdict:row.face_verdict,body_verdict:row.body_verdict,notes:row.notes,created_at:row.created_at,canon_changed:false,message:'Feedback saved. Canon and approved references were not changed.'};}
+  return {capabilities,summary,feedback,prepare,view,decide,execute,withdraw,previewReference,isBusy:()=>preparing||active.size>0,settle:()=>Promise.allSettled([...active.values()])};
 }

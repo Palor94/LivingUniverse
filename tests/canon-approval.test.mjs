@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import {randomBytes,randomUUID} from 'node:crypto';
+import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {createApp} from '../app/server.mjs';
 import {databaseIdentity} from '../app/character-edit.mjs';
 import {createWriteClient} from '../mcp/writes.mjs';
@@ -54,6 +54,35 @@ test('canon comparisons reject stale and concurrent reference-only approvals eve
   assert.notEqual(appearance.id,first.id);assert.equal(appearance.parent_id,first.id);
   assert.equal(f.app.db.prepare('SELECT appearance FROM canon WHERE id=?').get(first.id).appearance,first.appearance);
   assert.equal((await f.request(f.route,approval(f.mid,saved.id,JSON.parse(saved.references_json)))).status,409);
+});
+
+test('an already approved video stays in the set and no longer blocks an active picture',async t=>{
+  const f=await fixture(t),vid=randomUUID(),extra=randomUUID(),now=new Date().toISOString();
+  const video=Buffer.from('fixture-video-reference'),videoHash=createHash('sha256').update(video).digest('hex');
+  await fs.writeFile(path.join(f.root,'clip.mp4'),video);
+  await fs.writeFile(path.join(f.root,'extra.mp4'),Buffer.from('second-video'));
+  f.app.db.prepare('INSERT INTO media VALUES(?,?,?,?,?,?,?)').run(vid,'clip.mp4','','video',video.length,now,now);
+  f.app.db.prepare('INSERT INTO media VALUES(?,?,?,?,?,?,?)').run(extra,'extra.mp4','','video',12,now,now);
+  f.app.db.prepare('INSERT INTO depictions VALUES(?,?)').run(vid,f.cid);
+  f.app.db.prepare('INSERT INTO depictions VALUES(?,?)').run(extra,f.cid);
+  const revision=randomUUID(),legacy=[{media_id:vid,role:'body',sha256:videoHash}];
+  f.app.db.prepare('INSERT INTO canon VALUES(?,?,?,?,?,?,?)').run(revision,f.cid,null,'Approved appearance',JSON.stringify(legacy),'Legacy video reference',now);
+  const kept=await f.call(f.route,{appearance:'Approved appearance',references:[...legacy,{media_id:f.mid,role:'face'}],expected_revision_id:revision,expected_references:legacy});
+  const saved=JSON.parse(kept.references_json);
+  assert.deepEqual(saved.map(r=>r.media_id).sort(),[f.mid,vid].sort());
+  assert.equal(saved.find(r=>r.media_id===vid).role,'body');
+  const blocked=await f.request(f.route,{appearance:'Approved appearance',references:[...saved,{media_id:extra,role:'general'}],expected_revision_id:kept.id,expected_references:saved});
+  assert.equal(blocked.status,400);
+  assert.match(blocked.data.error,/active pictures/);
+  assert.equal(f.app.db.prepare('SELECT references_json FROM canon WHERE id=?').get(kept.id).references_json,kept.references_json);
+  const proposal=(await f.writer.call('propose_reference_update',{request_key:randomUUID(),character_id:f.cid,expected_revision_id:kept.id,references:[{media_id:f.mid,role:'face'}]})).data;
+  assert.equal(proposal.original.some(r=>r.media_id===vid),true);
+  assert.deepEqual(proposal.proposed.map(r=>r.media_id),[f.mid]);
+  await assert.rejects(f.writer.call('propose_reference_update',{request_key:randomUUID(),character_id:f.cid,expected_revision_id:kept.id,references:[{media_id:extra,role:'body'}]}),{code:'MEDIA_NOT_ASSIGNED'});
+  f.app.db.prepare('INSERT INTO media_hidden VALUES(?,?,0,?)').run(f.mid,'fixture.png',now);
+  const hidden=await f.request(f.route,{appearance:'Approved appearance',references:saved,expected_revision_id:kept.id,expected_references:saved});
+  assert.equal(hidden.status,400);
+  assert.match(hidden.data.error,/not an active catalogue file/);
 });
 
 test('same-revision reference removal scrubs proposal copies and explanations, preserves other characters and survives export/restore',async t=>{
