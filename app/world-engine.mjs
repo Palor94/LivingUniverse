@@ -23,6 +23,8 @@ export async function mapLimit(items,limit,fn){
 }
 import {installWorldSocial} from './world-social.mjs';
 import {installInnerState} from './inner-state.mjs';
+import {bm25} from './world-text-rank.mjs';
+import {readFileSync as readSql} from 'node:fs';
 export {LEVELS,SLOTS,localDay} from './world-common.mjs';
 
 const SETTINGS_KEY='world:engine';
@@ -243,10 +245,14 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   // ---- memories and effects ---------------------------------------------------------------
   // reason: memories that do not come from a world event (an answered invitation) say so.
   // Rewind recognises both "Világmotor esemény …" and "Meghívás válasza …".
-  function remember(cid,text,eventId,{reason:own=null}={}){
+  // E7 (2026-11-21): salience side table (importance, reinforcement).
+  db.exec(readSql(new URL('./migrations/034-memory-salience.up.sql',import.meta.url),'utf8'));
+  function remember(cid,text,eventId,{reason:own=null,importance=null}={}){
     const id=randomUUID(),t=iso(),reason=own?clip(own,300):'Világmotor esemény '+eventId,body=clip(text,1000);
     run('INSERT INTO character_memories VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',id,cid,1,'memory',body,null,'participants','approved','accurate',reason,t,t);
     run('INSERT INTO character_memory_revisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',randomUUID(),id,1,'memory',body,null,'participants','approved','accurate',reason,'world_engine',t);
+    const imp=Math.round(Number(importance));if(imp>=1&&imp<=5)run('INSERT INTO memory_salience(memory_id,importance) VALUES(?,?)',id,imp);
+    return id;
   }
   const recentMemories=cid=>all("SELECT text FROM character_memories WHERE character_id=? AND status='approved' ORDER BY rowid DESC LIMIT 12",cid).map(r=>r.text).reverse();
   // Recall (2026-11-12, plan step 2.1): the memories that matter now instead of simply the last
@@ -256,25 +262,36 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   const stem=w=>{w=w.toLocaleLowerCase('hu');return w.length>4&&/[aeáé]$/.test(w)?w.slice(0,-1):w;};
   const wordsOf=s=>[...new Set((String(s).toLocaleLowerCase('hu').match(/\p{L}{5,}/gu)||[]).map(x=>x.slice(0,5)))];
   function recallMemories(cid,{about=[],place='',text='',limit=12}={}){
-    const rows=all("SELECT text FROM character_memories WHERE character_id=? AND status='approved' ORDER BY rowid DESC LIMIT 300",cid).map(r=>r.text);
+    const rowsFull=all("SELECT m.id,m.text,s.importance,s.recall_count,s.last_recalled_day FROM character_memories m LEFT JOIN memory_salience s ON s.memory_id=m.id WHERE m.character_id=? AND m.status='approved' ORDER BY m.rowid DESC LIMIT 300",cid);
+    const rows=rowsFull.map(r=>r.text);
     if(rows.length<=limit)return rows.reverse();
     const names=[...new Set(about.flatMap(n=>String(n||'').split(/[\s-]+/)).filter(n=>n.length>=3).map(stem))];
-    const placeWords=wordsOf(place),moment=new Set(wordsOf(text));
+    const placeWords=wordsOf(place),moment=wordsOf(text);
     // Profile memory traits (2026-11-15): "Érzelmi emlékek tartóssága" (0–5) slows or speeds the
     // recency fade (8 memories when unknown, 4–12); "Sérelmek megőrzése" (0–5) lifts memories of
     // hurts, up to +4. Unknown values keep the earlier behaviour.
     const p=profile(cid),emo=profileScale(p,'emotional_memory'),grudge=profileScale(p,'grievances');
     const fade=emo===null?8:4+1.6*emo,hurt=grudge===null?0:0.8*grudge;
-    const scored=rows.map((m,i)=>{const low=m.toLocaleLowerCase('hu'),own=wordsOf(m);
-      // Recency fades over the last couple of dozen memories; a person +3, the place +2, each
-      // shared word (first five letters, a rough Hungarian stem) +1 up to 3.
+    // E7 (2026-11-21): words of the moment by BM25 (a rare shared word counts more than an
+    // everyday one; scaled to 0–3 like the earlier count), importance from the save point (3 =
+    // neutral, ±1.5) and reinforcement (a memory that keeps coming back, up to +1). Weights after
+    // Generative Agents retrieve.py (relevance > importance > recency, Apache-2.0) and AI Town
+    // memory.ts (MIT), kept on this engine's scale so earlier behaviour holds when nothing is known.
+    const terms=rows.map(wordsOf),rel=bm25(moment,terms),top=Math.max(0,...rel);
+    const scored=rows.map((m,i)=>{const low=m.toLocaleLowerCase('hu'),own=terms[i],r=rowsFull[i];
       let s=2*Math.exp(-i/fade);
       if(hurt&&HURT.test(m))s+=hurt;
       for(const n of names)if(low.includes(n))s+=3;
       if(placeWords.some(p=>own.includes(p)))s+=2;
-      s+=Math.min(3,own.filter(x=>moment.has(x)).length);
-      return {m,i,s:i<3?99:s};});
-    return scored.sort((a,b)=>b.s-a.s||a.i-b.i).slice(0,limit).sort((a,b)=>b.i-a.i).map(x=>x.m);
+      if(top>0&&rel[i]>0)s+=3*rel[i]/top;
+      if(r.importance)s+=(r.importance-3)*0.75;
+      s+=Math.min(1,(r.recall_count||0)*0.2);
+      return {m,i,s:i<3?99:s,id:r.id};});
+    const picked=scored.sort((a,b)=>b.s-a.s||a.i-b.i).slice(0,limit);
+    // Reinforcement: an older memory that came back counts once per world day.
+    const day=worldDayAt(now());
+    for(const x of picked)if(x.i>=3)run('INSERT INTO memory_salience(memory_id,recall_count,last_recalled_day) VALUES(?,1,?) ON CONFLICT(memory_id) DO UPDATE SET recall_count=recall_count+1,last_recalled_day=excluded.last_recalled_day WHERE last_recalled_day IS NULL OR last_recalled_day<>excluded.last_recalled_day',x.id,day);
+    return picked.sort((a,b)=>b.i-a.i).map(x=>x.m);
   }
   // ---- open threads: promises and plans between Palor and a character (030) --------------
   const THREAD_LIMIT=6;

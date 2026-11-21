@@ -1448,8 +1448,9 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       const eventId=randomUUID();
       // An intimate save point keeps the intimacy stage open for the next two weeks.
       run('INSERT INTO world_events(id,world_day,kind,status,title,summary,payload_json,model,seen_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',eventId,conv.world_day,'meeting','applied',summary.title,summary.summary||summary.title,JSON.stringify({slot:SLOTS.find(s=>s.label===conv.slot)?.id||null,character_ids:[c.id],location_id:conv.location_id,memories:[],level_changes:[],play_conversation_id:id,with_palor:true,intimate:!!summary.intimate}),'play',iso(),iso());
-      if(summary.character_memory)w.remember(c.id,summary.character_memory,eventId);
-      if(summary.palor_memory&&pid)w.remember(pid,summary.palor_memory,eventId);
+      // E7: the talk's importance (1–5) goes with both memories, for recall.
+      if(summary.character_memory)w.remember(c.id,summary.character_memory,eventId,{importance:summary.importance});
+      if(summary.palor_memory&&pid)w.remember(pid,summary.palor_memory,eventId,{importance:summary.importance});
       if(delta&&pid)w.setLevel(c.id,pid,after,{reason:summary.reason||'Beszélgetés',actor:'play',eventId});
       meetingSaved(eventId);
       w.resolveThreads(listed,{kept:data.kept,dropped:data.dropped});
