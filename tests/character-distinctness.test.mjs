@@ -9,14 +9,14 @@ import {createApp} from '../app/server.mjs';
 import {createMockProvider} from '../app/world-ai.mjs';
 import {defaultTemplate} from '../app/ghost-profile.mjs';
 import {innerCoverage,characterOnly,distinctness,similarity} from '../app/character-distinctness.mjs';
-import {castProfileTexts,GROUP_LEVELS} from '../app/profile-prompt.mjs';
+import {castProfileTexts,GROUP_LEVELS,profileText,CARD_HEAD,SECRET_HEAD,GROUP_SECRET_HEAD} from '../app/profile-prompt.mjs';
 
 const entry=value=>({value,interpretation:'',kind:'hypothesis',source:'teszt',visibility:'creator'});
 // Five synthetic men, deliberately unlike each other in goals, fears, motives and voice.
 export const CAST={
   'Teszt Aladár':{personality:'Melegszívű, gondoskodó pék.',goals:'Saját pékséget nyitni a főtéren.',fears:'Hogy csalódást okoz a családjának.',conflicts:'Mindenkinek segítene, közben magára nem marad ideje.',speech:'Hosszú, kedves mondatok, sokszor mondja: „drága barátom”.',agreeableness:9,attachment:9,sarcasm:1,bluntness:2},
-  'Teszt Béla':{personality:'Sértett, csípős nyelvű volt könyvelő.',goals:'Bosszút állni a volt főnökén, aki kirúgta.',fears:'Hogy kinevetik és lenézik.',conflicts:'Elismerést akar, de mindenkit eltaszít.',speech:'Rövid, gúnyos mondatok, kérdésre kérdéssel felel.',agreeableness:2,recognition:9,sarcasm:9,bluntness:8},
-  'Teszt Csaba':{personality:'Zárkózott, önálló erdész.',goals:'Elköltözni egy tanyára, egyedül.',fears:'A bezártság és a kötelező társaság.',conflicts:'Szereti a testvérét, de fojtogatja a közelsége.',speech:'Szűkszavú, sokat hallgat, ha beszél, tárgyilagos.',extraversion:1,autonomy:10,expressiveness:1,directness:8},
+  'Teszt Béla':{personality:'Sértett, csípős nyelvű volt könyvelő.',goals:'Bosszút állni a volt főnökén, aki kirúgta.',fears:'Hogy kinevetik és lenézik.',conflicts:'Elismerést akar, de mindenkit eltaszít.',speech:'Rövid, gúnyos mondatok, kérdésre kérdéssel felel.',play_voice:'Halkan, lassan gúnyolódik, sosem emeli fel a hangját.',play_rules:'Ha valaki dicséri, gyanakodni kezd, mit akar tőle.',play_contradiction:'Mindenkit lenéz, kivéve a kutyákat: velük gyengéd.',play_lines:'„Ennyi? Ezért ébresztettél fel?”',secrets:'TITOK-BELA: ő maga sikkasztott a cégnél, ezért rúgták ki.',agreeableness:2,recognition:9,sarcasm:9,bluntness:8},
+  'Teszt Csaba':{personality:'Zárkózott, önálló erdész.',goals:'Elköltözni egy tanyára, egyedül.',fears:'A bezártság és a kötelező társaság.',conflicts:'Szereti a testvérét, de fojtogatja a közelsége.',speech:'Szűkszavú, sokat hallgat, ha beszél, tárgyilagos.',play_voice:'Egy-két szó, hosszú csend után.',play_rules:'Személyes kérdésre a fákról kezd beszélni.',secrets:'TITOK-CSABA: már aláírta a tanya adásvételi szerződését.',extraversion:1,autonomy:10,expressiveness:1,directness:8},
   'Teszt Dénes':{personality:'Szorongó, ragaszkodó családapa.',goals:'Egyben tartani a családját.',fears:'Hogy elhagyják.',conflicts:'Félti a feleségét, ezért féltékenykedik, és ettől romlik a házassága.',speech:'Sokat kérdez vissza, bizonytalankodik, bocsánatot kér.',emotional_stability:2,attachment:10,security:9},
   'Teszt Ernő':{personality:'Kalandor, könnyelmű vállalkozó.',goals:'Egy év alatt meggazdagodni.',fears:'Az unalom és a hétköznapok.',conflicts:'Ígérget, de semmit nem fejez be.',speech:'Lelkes, túlzó, sok felkiáltás, nagy tervek.',reward:10,extraversion:9,agreeableness:6}
 };
@@ -71,6 +71,12 @@ test('same situation, five people: inner life reaches the 1:1 prompt and the gro
   const groupCoverage=inGroup.map(c=>({name:c.name,...innerCoverage(blocks[c.name],profileOf(c.values))}));
   t.diagnostic('group inner-life coverage: '+groupCoverage.map(c=>`${c.name} ${(c.ratio*100).toFixed(0)}% (missing: ${c.missing.join(', ')||'–'})`).join('; '));
   t.diagnostic('1:1 distinctness '+talkDistinct.mean.toFixed(2));
+  // E10/E13: in his own 1:1 prompt the card comes first and his secret is there, with the rule.
+  const bela=talk[people.findIndex(c=>c.name==='Teszt Béla')];
+  assert.ok(bela.indexOf(CARD_HEAD)>=0&&bela.indexOf(CARD_HEAD)<bela.indexOf('Személyiség összefoglaló'),'card before the long profile');
+  assert.ok(bela.includes(SECRET_HEAD)&&bela.includes('TITOK-BELA'));
+  for(const [i,u] of talk.entries())if(people[i].name!=='Teszt Béla')assert.ok(!u.includes('TITOK-BELA'),'nobody else gets his secret in a 1:1');
+  for(const c of inGroup)if(CAST[c.name].secrets)assert.ok(blocks[c.name].includes(GROUP_SECRET_HEAD)&&blocks[c.name].includes(CAST[c.name].secrets));
   // E11: the whole inner life is there in company too.
   for(const c of groupCoverage)assert.equal(c.ratio,1,c.name+' misses in group: '+c.missing.join(', '));
 });
@@ -91,4 +97,32 @@ test('E11 group detail levels: one level for everyone, background goes first, vo
   const p=profileOf({...CAST['Teszt Aladár'],attraction:'VONZALOM'});
   assert.ok(!castProfileTexts([p]).texts[0].includes('VONZALOM'));
   assert.ok(castProfileTexts([p],{explicit:true,intimate:true}).texts[0].includes('VONZALOM'));
+});
+
+test('E10/E13 card and secrets in profile text: card first, secrets only when asked, typical lines go first in company',()=>{
+  const p=profileOf(CAST['Teszt Béla']);
+  const plain=profileText(p);assert.ok(plain.startsWith(CARD_HEAD)&&!plain.includes('TITOK-BELA'),'secrets are never sent by default');
+  assert.ok(profileText(p,{secrets:true}).includes(SECRET_HEAD+' TITOK-BELA'));
+  const long='y'.repeat(290)+' ',fat=profileOf({...CAST['Teszt Béla'],identity:'Életrajz '+long,habits:'Szokás '+long});
+  const roomy=castProfileTexts([fat],{budget:1e9}),tight=castProfileTexts([fat],{budget:400});
+  assert.ok(roomy.texts[0].includes('Ennyi?')&&!tight.texts[0].includes('Ennyi?'),'typical lines dropped first');
+  assert.ok(tight.texts[0].includes('Mindenkit lenéz, kivéve a kutyákat')&&tight.texts[0].includes('Halkan, lassan'),'voice and contradiction kept');
+});
+
+test('E10 template: a saved template from before the card gets the card fields once, versioned, values untouched',async t=>{
+  const base=await fs.mkdtemp(path.join(os.tmpdir(),'lu-card-')),root=path.join(base,'media'),dataDir=path.join(base,'data');await fs.mkdir(root,{recursive:true});
+  const opts={root,dataDir,mcpWrites:null,mobile:null,imageGeneration:{},grokConfig:null,worldProvider:createMockProvider(()=>({reply:'x'})),worldClock:()=>new Date('2026-11-10T09:00:00')};
+  t.after(async()=>{await fs.rm(base,{recursive:true,force:true});});
+  let app=await createApp(opts);
+  const old={version:7,fields:defaultTemplate.fields.filter(f=>f.group!=='Szerepkártya')};
+  app.db.prepare('INSERT INTO application_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run('ghost:template',JSON.stringify(old));
+  app.db.prepare('INSERT INTO application_settings(key,value) VALUES(?,?)').run('ghost:character:x',JSON.stringify({version:1,values:{goals:entry('Megtartani.')},history:[],proposals:[]}));
+  await app.close();app=await createApp(opts);
+  const read=k=>JSON.parse(app.db.prepare('SELECT value FROM application_settings WHERE key=?').get(k)?.value??'null');
+  const now=read('ghost:template');assert.equal(now.version,8);
+  assert.deepEqual(now.fields.slice(-5).map(f=>f.id),['play_voice','play_rules','play_contradiction','play_lines','secrets']);
+  assert.deepEqual(now.fields.slice(0,old.fields.length),old.fields,'existing fields unchanged');
+  assert.equal(read('ghost:template-history:8').actor,'code:E10-character-card');
+  assert.equal(read('ghost:character:x').values.goals.value,'Megtartani.');
+  await app.close();app=await createApp(opts);assert.equal(read('ghost:template').version,8,'only once');await app.close();
 });

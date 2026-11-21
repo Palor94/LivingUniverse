@@ -9,7 +9,7 @@
 // separate, owner-approved step and is not done here.
 
 // The fields that make a person who he is in a scene (Szellemprofil ids).
-export const INNER_TEXT=['personality','goals','conflicts','fears','coping','emotional_traits','speech','habits'];
+export const INNER_TEXT=['play_voice','play_rules','play_contradiction','personality','goals','conflicts','fears','coping','emotional_traits','speech','habits'];
 export const INNER_SCALES=['security','attachment','reward','autonomy','recognition','agreeableness','extraversion','emotional_stability','bluntness','sarcasm','directness','expressiveness'];
 
 const filled=(p,id)=>{const v=p?.values?.[id]?.value;return v!==undefined&&v!==null&&String(v).trim()!=='';};

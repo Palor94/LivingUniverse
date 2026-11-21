@@ -344,7 +344,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     // Recall: memories about the people closest to him and what is on his mind today.
     const close=relations.filter(r=>(r.level??0)>=2).map(r=>r.name),memories=recallMemories(c.id,{about:[...close,...(pid?['Palor']:[])],text:[...doneToday,palorTalk,clip(c.profile?.values?.goals?.value,300)].join(' ')});
     const threads=openThreadsFor(c.id,day);
-    const prompt=agentPrompt({name:c.name,when,profile:profileText(c.profile,{use:'agent'}),places,relations,known,memories,doneToday,palorTalk,threads,messaging:messaging&&!!pid,canInvite:messaging&&roundIndex>=0&&canInvite(c.id,pid,day)});
+    const prompt=agentPrompt({name:c.name,when,profile:profileText(c.profile,{use:'agent',secrets:true}),places,relations,known,memories,doneToday,palorTalk,threads,messaging:messaging&&!!pid,canInvite:messaging&&roundIndex>=0&&canInvite(c.id,pid,day)});
     const out=await ask(prompt.system,prompt.user,prompt.maxTokens,{purpose:'world'})||{};
     // An empty or broken answer is not retried (it may be billed): he follows his routine.
     if(typeof out.intention!=='string'||!out.intention.trim())out.intention=filled(c.profile,'weekly_routine')?'A szokásos rutinját követi: '+clip(c.profile.values.weekly_routine.value,200):'A szokásos dolgait intézi.';

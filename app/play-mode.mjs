@@ -1167,7 +1167,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const dateNote=[date?`RANDEVÚ: ezt a találkozót Palorral beszéltétek meg ide, erre a napszakra${date.met_at?', és már itt vagytok együtt':', és Palor most megérkezett'}.`:'',missed?`ELMARADT RANDEVÚ: Palor nem jött el a megbeszélt találkozóra (${missed.world_day}, ${SLOTS.find(s=>s.id===missed.slot)?.label||''}${missed.place?', '+missed.place:''}). Ezt szóvá teheted; csalódott vagy sértett is lehetsz, a természeted szerint.`:''].filter(Boolean).join('\n');
     const longTalk=history.length>=14?'A beszélgetés már hosszú: ha természetes, kezdd el lezárni (búcsú, teendő, más elfoglaltság).':'';
     const corrections=directorText(cid);
-    const user=['PROFILOD:\n'+w.profileText(c.profile,{explicit:intimate||(stage==='intimate'&&channel!=='phone')}),
+    const user=['PROFILOD:\n'+w.profileText(c.profile,{explicit:intimate||(stage==='intimate'&&channel!=='phone'),secrets:true}),
       ...(corrections?[corrections]:[]),
       `KAPCSOLATOD PALORRAL [${LEVELS[level??0]}]:\n`+(clip(note,1500)||'nincs megadva'),
       ...(voice?[PALOR_VOICE_HEAD+voice]:[]),
@@ -1294,7 +1294,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const gIntimate=gStage==='intimate',gBeats=gIntimate?BEATS:['talk','flirt'];
     const system=`Egy élő világ társas jelenetét írod: Palor ${names.join(', ')} társaságában van itt: ${here.path||here.name}, ${k.weekday} ${k.slot}. Mindenki a saját hangján, magyarul, röviden (1-2 mondat) szól; nem kell mindenkinek megszólalnia, és reagálhatnak egymásra is. Minden kör vigye előre a jelenetet valami újjal; senki ne ismételje a saját vagy a többiek korábbi mondatait, fordulatait, és ne kezdje ugyanúgy. Csak a profiljukból, a Palorhoz fűződő kapcsolatukból és a mai napjukból dolgozz; ne találj ki új tényt a múltról. Palor titkos érzéseit senki nem ismeri. Mindenki felnőtt. ${gIntimate?'Ez a társaság közel áll Palorhoz: a jelenet szexuálissá is válhat, ha a résztvevők tényleg odáig jutnak és akarják. Akkor írd nyíltan, kendőzetlenül, mindenki a saját hangján, a vágyai és a profiljában leírt szexuális preferenciái szerint; bárki kezdeményezhet, és bárki nemet mondhat vagy kiszállhat.':'Ez társas jelenet: nincs benne intim vagy szexuális tartalom.'} "beat": hol tart most a jelenet (${gBeats.join(' / ')}); csak akkor lépj tovább, ha tényleg odáig jutottak. ${CHOICE_RULES(gIntimate,{group:true})} Csak JSON: {"replies":[{"name":"${names[0]}","text":"..."}],"beat":"${gBeats.join('|')}","choices":["...","...","..."]} – 1-3 válasz, csak ezektől: ${names.join(', ')}.`;
     // E11 (2026-11-21): one shared detail level for the whole company, inner life kept.
-    const castText=castProfileTexts(people.map(c=>c.profile),{explicit:gIntimate,intimate:gIntimate});
+    const castText=castProfileTexts(people.map(c=>c.profile),{explicit:gIntimate,intimate:gIntimate,secrets:true});
     const block=c=>{const level=w.levelOf(c.id,pid);const note=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,pid)?.description||'';
       const others=people.filter(o=>o.id!==c.id).map(o=>{const r=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,o.id)?.description;return r?`${o.name}: ${clip(r,200)}`:'';}).filter(Boolean);
       const fix=directorText(c.id);

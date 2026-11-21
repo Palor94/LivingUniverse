@@ -16,10 +16,26 @@ export const sexualPreferenceFields=[
   text('sexual_tongue_use','Nyelv használatával kapcsolatos preferenciák','Szexuális preferenciák'),
   text('sexual_hand_use','Kéz használatával kapcsolatos preferenciák','Szexuális preferenciák')
 ];
+// Character card (E10/E13, 2026-11-21, owner: living, different characters). A short "how to
+// play him" card derived from the profile and approved like any other field: voice in one
+// sentence, up to three behaviour rules, one contradiction, two typical lines, and secrets
+// that shape what he does without being said. Structure after Covel
+// plugins/character-blueprint (MIT, Covel Contributors); short contradictory identities after
+// AI Town data/characters.ts (MIT). Nothing here may be invented as fact: a proposal from the
+// profile is a hypothesis until the owner approves it.
+const CARD_GUIDE='Csak a profilban már meglévőből vezesd le; ami nincs benne, maradjon üres. Rövid, cselekvésre fordítható mondatok, nem leírás.';
+export const cardFields=[
+  {...text('play_voice','Hang egy mondatban','Szerepkártya'),guidance:'Egyetlen mondat arról, hogyan beszél (tempó, hossz, jellegzetes fordulat). '+CARD_GUIDE},
+  {...text('play_rules','Viselkedési szabályok (legfeljebb 3)','Szerepkártya'),guidance:'Legfeljebb 3 szabály „ha… akkor…” formában, pl. „A pénzéről csak akkor beszél, ha előbb te nyílsz meg.” '+CARD_GUIDE},
+  {...text('play_contradiction','Ellentmondás / kivétel','Szerepkártya'),guidance:'Egy ellentmondás vagy kivétel, ami élővé teszi, pl. „Mindig türelmes, kivéve ha…”. '+CARD_GUIDE},
+  {...text('play_lines','Két jellemző mondata','Szerepkártya'),guidance:'Legfeljebb két rövid mondat, ahogy ő mondaná. '+CARD_GUIDE},
+  {...text('secrets','Titkok (csak ő tudja)','Szerepkártya'),guidance:'Amit eltitkol. Csak a tulajdonos írja vagy hagyja jóvá; nem található ki. A szereplő viselkedését alakítja, de nem mondja ki.'}
+];
 export const defaultTemplate={version:1,fields:[
   text('birth_date','Születési dátum (ha ismert)','Alapok'),text('gender','Nem / önmeghatározás','Alapok'),text('occupation','Foglalkozás','Alapok'),text('residence','Lakóhely','Alapok'),text('origin','Technikai eredet és proveniencia','Alapok'),
   text('identity','Életrajz és életkörülmények','Alapok','biography'),text('appearance_summary','Rövid megjelenés','Megjelenés','appearance'),text('appearance_detail','Részletes megjelenés','Megjelenés'),text('anatomy','Részletes anatómiai alprofil','Megjelenés'),
   text('personality','Személyiség összefoglaló','Személyiség','personality'),
+  ...cardFields,
   ...[['extraversion','Extraverzió'],['agreeableness','Együttműködés'],['conscientiousness','Lelkiismeretesség'],['emotional_stability','Érzelmi stabilitás'],['openness','Nyitottság']].map(([id,label])=>scale(id,label,'Big Five')),
   ...[['security','Biztonság / önfenntartás'],['attachment','Kapcsolódás / kötődés'],['reward','Öröm / jutalomkeresés'],['autonomy','Autonómia / kompetencia'],['recognition','Önértékelés / elismerés']].map(([id,label])=>scale(id,label,'Motiváció')),
   text('goals','Tudatos célok és belső késztetések','Motiváció'),text('conflicts','Belső konfliktusok','Motiváció'),text('fears','Félelmek és elkerülések','Motiváció'),text('coping','Megküzdés','Motiváció'),
@@ -71,6 +87,11 @@ export function installGhostProfiles({one,all=()=>[],run,transaction,characterPo
     write('ghost:template-history:'+next.version,{previous:old,next,actor,at:new Date().toISOString()});write('ghost:template',next);return next;
   }
   function saveTemplate(body,actor='local-creator'){return transaction(()=>persistTemplate(body,actor));}
+  // E10 (2026-11-21): a saved template from before the card gets the card fields appended once,
+  // as a normal versioned template change (history kept, existing fields untouched).
+  transaction(()=>{const row=one('SELECT value FROM application_settings WHERE key=?','ghost:template');if(!row)return;
+    const old=JSON.parse(row.value),missing=cardFields.filter(f=>!old.fields.some(x=>x.id===f.id));
+    if(missing.length&&old.fields.length+missing.length<=100)persistTemplate({expected_version:old.version,fields:[...old.fields,...missing]},'code:E10-character-card');});
   function updateTemplate(args,actor='mcp-trusted'){
     const requestHash=validateTemplatePatch(args);
     return transaction(()=>{

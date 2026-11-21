@@ -56,16 +56,32 @@ const filled=(p,id)=>{const v=p?.values?.[id]?.value;return v!==undefined&&v!==n
 
 // use: 'talk' (default, the richest), 'agent' (world-engine intention), 'group' (several people
 // in one prompt, shorter). explicit:true only for an intimate Play scene.
-export function profileText(p,{explicit=false,use='talk'}={}){
+// Character card (E10, 2026-11-21): the short "how to play him" fields come first, under one
+// heading, so the model reads instructions before the long description. Secrets (E13) are
+// sent only with secrets:true – his own talk, his own group line, his own world-agent turn –
+// with the instruction to let them shape what he does without saying them. Pattern after
+// Covel plugins/character-blueprint/lib/roleplay-notes.js (MIT, Covel Contributors).
+export const CARD=['play_voice','play_rules','play_contradiction','play_lines'];
+export const CARD_HEAD='SZEREPKÁRTYA (így játszd; ez fontosabb, mint a hosszú leírás):';
+export const GROUP_SECRET_HEAD='TITKAI (csak ő tudja, a többiek nem: alakítsák, mit tesz és mit kerül, de ő nem mondja ki, és más szereplő sem tudhat róla, amíg a történet fel nem fedi):';
+export const SECRET_HEAD='TITKAID (csak te tudod: alakítsák, mit teszel, mit kerülsz és min akadsz fenn, de ne mondd ki őket, és ne célozz rájuk nyíltan, amíg a történet fel nem fedi):';
+const SPECIAL=new Set([...CARD,'secrets']);
+function cardLines(p,fields,max,{skip=new Set()}={}){
+  const lines=[];for(const f of fields)if(CARD.includes(f.id)&&!skip.has(f.id)&&filled(p,f.id))lines.push(`${f.label}: ${clip(p.values[f.id].value,max)}`);
+  return lines.length?[CARD_HEAD,...lines]:[];
+}
+const secretLines=(p,max,head=SECRET_HEAD)=>filled(p,'secrets')?[head+' '+clip(p.values.secrets.value,max)]:[];
+export function profileText(p,{explicit=false,use='talk',secrets=false}={}){
   if(!p?.template?.fields)return '';
   const omit=OMIT[use]||OMIT.talk,max=CLIP[use]||700,lines=[];
   for(const f of p.template.fields){
-    if(META.has(f.id)||omit.has(f.id)||(!explicit&&EXPLICIT.has(f.id)))continue;
+    if(SPECIAL.has(f.id)||META.has(f.id)||omit.has(f.id)||(!explicit&&EXPLICIT.has(f.id)))continue;
     if(filled(p,f.id)){const v=p.values[f.id].value;lines.push(f.type==='scale'?scaleLine(f,v):`${f.label}: ${clip(v,max)}`);continue;}
     const legacy=f.type==='text'&&f.source&&!has(p,f.id)?String(p.legacy?.[f.source]||'').trim():'';
     if(legacy)lines.push(`${f.label}: ${clip(legacy,max)}`);
   }
-  return lines.join('\n');
+  const card=cardLines(p,p.template.fields,max);
+  return [...card,...(secrets?secretLines(p,max):[]),...(card.length?['RÉSZLETES PROFIL:']:[]),...lines].join('\n');
 }
 
 // Group scenes (E11, 2026-11-21): the inner life stays in. Before, a group prompt left out each
@@ -87,11 +103,13 @@ export const GROUP_LEVELS=[
   {clip:100,drop:['personality'],extremesOnly:true}
 ];
 const GROUP_KEEP=new Set(['speech','goals','fears','security','attachment','reward','autonomy','recognition']);
+// Card lines: voice, rules and the contradiction are always kept; the typical lines go first (as
+// Covel drops example lines first).
 export const GROUP_BUDGET_PER_PERSON=1800,GROUP_BUDGET_MAX=7200;
-function groupText(p,{explicit,intimate,level}){
+function groupText(p,{explicit,intimate,level,secrets}){
   const L=GROUP_LEVELS[level],dropped=new Set(GROUP_LEVELS.slice(0,level+1).flatMap(x=>x.drop));const lines=[];
   for(const f of p?.template?.fields||[]){const id=f.id;
-    if(META.has(id)||GROUP_BASE.has(id)||(!explicit&&EXPLICIT.has(id))||(!intimate&&GROUP_INTIMATE_ONLY.includes(id)))continue;
+    if(SPECIAL.has(id)||META.has(id)||GROUP_BASE.has(id)||(!explicit&&EXPLICIT.has(id))||(!intimate&&GROUP_INTIMATE_ONLY.includes(id)))continue;
     if(dropped.has(id)&&!GROUP_KEEP.has(id))continue;
     if(filled(p,id)){const v=p.values[id].value;
       if(f.type==='scale'){const r=v/f.max;if(L.extremesOnly&&!GROUP_KEEP.has(id)&&r>0.3&&r<0.7)continue;lines.push(scaleLine(f,v));}
@@ -99,13 +117,14 @@ function groupText(p,{explicit,intimate,level}){
     const legacy=f.type==='text'&&f.source&&!has(p,id)?String(p.legacy?.[f.source]||'').trim():'';
     if(legacy)lines.push(`${f.label}: ${clip(legacy,L.clip)}`);
   }
-  return lines.join('\n');
+  const card=cardLines(p,p?.template?.fields||[],L.clip,{skip:level>=1?new Set(['play_lines']):new Set()});
+  return [...card,...(secrets?secretLines(p,L.clip,GROUP_SECRET_HEAD):[]),...lines].join('\n');
 }
 // Profiles of everyone in one group scene, at one shared level.
-export function castProfileTexts(profiles,{explicit=false,intimate=false,budget}={}){
+export function castProfileTexts(profiles,{explicit=false,intimate=false,budget,secrets=false}={}){
   const max=budget??Math.min(GROUP_BUDGET_MAX,GROUP_BUDGET_PER_PERSON*Math.max(1,profiles.length));
   for(let level=0;level<GROUP_LEVELS.length;level++){
-    const texts=profiles.map(p=>groupText(p,{explicit,intimate,level}));
+    const texts=profiles.map(p=>groupText(p,{explicit,intimate,level,secrets}));
     if(level===GROUP_LEVELS.length-1||texts.reduce((n,t)=>n+t.length,0)<=max)return {level,texts};
   }
 }
