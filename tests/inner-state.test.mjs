@@ -27,6 +27,7 @@ test('inner state: written at the save point from his side, in his next prompt, 
   const requests=[];let inner={mood:'megbántott',intensity:3,reason:'Palor elfelejtette a születésnapját.',concerns:['a lakbér miatt aggódik','ki akar békülni az öccsével'],wants_from_palor:'egy őszinte bocsánatkérést'};
   const provider=createMockProvider(req=>{requests.push(req);
     if(req.system.includes('Egy beszélgetést foglalsz össze'))return {title:'Feszült beszélgetés',summary:'Szóba került a születésnap.',character_memory:'Palor elfelejtette.',level_delta:0,inner};
+    if(req.user.includes('Palor: Mennem kell?'))return {reply:'Most mennem kell, bocs.',leaving:'dolga van a pékségben'};
     return {reply:'Szia.'};});
   let clock=new Date('2026-11-10T09:00:00');
   const app=await createApp({root,dataDir,mcpWrites:null,mobile:null,imageGeneration:{},grokConfig:null,worldProvider:provider,worldClock:()=>clock});
@@ -55,6 +56,11 @@ test('inner state: written at the save point from his side, in his next prompt, 
   assert.match(u,/HANGULATOD: nagyon megbántott \(Palor elfelejtette a születésnapját\.\)/);
   assert.match(u,/AMI MOST FOGLALKOZTAT[^\n]*\n- a lakbér miatt aggódik\n- ki akar békülni az öccsével/);
   assert.match(u,/AMIT PALORTÓL SZERETNÉL: egy őszinte bocsánatkérést/);assert.match(u,/A MAI NAPOD: /);
+  // E4: his own aim, early in the talk he brings it up himself; the reply may say he is leaving.
+  assert.match(u,/A SAJÁT CÉLOD EBBEN A BESZÉLGETÉSBEN: egy őszinte bocsánatkérést\. Magadtól hozd szóba/);
+  assert.match(requests.at(-1).system,/"leaving":/);assert.equal(talk.leaving,undefined);
+  const leave=(await call('/api/play/talk',{conversation_id:talk.id,text:'Mennem kell?'})).data;
+  assert.equal(leave.leaving,'dolga van a pékségben');assert.equal(leave.lines.at(-1).text,'Most mennem kell, bocs.');
   // The next summary carries his earlier state so concerns can continue.
   inner={mood:'megkönnyebbült',intensity:1,reason:'Palor bocsánatot kért.',concerns:['a lakbér miatt aggódik'],wants_from_palor:''};
   await call(`/api/play/conversations/${talk.id}/end`,{});

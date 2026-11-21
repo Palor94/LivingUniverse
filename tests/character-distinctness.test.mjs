@@ -78,6 +78,8 @@ test('same situation, five people: inner life reaches the 1:1 prompt and the gro
   assert.ok(bela.includes(SECRET_HEAD)&&bela.includes('TITOK-BELA'));
   for(const [i,u] of talk.entries())if(people[i].name!=='Teszt Béla')assert.ok(!u.includes('TITOK-BELA'),'nobody else gets his secret in a 1:1');
   for(const c of inGroup)if(CAST[c.name].secrets)assert.ok(blocks[c.name].includes(GROUP_SECRET_HEAD)&&blocks[c.name].includes(CAST[c.name].secrets));
+  // E4: with no state yet, each one's aim comes from his own goal.
+  for(const [i,u] of talk.entries())assert.ok(u.includes('A SAJÁT CÉLOD EBBEN A BESZÉLGETÉSBEN: közelebb jutni a célodhoz: '+people[i].values.goals.replace(/\.$/,'')),people[i].name);
   // E3: the appraisal block is in his own prompt.
   assert.ok(talk.every(u=>u.includes('ÍGY HAT RÁD, AMI TÖRTÉNIK')));
   // E11: the whole inner life is there in company too.
