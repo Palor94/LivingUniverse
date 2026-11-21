@@ -18,6 +18,7 @@ import {ROLE_TEXT,describeActivity,moodOf,LEVEL_STYLE,CLOSENESS_RULES,TIME_MOOD,
 import {createPlayScenes} from './play/scenes.mjs';
 import {palorVoice,speechOf,PALOR_VOICE_HEAD,CHOICE_RULES} from './play/palor-voice.mjs';
 import {castProfileTexts} from './profile-prompt.mjs';
+import {innerInstruction} from './inner-state.mjs';
 import {createPlayRecords} from './play/records.mjs';
 import {TALK_MINUTES} from './game-clock.mjs';
 import {kindOf,KIND_LABEL,chains,anchorOf as siteOf,townOf,travelMinutes,vehicleOwner,rollEncounter,isSettlement,isRegion,isPassage,isOriginName,originChild,originIndex,arrivalOf,passagesOf,travelOptions,trainBetween,TRAVEL_MODES,walkOnly,bikeAllowed,trainRunsAt,ridesWith,transportPlace,tripScenePlaces,rollRoadside} from './place-network.mjs';
@@ -1141,6 +1142,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const sinceText=daysSince===null?'':daysSince===0?' (ma már beszéltetek)':daysSince>=7?` (${daysSince} napja nem beszéltetek – ezt észreveheted)`:` (${daysSince} napja)`;
     // His mood today, from today's events about him.
     const mood=moodOf(today);
+    const innerLines=w.inner?w.inner.promptLines(cid,k.day,c.profile):[];
     // Gossip: what happened today to the people closest to him (level ≥ 3: they talk every day).
     // Anything else he knows only if someone told him in a world meeting (2026-11-12, plan step
     // 2.5): that arrives as a memory and comes back through recall.
@@ -1176,7 +1178,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       ...(shared?['KÖZÖS MÚLTATOK PALORRAL (ahogy te emlékszel rá):\n'+clip(shared,1500)]:[]),
       ...(earlier.length?['KORÁBBI BESZÉLGETÉSEITEK:\n'+earlier.join('\n')]:[]),
       'LEGUTÓBB PALORRAL: '+(lastTalk?lastTalk+sinceText:'még nem beszélgettetek'),
-      'HANGULATOD MA: '+mood.text+(placeRole&&ROLE_CONTEXT[placeRole]?' '+ROLE_CONTEXT[placeRole]:''),
+      // E2 (2026-11-21): his carried inner state; the day's events stay as background.
+      ...(innerLines.length?['A MAI NAPOD: '+mood.text+(placeRole&&ROLE_CONTEXT[placeRole]?' '+ROLE_CONTEXT[placeRole]:''),...innerLines]:['HANGULATOD MA: '+mood.text+(placeRole&&ROLE_CONTEXT[placeRole]?' '+ROLE_CONTEXT[placeRole]:'')]),
       'EMLÉKEID:\n'+(memories.map(m=>'- '+clip(m,300)).join('\n')||'nincs'),
       'MA VELED TÖRTÉNT:\n'+(today.map(e=>`- ${e.title}: ${clip(e.summary,200)}`).join('\n')||'semmi különös'),
       ...(gossip.length?['MA HALLOTTAD AZ ISMERŐSEIDRŐL (szóba hozhatod, ha illik):\n'+gossip.map(e=>`- ${e.title}: ${clip(e.summary,160)}`).join('\n')]:[]),
@@ -1298,7 +1301,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const block=c=>{const level=w.levelOf(c.id,pid);const note=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,pid)?.description||'';
       const others=people.filter(o=>o.id!==c.id).map(o=>{const r=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,o.id)?.description;return r?`${o.name}: ${clip(r,200)}`:'';}).filter(Boolean);
       const fix=directorText(c.id);
-      return `## ${c.name}\nPROFIL:\n${castText.texts[people.indexOf(c)]}${fix?'\n'+fix:''}\nKAPCSOLATA PALORRAL [${LEVELS[level??0]}]: ${clip(note,600)||'nincs megadva'}\nMOST ÉPPEN: ${activityOf(c.id,here.location_id)}${others.length?'\nA TÖBBIEKHEZ: '+others.join('; '):''}`;};
+      return `## ${c.name}\nPROFIL:\n${castText.texts[people.indexOf(c)]}${fix?'\n'+fix:''}${w.inner?w.inner.promptLines(c.id,k.day,c.profile,{person:'ő'}).map(x=>'\n'+x).join(''):''}\nKAPCSOLATA PALORRAL [${LEVELS[level??0]}]: ${clip(note,600)||'nincs megadva'}\nMOST ÉPPEN: ${activityOf(c.id,here.location_id)}${others.length?'\nA TÖBBIEKHEZ: '+others.join('; '):''}`;};
     // Same anti-repeat and suggestion inputs as a one-on-one talk (2026-11-15).
     const ownLast=history.filter(l=>l.speaker!=='palor').slice(-4).map(l=>'- '+(l.speaker_name?l.speaker_name+': ':'')+clip(l.text,300));
     const palorLast=history.filter(l=>l.speaker==='palor').slice(-3).map(l=>clip(l.text,200));
@@ -1395,14 +1398,15 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     // Promises and plans (2026-11-12): the same summary call lists new ones and says which of the
     // open ones this talk kept or dropped (by number). No extra call.
     const listed=w.openThreadsFor(c.id,conv.world_day).open;
-    const system=`Egy beszélgetést foglalsz össze Palor és ${c.name} között. Csak azt írd le, ami a beszélgetésben ténylegesen elhangzott vagy történt. "promises": csak kifejezett ígéret vagy megbeszélt terv (pl. "pénteken felhívlak", "holnap este átjövök"), legfeljebb 3; "by": ki ígérte; "due": a dátum ÉÉÉÉ-HH-NN alakban, ha kiderül, különben null. "kept"/"dropped": a felsorolt nyitott tervek közül melyik teljesült, illetve melyiket mondták le ebben a beszélgetésben (sorszámok). "shared_history": ${c.name} és Palor közös múltja ${c.name} szemszögéből, legfeljebb 6 mondatban: a KORÁBBI KÖZÖS MÚLT kiegészítve ezzel a beszélgetéssel; a fontosat (fordulópontok, ígéretek, érzelmes pillanatok, amit megtudtak egymásról) tartsd meg, a régi apróságokat tömörítsd; csak azt írd bele, ami ott vagy ebben a beszélgetésben szerepel, ne találj ki semmit. ${RICH_FIELDS_HINT} "learned": mit tudott meg ebben a beszélgetésben ${c.name} Palorról ("character"), illetve Palor ${c.name}-ról ("palor"), egy-egy mondat, üres, ha semmi újat. "mood": egy-három szó, milyen hangulatban volt a beszélgetés végén ${c.name} ("character") és Palor ("palor"). Csak JSON, magyarul: {"title":"rövid cím","summary":"1-2 mondat","character_memory":"egy-két mondat ${c.name} szemszögéből","palor_memory":"egy-két mondat Palor szemszögéből","level_delta":-1|0|1,"reason":"miért változott (vagy nem) ${c.name} viszonya Palorhoz","promises":[{"by":"palor|character","text":"...","due":null}],"kept":[],"dropped":[],"shared_history":"...",${RICH_FIELDS_JSON},"learned":{"character":"","palor":""},"mood":{"character":"","palor":""}}`;
+    const system=`Egy beszélgetést foglalsz össze Palor és ${c.name} között. Csak azt írd le, ami a beszélgetésben ténylegesen elhangzott vagy történt. "promises": csak kifejezett ígéret vagy megbeszélt terv (pl. "pénteken felhívlak", "holnap este átjövök"), legfeljebb 3; "by": ki ígérte; "due": a dátum ÉÉÉÉ-HH-NN alakban, ha kiderül, különben null. "kept"/"dropped": a felsorolt nyitott tervek közül melyik teljesült, illetve melyiket mondták le ebben a beszélgetésben (sorszámok). "shared_history": ${c.name} és Palor közös múltja ${c.name} szemszögéből, legfeljebb 6 mondatban: a KORÁBBI KÖZÖS MÚLT kiegészítve ezzel a beszélgetéssel; a fontosat (fordulópontok, ígéretek, érzelmes pillanatok, amit megtudtak egymásról) tartsd meg, a régi apróságokat tömörítsd; csak azt írd bele, ami ott vagy ebben a beszélgetésben szerepel, ne találj ki semmit. ${RICH_FIELDS_HINT} "learned": mit tudott meg ebben a beszélgetésben ${c.name} Palorról ("character"), illetve Palor ${c.name}-ról ("palor"), egy-egy mondat, üres, ha semmi újat. "mood": egy-három szó, milyen hangulatban volt a beszélgetés végén ${c.name} ("character") és Palor ("palor"). Csak JSON, magyarul: {"title":"rövid cím","summary":"1-2 mondat","character_memory":"egy-két mondat ${c.name} szemszögéből","palor_memory":"egy-két mondat Palor szemszögéből","level_delta":-1|0|1,"reason":"miért változott (vagy nem) ${c.name} viszonya Palorhoz","promises":[{"by":"palor|character","text":"...","due":null}],"kept":[],"dropped":[],"shared_history":"...",${RICH_FIELDS_JSON},"learned":{"character":"","palor":""},"mood":{"character":"","palor":""}${w.inner?',"inner":{"mood":"","intensity":0,"reason":"","concerns":[],"wants_from_palor":""}':''}} ${w.inner?innerInstruction(c.name):''}`;
     // What the shared history grows from: the previous version, or (first time) the earlier talks.
     const prevShared=sharedHistoryOf(c.id);
     const base=prevShared||pastTalks(c.id,9).filter(r=>r.id!==id&&r.status==='closed'&&(r.summary.summary||r.summary.title)).slice(0,8).reverse().map(r=>`${r.world_day}: ${clip(r.summary.summary||r.summary.title,300)}`).join('\n');
     const chemistry=one('SELECT coalesce(sum(m.spark),0) n FROM play_line_meta m JOIN active_play_lines l ON l.id=m.line_id WHERE l.conversation_id=?',id).n;
     const wasDate=!!one('SELECT 1 FROM play_dates WHERE conversation_id=?',id);
     const wd=weekdayOf(conv.world_day);
-    const data=await w.ask(system,`(A beszélgetés napja: ${conv.world_day}, ${WEEKDAYS[wd]}.)\n`+'KORÁBBI KÖZÖS MÚLT:\n'+(base||'még nincs, ez az első beszélgetésük')+'\n\n'+(listed.length?'NYITOTT TERVEK:\n'+listed.map((t,i)=>`${i+1}. ${t.promised_by==='palor'?'Palor':c.name}: ${t.text}${t.due_day?' ('+t.due_day+')':''}`).join('\n')+'\n\n':'')+ls.map(l=>(l.speaker==='palor'?'Palor':isGuestLine(l)?l.speaker_name:c.name)+': '+l.text).join('\n')+(chemistry?`\n\n(${c.name} reakciói a beszélgetés során összesen: ${chemistry>0?'+':''}${chemistry}; ezt is vedd figyelembe a level_delta-nál.)`:'')+(wasDate?'\n\n(Ez egy megbeszélt randevú volt.)':''),1200)||{};
+    const innerBefore=w.inner?w.inner.summaryContext(c.id):'';
+    const data=await w.ask(system,`(A beszélgetés napja: ${conv.world_day}, ${WEEKDAYS[wd]}.)\n`+(innerBefore?innerBefore+'\n\n':'')+'KORÁBBI KÖZÖS MÚLT:\n'+(base||'még nincs, ez az első beszélgetésük')+'\n\n'+(listed.length?'NYITOTT TERVEK:\n'+listed.map((t,i)=>`${i+1}. ${t.promised_by==='palor'?'Palor':c.name}: ${t.text}${t.due_day?' ('+t.due_day+')':''}`).join('\n')+'\n\n':'')+ls.map(l=>(l.speaker==='palor'?'Palor':isGuestLine(l)?l.speaker_name:c.name)+': '+l.text).join('\n')+(chemistry?`\n\n(${c.name} reakciói a beszélgetés során összesen: ${chemistry>0?'+':''}${chemistry}; ezt is vedd figyelembe a level_delta-nál.)`:'')+(wasDate?'\n\n(Ez egy megbeszélt randevú volt.)':''),1200)||{};
     let delta=Math.max(-1,Math.min(1,Math.round(Number(data.level_delta)||0)));
     // Owner decision 2026-11-11: at most three steps closer per character per world day.
     const risesToday=all("SELECT summary_json FROM play_conversations WHERE character_id=? AND world_day=? AND status='closed' AND rewound_at IS NULL AND id<>?",c.id,conv.world_day,id).filter(r=>{try{return JSON.parse(r.summary_json||'{}').level_delta>0;}catch{return false;}}).length;
@@ -1433,6 +1437,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       meetingSaved(eventId);
       w.resolveThreads(listed,{kept:data.kept,dropped:data.dropped});
       w.addThreads(c.id,id,data.promises,conv.world_day);
+      // E2: his inner state after this talk, from his point of view.
+      if(w.inner)w.inner.record(c.id,data.inner,{day:conv.world_day,eventId,conversationId:id});
     });
     return conversationView(id);
   }

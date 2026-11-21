@@ -22,6 +22,7 @@ export async function mapLimit(items,limit,fn){
   return out;
 }
 import {installWorldSocial} from './world-social.mjs';
+import {installInnerState} from './inner-state.mjs';
 export {LEVELS,SLOTS,localDay} from './world-common.mjs';
 
 const SETTINGS_KEY='world:engine';
@@ -60,6 +61,8 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   const hasGroups=!!one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='character_groups'");
   // 031: who heard what from whom, and characters' own beliefs (world-social.mjs).
   const social=installWorldSocial({db,one,all,run,remember:(...a)=>remember(...a),now});
+  // E2 (2026-11-21): each character's inner state, carried between conversations.
+  const inner=installInnerState({db,one,all,run,now});
   let running=false,timer=null;
   const iso=()=>now().toISOString();
 
@@ -592,7 +595,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     return false;
   }
   // Shared with Play mode and rewind (same cost cap, same memories and levels).
-  const internals={ask,people,palor,profile,profileText,autonomous,meetable,placesOf,levelOf,setLevel,remember,recentMemories,recallMemories,groupIds,openThreadsFor,addThreads,resolveThreads,noteLapsed,threadsOf,social,beliefsFor:social.beliefsFor};
+  const internals={inner,ask,people,palor,profile,profileText,autonomous,meetable,placesOf,levelOf,setLevel,remember,recentMemories,recallMemories,groupIds,openThreadsFor,addThreads,resolveThreads,noteLapsed,threadsOf,social,beliefsFor:social.beliefsFor};
   // Job ledger (2026-11-13): a round whose status says "running" while no round runs in this
   // process was cut off (crash, restart). It is shown as stuck and can be marked interrupted.
   function roundState(){return {running,last:lastRound(),spent_today:spentToday(),cap:settings().daily_cap_usd};}
