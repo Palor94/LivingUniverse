@@ -56,7 +56,8 @@ export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()})
   }
 
   // ---- reflection ----------------------------------------------------------------------------
-  const lastBeliefAt=cid=>one('SELECT max(created_at) t FROM world_beliefs WHERE character_id=? AND rewound_at IS NULL',cid)?.t||'';
+  // Opinions from conversations (E12) do not count as a reflection.
+  const lastBeliefAt=cid=>one("SELECT max(created_at) t FROM world_beliefs WHERE character_id=? AND rewound_at IS NULL AND model<>'play-opinion'",cid)?.t||'';
   const newMemories=cid=>all("SELECT id,text FROM character_memories WHERE character_id=? AND status='approved' AND created_at>? ORDER BY rowid DESC LIMIT 20",cid,lastBeliefAt(cid)).reverse();
   const due=cast=>cast.filter(c=>newMemories(c.id).length>=REFLECT_AFTER).slice(0,REFLECT_PER_ROUND);
 
@@ -95,8 +96,27 @@ export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()})
   function beliefsFor(cid,aboutIds=[]){
     const rows=all("SELECT about_id,about_name,text FROM world_beliefs WHERE character_id=? AND rewound_at IS NULL AND text<>'' ORDER BY created_at DESC LIMIT 40",cid);
     const seen=new Set(),out=[];
-    for(const r of rows){if(seen.has(r.about_id)||(aboutIds.length&&!aboutIds.includes(r.about_id)))continue;seen.add(r.about_id);out.push(r);if(out.length>=4)break;}
+    // A topic opinion (E12) has no person id: it is kept apart by its name.
+    for(const r of rows){const key=r.about_id||'topic:'+r.about_name.toLocaleLowerCase('hu');if(seen.has(key)||(aboutIds.length&&!aboutIds.includes(r.about_id)))continue;seen.add(key);out.push(r);if(out.length>=4)break;}
     return out;
+  }
+  // Opinions from a conversation (E12, 2026-11-21): what he thought of someone he talked about, or
+  // of a recurring topic, from his side. After Generative Agents convo_to_thoughts /
+  // keyword_to_thoughts (Apache-2.0). Stored beside reflection beliefs (model 'play-opinion'),
+  // shown in his prompt as his opinion; never about himself; at most two per conversation.
+  function addOpinions(cid,list,{day,people=[],eventId=null}={}){
+    const byName=new Map(people.map(p=>[p.name.toLocaleLowerCase('hu'),p])),first=new Map();
+    for(const p of people){const f=p.name.split(/[\s-]+/).pop().toLocaleLowerCase('hu');first.set(f,first.has(f)?null:p);}
+    const written=[];
+    for(const o of (Array.isArray(list)?list:[]).slice(0,2)){
+      const name=String(o?.about||'').trim(),text=String(o?.text||'').trim();if(!name||!text)continue;
+      const key=name.toLocaleLowerCase('hu'),person=byName.get(key)||first.get(key)||null;
+      if(person?.id===cid)continue;
+      const id=randomUUID();
+      run('INSERT INTO world_beliefs(id,character_id,about_id,about_name,text,memory_ids_json,world_day,model,created_at,rewound_at) VALUES(?,?,?,?,?,?,?,?,?,NULL)',id,cid,person?.id||null,person?.name||clip(name,80),clip(text,300),JSON.stringify(eventId?[eventId]:[]),day,'play-opinion',iso());
+      written.push(id);
+    }
+    return written;
   }
   // For the owner: recent beliefs and who heard what.
   function overview(limit=40){
@@ -115,5 +135,5 @@ export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()})
     for(const id of beliefs)run('UPDATE world_beliefs SET rewound_at=NULL WHERE id=?',id);
     for(const k of knowledge)run('UPDATE world_knowledge SET rewound_at=NULL WHERE event_id=? AND character_id=?',k.event_id,k.character_id);
   }
-  return {spread,reflect,due,beliefsFor,overview,rewindAfter,undoRewind,knownEvents};
+  return {spread,reflect,due,beliefsFor,addOpinions,overview,rewindAfter,undoRewind,knownEvents};
 }

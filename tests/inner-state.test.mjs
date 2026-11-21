@@ -24,9 +24,9 @@ test('inner state: cleaning, fade speed by profile',()=>{
 
 test('inner state: written at the save point from his side, in his next prompt, rewound and restored',async t=>{
   const base=await fs.mkdtemp(path.join(os.tmpdir(),'lu-inner-')),root=path.join(base,'media'),dataDir=path.join(base,'data');await fs.mkdir(root,{recursive:true});
-  const requests=[];let delta=-1,inner={mood:'megbántott',intensity:3,reason:'Palor elfelejtette a születésnapját.',concerns:['a lakbér miatt aggódik','ki akar békülni az öccsével'],wants_from_palor:'egy őszinte bocsánatkérést',palor_view:'Haragszik rá, mert elfelejtette a születésnapját.'};
+  const requests=[];let opinions=[{about:'Béla',text:'Béla irigy rá, amióta megnyílt a pékség.'},{about:'pénz',text:'A pénz miatt örökké aggódni kell.'},{about:'Palor',text:'NEM-IDE'}],delta=-1,inner={mood:'megbántott',intensity:3,reason:'Palor elfelejtette a születésnapját.',concerns:['a lakbér miatt aggódik','ki akar békülni az öccsével'],wants_from_palor:'egy őszinte bocsánatkérést',palor_view:'Haragszik rá, mert elfelejtette a születésnapját.'};
   const provider=createMockProvider(req=>{requests.push(req);
-    if(req.system.includes('Egy beszélgetést foglalsz össze'))return {title:'Feszült beszélgetés',summary:'Szóba került a születésnap.',character_memory:'Palor elfelejtette.',level_delta:delta,reason:'Palor elfelejtette a születésnapját.',inner};
+    if(req.system.includes('Egy beszélgetést foglalsz össze'))return {title:'Feszült beszélgetés',summary:'Szóba került a születésnap.',character_memory:'Palor elfelejtette.',level_delta:delta,reason:'Palor elfelejtette a születésnapját.',inner,opinions};
     if(req.user.includes('Palor: Mennem kell?'))return {reply:'Most mennem kell, bocs.',leaving:'dolga van a pékségben'};
     return {reply:'Szia.'};});
   let clock=new Date('2026-11-10T09:00:00');
@@ -37,6 +37,8 @@ test('inner state: written at the save point from his side, in his next prompt, 
   const call=async(route,body)=>{const r=await fetch(origin+route,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json()};};
   await call('/api/characters',{name:'Palor',gender:'férfi'});
   const a=(await call('/api/characters',{name:'Teszt Aladár',gender:'férfi'})).data;
+  const b=(await call('/api/characters',{name:'Teszt Béla',gender:'férfi'})).data;
+  app.db.prepare('INSERT INTO application_settings(key,value) VALUES(?,?)').run('ghost:character:'+b.id,JSON.stringify({version:1,values:{goals:entry('Bosszú.')},history:[],proposals:[]}));
   app.db.prepare('INSERT INTO application_settings(key,value) VALUES(?,?)').run('ghost:character:'+a.id,JSON.stringify({version:1,values:{goals:entry('Pékséget nyitni.'),emotional_stability:entry(2)},history:[],proposals:[]}));
   const work=(await call('/api/locations',{name:'Pékség',kind:'tag'})).data;await call('/api/world-engine/places',{character_id:a.id,location_id:work.id,role:'work'});
   await fs.writeFile(path.join(dataDir,'location-canvas.json'),JSON.stringify({schema:1,head:'r1',approved_head:'r1',revisions:[{id:'r1',parent_id:null,kind:'approved',state:{schema:1,types:[],nodes:[{id:'n-b',name:'Pékség',parent_id:null,kind:'place',source_id:work.id,placed:true,archived:false,order:0}]}}]}));
@@ -56,6 +58,10 @@ test('inner state: written at the save point from his side, in his next prompt, 
   assert.match(u,/HANGULATOD: nagyon megbántott \(Palor elfelejtette a születésnapját\.\)/);
   assert.match(u,/AMI MOST FOGLALKOZTAT[^\n]*\n- a lakbér miatt aggódik\n- ki akar békülni az öccsével/);
   assert.match(u,/AMIT PALORTÓL SZERETNÉL: egy őszinte bocsánatkérést/);assert.match(u,/A MAI NAPOD: /);
+  // E12: his opinions from the last talk – about Béla (matched by first name) and about money.
+  assert.match(u,/A VÉLEMÉNYED[^\n]*\n(- [^\n]*\n)*- Teszt Béla: Béla irigy rá/);assert.match(u,/- pénz: A pénz miatt örökké aggódni kell\./);
+  assert.doesNotMatch(u,/NEM-IDE/,'no opinion about Palor here (his view of Palor is palor_view)');
+  assert.equal(app.db.prepare("SELECT count(*) n FROM world_beliefs WHERE model='play-opinion' AND about_id=?").get(b.id).n,1);
   // E6: where they stand as he sees it, and why the relationship changed.
   assert.match(u,/AHOGY TE LÁTOD, HOL TARTOTOK PALORRAL: Haragszik rá, mert elfelejtette a születésnapját\./);
   assert.match(u,/MIÉRT VÁLTOZOTT LEGUTÓBB A VISZONYOTOK[^\n]*\n- távolabb: Palor elfelejtette a születésnapját\./);
@@ -65,7 +71,7 @@ test('inner state: written at the save point from his side, in his next prompt, 
   const leave=(await call('/api/play/talk',{conversation_id:talk.id,text:'Mennem kell?'})).data;
   assert.equal(leave.leaving,'dolga van a pékségben');assert.equal(leave.lines.at(-1).text,'Most mennem kell, bocs.');
   // The next summary carries his earlier state so concerns can continue.
-  delta=0;inner={mood:'megkönnyebbült',intensity:1,reason:'Palor bocsánatot kért.',concerns:['a lakbér miatt aggódik'],wants_from_palor:''};
+  delta=0;opinions=[];inner={mood:'megkönnyebbült',intensity:1,reason:'Palor bocsánatot kért.',concerns:['a lakbér miatt aggódik'],wants_from_palor:''};
   await call(`/api/play/conversations/${talk.id}/end`,{});
   assert.match(requests.filter(r=>r.system.includes('Egy beszélgetést foglalsz össze')).at(-1).user,/KORÁBBI BELSŐ ÁLLAPOTA \([^)]*\): megbántott/);
   assert.equal(app.worldEngine.internals.inner.current(a.id).mood,'megkönnyebbült');
