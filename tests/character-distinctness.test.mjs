@@ -47,6 +47,7 @@ test('same situation, five people: inner life reaches the 1:1 prompt and the gro
   const origin='http://127.0.0.1:'+app.server.address().port;
   const call=async(route,body)=>{const r=await fetch(origin+route,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json()};};
   const palor=(await call('/api/characters',{name:'Palor',gender:'férfi'})).data;
+  app.db.prepare('INSERT INTO application_settings(key,value) VALUES(?,?)').run('ghost:character:'+palor.id,JSON.stringify({version:1,values:{play_voice:entry('PALOR-HANG: elemző, önjavító.'),play_contradiction:entry('PALOR-ELLENTMONDAS'),speech:entry('Általános beszédstílus\nPALOR-STILUS')},history:[],proposals:[]}));
   const work=(await call('/api/locations',{name:'Kávézó',kind:'tag'})).data;
   const people=[];
   for(const [name,values] of Object.entries(CAST)){const c=(await call('/api/characters',{name,gender:'férfi'})).data;people.push({...c,name,values});
@@ -79,6 +80,8 @@ test('same situation, five people: inner life reaches the 1:1 prompt and the gro
   assert.ok(bela.includes(SECRET_HEAD)&&bela.includes('TITOK-BELA'));
   for(const [i,u] of talk.entries())if(people[i].name!=='Teszt Béla')assert.ok(!u.includes('TITOK-BELA'),'nobody else gets his secret in a 1:1');
   for(const c of inGroup)if(CAST[c.name].secrets)assert.ok(blocks[c.name].includes(GROUP_SECRET_HEAD)&&blocks[c.name].includes(CAST[c.name].secrets));
+  // Palor's card leads the guide for the suggested lines (the player's character), never a character's own profile.
+  for(const u of talk){const i=u.indexOf('PALOR BESZÉDMÓDJA');assert.ok(i>=0&&u.indexOf('PALOR-HANG',i)>i&&u.indexOf('PALOR-ELLENTMONDAS',i)>i,'card in the voice guide');assert.ok(u.indexOf('PALOR-HANG')>i-1,'not elsewhere');}
   // E4: with no state yet, each one's aim comes from his own goal.
   for(const [i,u] of talk.entries())assert.ok(u.includes('A SAJÁT CÉLOD EBBEN A BESZÉLGETÉSBEN: közelebb jutni a célodhoz: '+people[i].values.goals.replace(/\.$/,'')),people[i].name);
   // E5: everyone may disagree; the low-agreeableness one is told he contradicts.

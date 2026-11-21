@@ -16,7 +16,7 @@ import {createMediaDirector,imageSize} from './media-director.mjs';
 import {partialJsonString} from './world-ai.mjs';
 import {ROLE_TEXT,describeActivity,moodOf,LEVEL_STYLE,CLOSENESS_RULES,TIME_MOOD,STAGE_ALLOW,BEATS,BEAT_WANT,MAX_DAILY_RISES,PACES,PACE_TEXT,PHONE_MOODS,cleanChoices} from './play/rules.mjs';
 import {createPlayScenes} from './play/scenes.mjs';
-import {palorVoice,speechOf,PALOR_VOICE_HEAD,CHOICE_RULES} from './play/palor-voice.mjs';
+import {palorVoice,palorCard,speechOf,PALOR_VOICE_HEAD,CHOICE_RULES} from './play/palor-voice.mjs';
 import {castProfileTexts} from './profile-prompt.mjs';
 import {innerInstruction} from './inner-state.mjs';
 import {appraisalLines,appraiseEvent} from './appraisal.mjs';
@@ -1133,7 +1133,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const palorLast=history.filter(l=>l.speaker==='palor').slice(-3).map(l=>clip(l.text,200));
     // Palor's own voice for the suggestions: his general style, how he talks to this person, his
     // flirting; his intimacy sections only inside an intimate scene.
-    const voice=palorVoice(speechOf(w.profile(pid)),c.name,{intimate});
+    const voice=[pid?palorCard(w.profile(pid)):'',palorVoice(speechOf(w.profile(pid)),c.name,{intimate})].filter(Boolean).join('\n\n');
     // Place and time are not in the system message (2026-11-12): it stays the same through a
     // conversation, so the provider's prompt cache can reuse it; they come at the end instead.
     const system=`Te ${c.name} vagy egy élő világban, és Palorral beszélsz (hol és mikor: az üzenet végén). Maradj a szerepben, a saját hangodon és beszédstílusodban, magyarul, röviden (1-4 mondat, mint egy valódi beszélgetésben; cselekvést *csillagok között* írhatsz). Minden válaszod vigye előre a jelenetet valami újjal (új mozdulat, érzés, érzékelés, gondolat, kérdés, helyzetváltozás vagy tempóváltás); ne ismételd a saját korábbi mondataidat, fordulataidat és képeidet, és ne kezdd ugyanúgy, mint az előzőt. Csak a profilodból, a Palorhoz fűződő kapcsolatodból, a közös múltatokból, az emlékeidből és a mai napodból dolgozz; ne találj ki új tényt a múltról, rokonokról vagy Palorról. Csak azt tudod Palorról, ami a kapcsolatodban és az emlékeidben szerepel; a titkos érzéseit nem ismered. A beszélgetőtársad neve Palor: ha nevén szólítod, mindig Palornak hívd; ő nem azonos a profilodban vagy az emlékeidben említett más emberekkel (barátok, rokonok, kollégák). Mindenki felnőtt. Senki nem hal meg. ${CLOSENESS_RULES[stage!=='none'&&(intimate||stage==='intimate')&&hostileWith(cid)?'hostile':intimate?'intimate':stage]}${channel==='phone'?` Telefonon képet is küldhetsz magadról, ha Palor kér, vagy ha nagyon illik a beszélgetéshez (ritkán): "photo" = ${PHONE_MOODS[stage].map(x=>`"${x}"`).join(' / ')}${stage==='none'?' (hétköznapi kép)':''}; egyébként "none".`:''} ${channel==='in_person'?` "beat": hol tart most köztetek a jelenet a te válaszod után (${beats.join(' / ')}); csak akkor lépj tovább, ha a beszélgetésben tényleg odáig jutottatok, és te is akarod.`:''} "leaving": ha most magadtól le akarod zárni a beszélgetést (dolgod van, sietsz, megsértődtél, eleged lett), egy rövid ok; különben "". Ha nem üres, a válaszodban jelezd is a saját módodon; a döntés a természetedé, nem kell mindig maradnod. "spark": hogyan hatott rád Palor utolsó mondata (-1 rosszul esett, 0 semleges, 1 jólesett). ${CHOICE_RULES(intimate)} Csak JSON: {"reply":"..."${moods.length>1?`,"mood":"${moods.join('|')}"`:''}${channel==='phone'?`,"photo":"none|${PHONE_MOODS[stage].join('|')}"`:`,"beat":"${beats.join('|')}"`},"leaving":"","spark":-1|0|1,"choices":["...","...","..."],"scene":"egy rövid mondat: hol tart most a jelenet a válaszod után, mi változott az előzőhöz képest"${wantMemo?',"memo":"2-3 mondat: az egész eddigi beszélgetés lényege (ki mit mondott, mit beszéltetek meg)"':''}}`;
@@ -1325,7 +1325,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const ownLast=history.filter(l=>l.speaker!=='palor').slice(-4).map(l=>'- '+(l.speaker_name?l.speaker_name+': ':'')+clip(l.text,300));
     const palorLast=history.filter(l=>l.speaker==='palor').slice(-3).map(l=>clip(l.text,200));
     const prevChoices=(()=>{if(!conv)return [];try{return cleanChoices(JSON.parse(one("SELECT m.choices_json FROM active_play_lines l JOIN play_line_meta m ON m.line_id=l.id WHERE l.conversation_id=? AND l.speaker='character' ORDER BY l.rowid DESC LIMIT 1",conv.id)?.choices_json||'[]'));}catch{return [];}})();
-    const voice=palorVoice(speechOf(w.profile(pid)),names.join(' '),{intimate:gIntimate});
+    const voice=[pid?palorCard(w.profile(pid)):'',palorVoice(speechOf(w.profile(pid)),names.join(' '),{intimate:gIntimate})].filter(Boolean).join('\n\n');
     const user=[...people.map(block),'A JELENET EDDIG:\n'+(history.slice(-24).map(l=>(l.speaker==='palor'?'Palor':l.speaker_name||'?')+': '+l.text).join('\n')||'(most kezdődik)'),
       ...(ownLast.length>=2?['AZ UTOLSÓ VÁLASZOK – ezek mondatait, fordulatait és képeit most NE ismételjétek:\n'+ownLast.join('\n')]:[]),
       ...(voice?[PALOR_VOICE_HEAD+voice]:[]),

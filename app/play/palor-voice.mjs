@@ -62,6 +62,16 @@ export function palorVoice(text,characterName,{intimate=false,max=intimate?4200:
   const joined=picked.join('\n\n');return joined.length>max?joined.slice(0,max)+'…':joined;
 }
 
+// Palor's character card (owner, 2026-11-21): his voice, rules and contradiction lead the guide
+// for the suggested lines, so the suggestions sound like him (he overthinks an ambiguous remark,
+// gets eager around a respected older man…). Used only for the "choices"; the player still
+// decides, and no character prompt gets it.
+export function palorCard(profile){
+  const v=id=>{const x=profile?.values?.[id]?.value;return typeof x==='string'?x.trim():'';};
+  const lines=[['Hangja',v('play_voice')],['Ahogy viselkedik',v('play_rules')],['Ellentmondása',v('play_contradiction')],['Jellemző mondatai',v('play_lines')]].filter(([,x])=>x).map(([k,x])=>`${k}: ${x.slice(0,500)}`);
+  return lines.length?'Szerepkártya:\n'+lines.join('\n'):'';
+}
+
 export const PALOR_VOICE_HEAD='PALOR BESZÉDMÓDJA (ahhoz, hogy a "choices" Palor saját hangján szóljon):\n';
 
 // The suggested lines (owner, 2026-11-21, replacing 2026-11-15's "one direct reaction"): all
