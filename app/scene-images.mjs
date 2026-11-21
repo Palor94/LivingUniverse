@@ -80,8 +80,8 @@ export function installSceneImages({db,root,one,all,run,transaction,fail,palor,l
   // Upload in the game: a friendly name "<place> - <date>-<n>.png"; identical bytes are reused.
   async function upload(body){
     const c=one('SELECT id,name FROM characters WHERE id=?',body.character_id);if(!c)throw fail('Character not found',404);
-    const m=typeof body.data_url==='string'&&body.data_url.match(/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=]+)$/);if(!m)throw fail('Choose a JPEG or PNG image.');
-    const bytes=Buffer.from(m[2],'base64');if(!bytes.length||bytes.length>MAX_BYTES)throw fail('Images must be at most 20 MiB.',413);
+    const m=typeof body.data_url==='string'&&body.data_url.match(/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=]+)$/);if(!Buffer.isBuffer(body.bytes)&&!m)throw fail('Choose a JPEG or PNG image.');
+    const bytes=Buffer.isBuffer(body.bytes)?body.bytes:Buffer.from(m[2],'base64');if(!bytes.length||bytes.length>MAX_BYTES)throw fail('Images must be at most 20 MiB.',413);
     const type=await validateMedia(bytes);if(type.kind!=='image')throw fail('Choose a JPEG or PNG image.');
     if(body.content!==undefined&&!LEVELS.includes(body.content))throw fail('Unknown content level.');
     const t=await locationTree.load(),node=body.location_id?t.byLocation.get(body.location_id):null;
@@ -107,7 +107,7 @@ export function installSceneImages({db,root,one,all,run,transaction,fail,palor,l
       :one("SELECT id,slot,memo_json FROM play_conversations WHERE character_id=? AND status='open' AND channel='in_person' AND rewound_at IS NULL ORDER BY rowid DESC LIMIT 1",characterId);
     if(!conv)return null;
     const p=palor(),c=one('SELECT name FROM characters WHERE id=?',characterId);
-    const rows=all("SELECT l.speaker,l.text,(SELECT beat FROM play_line_meta m WHERE m.line_id=l.id) beat FROM play_lines l WHERE l.conversation_id=? ORDER BY l.rowid DESC LIMIT 8",conv.id).reverse();
+    const rows=all("SELECT l.speaker,l.text,(SELECT beat FROM play_line_meta m WHERE m.line_id=l.id) beat FROM active_play_lines l WHERE l.conversation_id=? ORDER BY l.rowid DESC LIMIT 8",conv.id).reverse();
     const beat=[...rows].reverse().find(r=>r.speaker==='character'&&r.beat)?.beat||null;
     let memo=null;try{memo=JSON.parse(conv.memo_json||'null')?.text||null;}catch{}
     return {beat,memo,slot:conv.slot,lines:rows.map(r=>({who:r.speaker==='palor'?(p?.name||'Palor'):c?.name||'',text:r.text}))};

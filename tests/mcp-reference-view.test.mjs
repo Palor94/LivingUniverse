@@ -24,7 +24,7 @@ test('reference preview is a single static resource and only verified image resu
   assert.match(replies[6].result._meta['living-universe/program'],/^\d{4}-\d\d-\d\dT|unknown/);assert.equal(wire.includes('private path'),false);
   // 16 read-only tools since the 2026-11-06 living-world streak (scene pack, memories, story
   // clock, next scenes, reference coverage). Update deliberately when tools are added.
-  assert.equal(tools.length,16);assert.equal(tools.find(t=>t.name==='get_approved_references')._meta.ui.resourceUri,REFERENCE_VIEW_URI);
+  assert.equal(tools.length,18);assert.equal(tools.find(t=>t.name==='get_approved_references')._meta.ui.resourceUri,REFERENCE_VIEW_URI);
   assert.deepEqual(tools.filter(t=>t._meta?.ui?.resourceUri).map(t=>t.name),['get_approved_references'],'only the reference tool opens the picture viewer');
 });
 

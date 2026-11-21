@@ -59,6 +59,8 @@ test('face identity: suggestions only above the margin, likely wrong links, refe
     assert.deepEqual(ada.items.map(i=>i.status).sort(),['ok','ok','outlier'],'the reference showing someone else stands out');
     assert.deepEqual(bela.items.map(i=>i.status),['ok','ok'],'the crop picks the face inside it');
     assert.equal(r.report.lookalikes.length,0);
+    const screened=await app.identity.checkGenerated(a.id,id('solo-a.png'));assert.equal(screened.face_verdict,'matches');assert.equal(screened.body_verdict,'unknown');assert.equal(screened.canon_changed,false);
+    assert.equal((await app.identity.checkGenerated(a.id,id('pair.png'))).reason,'MULTIPLE_FACES');
     // The owner says no: that suggestion disappears. Yes goes through the ordinary link route.
     const pairA=r.report.suggestions.find(s=>s.media_id===id('pair.png')&&s.name==='Teszt Ádám');
     await api('/api/identity/feedback',{media_id:pairA.media_id,character_id:pairA.character_id,verdict:'no'});

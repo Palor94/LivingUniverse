@@ -1,0 +1,16 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {randomUUID} from 'node:crypto';
+import {installPlayImageWorker} from '../app/play-image-worker.mjs';
+test('finite figure worker uses frozen jobs, abstains on uncertain faces and never retries paid failures or changes canon',async()=>{
+  const db=new DatabaseSync(':memory:');db.exec('CREATE TABLE application_settings(key TEXT PRIMARY KEY,value TEXT);CREATE TABLE image_generation_runs(id TEXT,request_key TEXT);CREATE TABLE canon(id TEXT,character_id TEXT);');const cid=randomUUID(),revision=randomUUID(),mid=randomUUID();db.prepare('INSERT INTO canon VALUES(?,?)').run(revision,cid);const plans=new Map();let calls=0,finished=[],face='uncertain',revoked=false;
+  const imageGeneration={capabilities:()=>({providers:[{provider:'sogni',available:true}]}),prepare:async args=>{const run_id=randomUUID(),plan={run_id,status:'pending',manifest:args,outputs:[]};db.prepare('INSERT INTO image_generation_runs VALUES(?,?)').run(run_id,args.request_key);plans.set(run_id,plan);return plan;},view:rid=>structuredClone(plans.get(rid)),execute:async rid=>{calls++;const plan=plans.get(rid);plan.status='succeeded';plan.outputs=[{media_id:mid,active:true}];},settle:async()=>{}};
+  const worker=installPlayImageWorker({one:(sql,...args)=>db.prepare(sql).get(...args),all:(sql,...args)=>db.prepare(sql).all(...args),run:(sql,...args)=>db.prepare(sql).run(...args),imageGeneration,sessions:{get:()=>({status:revoked?'revoked':'approved',scope:{jobs:[...plans.keys()].map(run_id=>({run_id}))}})},playAssets:{brief:async args=>({...args,prompt:'Exact approved male figure prompt.',content_expected:'non_intimate'}),startJob:async()=>({job_id:randomUUID()}),finishJob:async args=>{finished.push(args);return {status:args.outcome};}},playMode:{},origin:{everydayReferences:()=>[{media_id:mid,role:'face'}]},palor:()=>null,identity:{checkGenerated:async()=>({face_verdict:face,body_verdict:'unknown',method:'local-fixture'})}});
+  try{const args={request_key:'worker_fixture_001',target:'figure',character_id:cid,expression:'mosoly',output_count:1,max_estimated_capacity_units:2},order=await worker.prepare(args);assert.equal(calls,0);assert.equal(order.plan.manifest.play_target.character_id,cid);assert.equal(order.plan.manifest.prompt,'Exact approved male figure prompt.');assert.equal((await worker.prepare(args)).run_id,order.run_id);
+    await worker.startWorker('fixture-session');await worker.settle();assert.equal(calls,1);assert.equal(worker.view(order.run_id).status,'review_required');assert.equal(finished.length,0);assert.equal(worker.view(order.run_id).checks[0].body_verdict,'unknown');
+    // An owner can review the already generated output; no new generation call.
+    face='matches';await worker.place(order.run_id,0);assert.equal(calls,1);assert.equal(finished.length,1);assert.equal(finished[0].outcome,'done');assert.equal(worker.view(order.run_id).status,'placed');
+    revoked=true;await assert.rejects(worker.startWorker('fixture-session'),{code:'APPROVAL_REQUIRED'});assert.equal(calls,1);assert.equal(db.prepare('SELECT COUNT(*) n FROM canon').get().n,1);
+  }finally{db.close();}
+});

@@ -1,3 +1,5 @@
+import {notify} from './interactions.js';
+import './app-install.js';
 // "Játék" on the phone (NEXT_GEN_PLAN 4.8): the same play screen as on the desktop, served by
 // the restricted mobile listener behind Tailscale. Every change carries the mobile session's
 // CSRF token; the mobile listener forwards only play routes to the desktop application.
@@ -11,14 +13,8 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 let csrf='',toastTimer=null;
 const csrfHeaders=()=>({'X-LU-CSRF':csrf});
 
-function toast(message,error=false){
-  if(error)try{window.__luTrail?.error(message,'üzenet');}catch{}
-  const box=$('#toast'),text=document.createElement('span'),close=document.createElement('button');
-  const hide=()=>{clearTimeout(toastTimer);box.style.display='none';};
-  text.textContent=message;close.type='button';close.className='toast-close';close.textContent='✕';close.setAttribute('aria-label',t('common.dismiss'));close.onclick=hide;
-  box.replaceChildren(text,close);box.classList.toggle('error',error);box.setAttribute('role',error?'alert':'status');box.style.display='flex';
-  clearTimeout(toastTimer);if(!error)toastTimer=setTimeout(hide,3500);
-}
+function toast(message,error=false,retry=null){if(error)try{window.__luTrail?.error(message,'üzenet');}catch{}return notify(message,error,retry);}
+
 async function api(route,data,method){
   const m=method||(data?'POST':'GET');
   const r=await fetch(route,{method:m,headers:{...(data?{'Content-Type':'application/json'}:{}),...(m!=='GET'?csrfHeaders():{})},body:data?JSON.stringify(data):undefined});

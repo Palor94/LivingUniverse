@@ -5,6 +5,7 @@
 // `npm run doctor -- --weekly` for a Markdown file.
 import {readFileSync} from 'node:fs';
 import path from 'node:path';
+import {readMeasurements,measurementSummary} from './ux-measurements.mjs';
 
 function readJsonLines(file){
   const out=[];
@@ -31,6 +32,7 @@ export async function weeklyReport({dataDir,all,requestLog,aiTrace,jobs,audit,no
   let auditResult=null;try{auditResult=audit?await audit():null;}catch{}
   return {
     from:since,to:new Date(now()).toISOString(),
+    ux:measurementSummary(readMeasurements(dataDir),{since,to:new Date(now()).toISOString()}),
     errors:{total:errors.length,server:errors.filter(e=>e.source!=='client').length,client:errors.filter(e=>e.source==='client').length,top:[...groups.values()].sort((a,b)=>b.count-a.count).slice(0,10)},
     slow_requests:[...slow.values()].sort((a,b)=>b.slow+b.failed-(a.slow+a.failed)).slice(0,10),
     ai:{...aiTotal,cache_share:aiTotal.input?+(aiTotal.cached/aiTotal.input).toFixed(3):null,by_day:ai},
@@ -49,6 +51,7 @@ export function weeklyMarkdown(r){
     '## Lassú vagy hibás kérések (indulás óta)','',...(r.slow_requests.length?r.slow_requests.map(s=>`- ${s.route}: ${s.slow} lassú, ${s.failed} hibás, leghosszabb ${s.max_ms} ms`):['Nincs.']),'',
     '## AI','',line('hívások',r.ai.calls),line('hibák',r.ai.errors),line('csonka válaszok',r.ai.truncated),line('gyorsítótár aránya',r.ai.cache_share===null?'–':Math.round(r.ai.cache_share*100)+'%'),line('költség',r.cost.total_usd.toFixed(2)+' USD'),'',
     '## Háttérfeladatok','',line('futott',r.jobs.total),...r.jobs.failed.map(j=>`- hiba: ${j.kind} ${j.at}: ${j.error}`),...r.jobs.stuck.map(j=>`- beragadt: ${j.kind} (${j.minutes} perce)`),'',
+    '## Feladatmérések','',...((r.ux||[]).length?r.ux.map(m=>`- ${{talk:'Első mondatig',background:'Háttér beállítása',other:'Egyéb feladat'}[m.task]} (${m.surface==='phone'?'telefon':'laptop'}): ${m.runs} mérés, átlag ${m.avg_clicks} kattintás, ${(m.avg_ms/1000).toFixed(1)} mp`):['Nincs lezárt mérés.']),'',
     '## Kiesések','',...(r.outages.length?r.outages.map(o=>`- ${o.what}: ${o.state}, ${o.from}${o.to?' – '+o.to:' (most is)'} (${o.minutes} perc)`):['Nincs.']),'',
     '## Adatellenőrzés','',r.audit?(r.audit.problems?r.audit.checks.map(c=>`- ${c.id}: ${c.count}`).join('\n'):'Nincs eltérés.'):'Nem futott.',''].join('\n');
 }

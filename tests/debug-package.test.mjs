@@ -14,6 +14,8 @@ import {createCallLog} from '../mcp/call-log.mjs';
 import {changeRisk} from '../ops/test.mjs';
 import {seededRandom} from '../ops/sandbox.mjs';
 import {createTrail,controlLabel} from '../app/public/debug-trail.js';
+import {weeklyMarkdown} from '../app/weekly-report.mjs';
+import {isPlayRoute} from '../app/mobile.mjs';
 
 test('request ids, steps, statistics, connector, weekly report and bug reports',async()=>{
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'lu-debug-'));let app;
@@ -54,10 +56,19 @@ test('request ids, steps, statistics, connector, weekly report and bug reports',
     assert.equal(conn.clients[0].stale_calls,1);
 
     // Weekly report.
+    const measurement={id:'11111111-2222-4333-8444-555555555555',task:'talk',surface:'desktop',clicks:4,ms:2500};
+    assert.equal((await post('/api/dev/ux-measurements',measurement)).r.status,201);
+    assert.equal((await post('/api/dev/ux-measurements',measurement)).body.duplicate,true,'an uncertain save can be retried without counting twice');
+    assert.equal((await post('/api/dev/ux-measurements',{...measurement,note:'private entered text'})).r.status,400);
+    assert.equal((await post('/api/dev/ux-measurements',{...measurement,clicks:-1})).r.status,400);
+    const foreign=await fetch(origin+'/api/dev/ux-measurements',{method:'POST',headers:{'content-type':'application/json',origin:'https://example.com'},body:JSON.stringify(measurement)});
+    assert.equal(foreign.status,403);
     const {body:week}=await get('/api/dev/weekly');
     assert.equal(week.errors.client,1);
     assert.equal(week.ai.calls,3);
     assert.ok(week.audit);
+    assert.deepEqual(week.ux,[{task:'talk',surface:'desktop',runs:1,clicks:4,ms:2500,avg_clicks:4,avg_ms:2500}]);
+    assert.match(weeklyMarkdown(week),/Első mondatig \(laptop\): 1 mérés, átlag 4 kattintás, 2.5 mp/);
 
     // Bug report with a database snapshot; list; replay goes to the sandbox launcher.
     const {r:created,body:report}=await post('/api/dev/bug-report',{note:'A térkép nem nyílt meg',snapshot:true,client:{steps:[{kind:'click',text:'Térkép'}]}});
@@ -127,4 +138,28 @@ test('the browser trail keeps clicks and requests, never typed text',()=>{
   assert.equal(controlLabel(input),'input');
   const button=fake('BUTTON',{id:'play-scan'},'  Háttérképek   beolvasása ');button.closest=()=>button;
   assert.equal(controlLabel(button),'Háttérképek beolvasása #play-scan');
+});
+
+test('B7 counts tasks across the bounded trail and reload; debugger clicks and cancelled tasks are excluded',()=>{
+  let clock=1000;const saved=new Map(),old=globalThis.sessionStorage;
+  globalThis.sessionStorage={getItem:k=>saved.get(k),setItem:(k,v)=>saved.set(k,v)};
+  try{
+    let trail=createTrail({clock:()=>clock,makeId:()=> '11111111-2222-4333-8444-555555555555'});
+    assert.equal(trail.startTask('talk'),true);assert.equal(trail.startTask('background'),false);
+    for(let n=0;n<75;n++)trail.note('click','control');
+    trail.note('click','Feladat vége',{measure:false});
+    assert.equal(trail.steps(100).length,60);
+    trail=createTrail({clock:()=>clock});clock=4500;
+    assert.equal(trail.activeTask().clicks,75,'counter is independent of the 60-step ring and survives reload');
+    const record=trail.finishTask();assert.deepEqual([record.clicks,record.ms,record.task,record.surface],[75,3500,'talk','desktop']);
+    assert.equal(trail.finishTask(),null);
+    assert.equal(trail.measurements()[0].saved,undefined);trail.taskSaved(record.id);
+    assert.equal(trail.measurements()[0].saved,true);
+    assert.equal(trail.startTask('other','phone'),true);trail.cancelTask();
+    assert.equal(trail.measurements().length,1);
+    assert.equal(trail.activeTask(),null);assert.equal(trail.startTask('private text'),false);
+    assert.equal(isPlayRoute('/api/dev/ux-measurements','POST'),true);
+    assert.equal(isPlayRoute('/api/dev/ux-measurements','GET'),false);
+    assert.equal(isPlayRoute('/api/dev/weekly','GET'),false);
+  }finally{globalThis.sessionStorage=old;}
 });

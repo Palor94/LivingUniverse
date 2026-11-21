@@ -120,14 +120,46 @@ test('Szereplőgyár: one form, Grok profile accepted and checked, avatars and g
   const bandiSrc=app.db.prepare('SELECT relative_path FROM media WHERE id=?').get(s.source_pictures[0].media_id).relative_path;
   assert.equal(path.basename(bandiSrc),`Teszt Bandi - forrás - meztelen - ${day}-1.png`,'content chosen per picture');
   assert.equal((await mcp('order_picture_save',{order_id:s.order_id,media_id:s.source_pictures[0].media_id})).status,400,'scene is required');
-  // Intimate shared scene: Palor's origin does not allow it here, so it is blocked, not made.
-  assert.equal(s.gallery.scenes.find(x=>x.scene==='coffee').state,'blocked');assert.equal(s.gallery.blocked,1);
-  assert.equal((await mcp('order_picture_save',{order_id:s.order_id,scene:'coffee',media_id:s.source_pictures[0].media_id})).status,403,'origin gate');
+  // No origin gate in the Szereplőgyár (owner): the intimate shared scene is made as chosen.
+  assert.equal(s.gallery.scenes.find(x=>x.scene==='coffee').state,'open');
+  const coffee=(await mcp('order_picture_save',{order_id:s.order_id,scene:'coffee',media_id:s.source_pictures[0].media_id})).data;
+  assert.equal(coffee.file,`Palor + Teszt Bandi - közös kávé - szex - ${day}-1.png`,JSON.stringify(coffee));
   const shared=(await mcp('order_picture_save',{order_id:s.order_id,scene:'walk',media_id:s.source_pictures[0].media_id,content:'sexual_activity'})).data;
   assert.equal(shared.file,`Palor + Teszt Bandi - séta - hetkoznapi - ${day}-1.png`,'Palor first, scene label, the scene content wins');
   const palorId=app.db.prepare("SELECT id FROM characters WHERE name='Palor'").get().id;
   assert.ok(app.db.prepare('SELECT 1 FROM depictions WHERE media_id=? AND character_id=?').get(shared.media_id,palorId),'Palor linked');
   assert.equal((await mcp('order_picture_save',{order_id:s.order_id,scene:'walk',media_id:s.source_pictures[0].media_id})).status,409,'scene already done');
+  // Life moments for existing characters: daily + shirtless always, Palor scenes only with a recorded relationship.
+  const lajos=(await call('/api/characters',{name:'Teszt Lajos',gender:'férfi'})).data,feri=(await call('/api/characters',{name:'Teszt Feri',gender:'férfi'})).data;
+  app.db.prepare('INSERT INTO relationships VALUES(?,?,?,?)').run(randomUUID(),feri.id,palorId,'Régi edzőtársak, hetente együtt futnak.');
+  const cands=(await call('/api/character-orders/life')).data.characters;
+  assert.equal(cands.some(c=>c.name==='Palor'),false,'not for Palor');assert.equal(cands.find(c=>c.id===feri.id).relationship,true);assert.equal(cands.find(c=>c.id===lajos.id).relationship,false);
+  const onlyPalor=(await call('/api/character-orders/life',{character_ids:[lajos.id],daily:false,shirtless:false})).data;
+  assert.deepEqual([onlyPalor.made.length,onlyPalor.skipped[0].reason],[0,'no_relationship'],'no relationship → nothing invented');
+  const lifeL=(await call('/api/character-orders/life',{character_ids:[lajos.id]})).data.made[0];
+  assert.equal(lifeL.kind,'life');assert.equal(lifeL.relationship_with_palor,'none recorded: do not invent one');
+  assert.equal(lifeL.gallery.want,11);assert.equal(lifeL.gallery.scenes.filter(x=>x.with_palor).length,0,'no Palor without a relationship');
+  assert.equal(lifeL.gallery.scenes.filter(x=>x.content==='nudity').length,6);
+  const lifeF=(await call('/api/character-orders/life',{character_ids:[feri.id]})).data.made[0];
+  assert.equal(lifeF.gallery.want,14);assert.equal(lifeF.gallery.scenes.filter(x=>x.with_palor).length,6,'3 relationship + 3 shirtless with Palor');
+  assert.deepEqual(lifeF.relationship_with_palor.notes,['Régi edzőtársak, hetente együtt futnak.']);
+  assert.equal((await call('/api/character-orders/life',{character_ids:[feri.id]})).data.skipped[0].reason,'open','one open life order per character');
+  const forGpt2=(await mcp('orders_list',{for:'chatgpt'})).data;assert.ok(forGpt2.orders.some(x=>x.order_id===lifeF.order_id),'ChatGPT gets life orders');
+  assert.equal((await mcp('orders_list',{for:'grok'})).data.orders.some(x=>x.order_id===lifeF.order_id),false,'Grok does not');
+  // A new approved shared event → its own order with one picture of that moment.
+  const ev=randomUUID();
+  app.db.prepare('INSERT INTO story_events VALUES(?,?,?,?,?,?)').run(ev,1,'k-'+ev,'h',null,new Date().toISOString());
+  app.db.prepare('INSERT INTO story_event_revisions VALUES(?,?,?,?,?,?,?)').run(ev,1,'approved',JSON.stringify({title:'Közös futás a Velencei-tónál',summary:'Feri és Palor együtt futnak le tíz kilométert.'}),'test','test',new Date().toISOString());
+  for(const id of [feri.id,palorId])app.db.prepare('INSERT INTO story_event_participants VALUES(?,?,?,?)').run(ev,id,'participant',1);
+  const auto=(await call('/api/character-orders')).data.orders.filter(x=>x.character_id===feri.id&&x.kind==='palor_event');
+  assert.equal(auto.length,1);assert.equal(auto[0].gallery.want,1);assert.match(auto[0].gallery.scenes[0].default_idea,/Velencei-tónál/);
+  assert.equal((await call('/api/character-orders')).data.orders.filter(x=>x.kind==='palor_event').length,1,'an event is ordered once');
+  const couch=(await mcp('order_picture_save',{order_id:lifeF.order_id,scene:'bare_couch',media_id:s.source_pictures[0].media_id})).data;
+  assert.equal(couch.file,`Palor + Teszt Feri - kanapén - meztelen - ${day}-1.png`,JSON.stringify(couch));
+  const lifePic=(await mcp('order_picture_save',{order_id:lifeF.order_id,scene:'palor_1',media_id:s.source_pictures[0].media_id})).data;
+  assert.equal(lifePic.saved,true,JSON.stringify(lifePic));assert.equal(lifePic.file,`Palor + Teszt Feri - közös pillanat - hetkoznapi - ${day}-1.png`);
+  assert.equal(lifePic.face.state,'unchecked','no approved references yet');
+
   const ref=(await mcp('order_picture_save',{order_id:s.order_id,scene:'selfie',outcome:'refused',note:'no'})).data;
-  assert.equal(ref.gallery.scenes.find(x=>x.scene==='selfie').state,'refused');assert.equal(ref.gallery.have+ref.gallery.refused,2);assert.equal(ref.gallery.state,'open');
+  assert.equal(ref.gallery.scenes.find(x=>x.scene==='selfie').state,'refused');assert.equal(ref.gallery.have+ref.gallery.refused,3);assert.equal(ref.gallery.state,'open');
 });

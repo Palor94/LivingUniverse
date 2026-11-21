@@ -11,7 +11,7 @@ import {createMockProvider} from '../app/world-ai.mjs';
 
 const entry=value=>({value,interpretation:'',kind:'hypothesis',source:'teszt',visibility:'creator'});
 
-test('narrator: answers *Rendszer!* orders from the data, explicit details only when open',async t=>{
+test('narrator: answers *Rendszer!* orders from the data, explicit details in person, never on the phone',async t=>{
   const base=await fs.mkdtemp(path.join(os.tmpdir(),'lu-narrator-')),root=path.join(base,'media'),dataDir=path.join(base,'data');
   await fs.mkdir(root,{recursive:true});
   const requests=[];
@@ -30,13 +30,17 @@ test('narrator: answers *Rendszer!* orders from the data, explicit details only 
   await call('/api/play/travel',{node_id:'n-home'});
   const setLevel=l=>call('/api/world-engine/levels',{source_id:a.id,target_id:palor.id,level:l});
 
-  // Flirt stage: the narrator answers, the character does not, explicit fields stay out.
+  // Flirt stage in person (owner 2026-11-18: the narrator follows the scene that is running, the
+  // relationship level alone does not close it): the narrator answers, explicit fields included.
   await setLevel(0);
   let r=(await call('/api/play/talk',{character_id:a.id,text:'*Rendszer! adj leírást róla*'})).data;
   assert.equal(r.narration_only,true);assert.equal(r.narration.answer,'Narrátori válasz.');assert.equal(r.narration.question,'adj leírást róla');
   assert.equal(requests.length,1,'only the narrator was asked');
-  assert.ok(requests[0].system.includes('Rendszere'));assert.ok(!requests[0].user.includes('ANATÓMIA-ADAT'));
+  assert.ok(requests[0].system.includes('Rendszere'));assert.ok(requests[0].user.includes('ANATÓMIA-ADAT'));
   assert.equal(app.db.prepare('SELECT count(*) n FROM play_conversations').get().n,0,'no conversation started');
+  // On the phone explicit fields stay out.
+  await call('/api/play/talk',{character_id:a.id,channel:'phone',text:'*Rendszer! adj leírást róla*'});
+  assert.ok(!requests.at(-1).user.includes('ANATÓMIA-ADAT'));
 
   // Intimate stage: explicit details are part of the data.
   await setLevel(2);

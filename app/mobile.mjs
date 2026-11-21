@@ -1,19 +1,20 @@
-﻿import http from 'node:http';
+import http from 'node:http';
 import {randomBytes} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 
 const fields={aliases:1000,biography:30000,personality:30000,sexuality:30000,speech_style:30000,appearance:30000,notes:30000};
-const PLAY_CSP="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+const PLAY_CSP="default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 // What the phone's play screen may reach on the desktop application. Uploads and scans of
 // backgrounds, sprites and scenes stay on the desktop.
-const PLAY_ASSETS=new Set(['/play.js','/play-map.js','/play-story.js','/play-town-map.js','/play-icons.js','/debug-trail.js','/layout-check.js','/play-debug.js','/sprite-cutout.js','/style.css','/theme.css']);
+const PLAY_ASSETS=new Set(['/interactions.js','/interactions.css','/app-routes.js','/play.webmanifest','/app-icon.svg','/app-icon-192.png','/app-icon-512.png','/app-install.js','/service-worker.js','/play.js','/command-palette.js','/upload-image.js','/asset-generation.js','/picture-order.js','/api-json.js','/play-scene.js','/play-dialog.js','/play-travel.js','/play-map.js','/play-map-layout.js','/play-story.js','/play-town-map.js','/play-icons.js','/debug-trail.js','/layout-check.js','/play-debug.js','/sprite-cutout.js','/sprite-cutout-worker.js','/sprite-cutout-pixels.js','/style.css','/theme.css']);
 export function isPlayRoute(p,method){
+  if(p==='/api/dev/ux-measurements')return method==='POST';
   const read=method==='GET'||method==='HEAD';
   if(read&&(PLAY_ASSETS.has(p)||/^\/(thumb|media)\/[^/]+$/.test(p)||/^\/api\/sprites\/[^/]+$/.test(p)&&p!=='/api/sprites/scan'))return true;
   if(/^\/api\/play\/scenes\/(scan|upload)$/.test(p))return false;
   return /^\/api\/play(?:\/|$)/.test(p)||/^\/api\/world-engine\/(levels|events\/[^/]+(?:\/[a-z-]+)?)$/.test(p);
 }
-const FORWARD_REQUEST=['content-type','content-length','accept','accept-encoding','if-none-match','range'];
+const FORWARD_REQUEST=['content-type','content-length','x-lu-asset-csrf','accept','accept-encoding','if-none-match','range'];
 const FORWARD_RESPONSE=['content-type','content-length','content-encoding','etag','cache-control','vary','location','content-range','accept-ranges','last-modified'];
 // Streams one request to the desktop listener and its answer back (streamed talk included).
 function forward(req,res,target,securityHeaders){
@@ -92,7 +93,7 @@ export function createMobileServer({config,play=true,all,one,run,transaction,cha
       const importPage=/^\/media-import\/[0-9a-f-]{36}$/i.test(p),connectPage=/^\/grok-connect\/[0-9a-f]{32}$/i.test(p);
       const renamePage=p==='/character-rename.html';
       const ghostPage=/^\/ghost-profile\/[0-9a-f-]{36}$/i.test(p);
-      const ghostApi=/^\/api\/characters\/[0-9a-f-]{36}\/ghost(?:\/proposals(?:\/[0-9a-f-]{36}\/decision)?)?$/i.test(p);
+      const ghostApi=/^\/api\/characters\/[0-9a-f-]{36}\/ghost(?:\/manual|\/proposals(?:\/[0-9a-f-]{36}\/decision)?)?$/i.test(p);
       const generationPage=/^\/image-generation\/[0-9a-f-]{36}$/i.test(p);
       const previewRoute=p.match(/^\/approved-preview\/([0-9a-f-]{36})\/([0-9a-f-]{36})$/i);
       const originalRoute=/^\/media-original\/([a-fA-F0-9-]{36})$/.exec(p);
@@ -126,10 +127,10 @@ export function createMobileServer({config,play=true,all,one,run,transaction,cha
         if(req.method==='GET'&&(renamePage||p==='/character-rename.js'||p==='/character-rename.css')){const file=renamePage?'character-rename.html':p.slice(1);const content=await fs.readFile(new URL('./public/'+file,import.meta.url));res.writeHead(200,{...headers,'Content-Type':renamePage?'text/html; charset=utf-8':p.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8'});return res.end(content);}
       }
       if(ghostProfiles){
-        const ghost=p.match(/^\/api\/characters\/([0-9a-f-]{36})\/ghost(?:\/proposals(?:\/([0-9a-f-]{36})\/decision)?)?$/i);
-        if(ghost){character(ghost[1]);if(req.method==='GET'&&p.endsWith('/ghost'))return json(ghostProfiles.get(ghost[1]));if(req.method==='POST'&&p.endsWith('/proposals'))return json(ghostProfiles.propose(ghost[1],body));if(req.method==='POST'&&ghost[2])return json(ghostProfiles.decide(ghost[1],ghost[2],body,login));throw fail('Nem támogatott szellemprofil-művelet.',405);}
+        const ghost=p.match(/^\/api\/characters\/([0-9a-f-]{36})\/ghost(?:\/manual|\/proposals(?:\/([0-9a-f-]{36})\/decision)?)?$/i);
+        if(ghost){character(ghost[1]);if(req.method==='GET'&&p.endsWith('/ghost'))return json(ghostProfiles.get(ghost[1]));if(req.method==='POST'&&p.endsWith('/manual'))return json(ghostProfiles.saveManual(ghost[1],body,login));if(req.method==='POST'&&p.endsWith('/proposals'))return json(ghostProfiles.propose(ghost[1],body));if(req.method==='POST'&&ghost[2])return json(ghostProfiles.decide(ghost[1],ghost[2],body,login));throw fail('Nem támogatott szellemprofil-művelet.',405);}
         if(p==='/api/ghost-template'){if(req.method==='GET')return json(ghostProfiles.template());if(req.method==='PUT')return json(ghostProfiles.saveTemplate(body,login));}
-        if(req.method==='GET'&&(ghostPage||['/ghost-review.js','/ghost-profile.js','/profile-appearance-guide.js','/ghost-import.js','/ghost-review.css'].includes(p))){
+        if(req.method==='GET'&&(ghostPage||['/ghost-review.js','/ghost-profile.js','/profile-autosave.js','/profile-appearance-guide.js','/ghost-import.js','/ghost-review.css'].includes(p))){
           const file=ghostPage?'ghost-review.html':p.slice(1);if(ghostPage)character(p.split('/').at(-1));const content=await fs.readFile(new URL('./public/'+file,import.meta.url));res.writeHead(200,{...headers,'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8'});return res.end(content);
         }
       }

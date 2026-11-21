@@ -6,7 +6,8 @@ import path from 'node:path';
 import os from 'node:os';
 import {createApp} from '../app/server.mjs';
 import {createCatalogue} from '../mcp/catalogue.mjs';
-import {defaultTemplate,validateEntry,sexualPreferenceFields} from '../app/ghost-profile.mjs';
+import {defaultTemplate,validateEntry,sexualPreferenceFields,installGhostProfiles} from '../app/ghost-profile.mjs';
+import {MANUAL_SOURCE} from '../app/public/ghost-import.js';
 import {parseGhostImport,buildProfileGenerationPackage,buildProfileOverview} from '../app/public/ghost-profile.js';
 import {normalizeGhostValues} from '../app/public/ghost-import.js';
 
@@ -51,6 +52,20 @@ test('full generation package asks for narrative background, personality and sex
  for(const f of sexualPreferenceFields){assert.equal(f.type,'text');assert.equal(defaultTemplate.fields.find(field=>field.id===f.id).group,'Szexuális preferenciák');assert.ok(result.questions[f.id]);}
 });
 
+test('owner manual save outranks older proposals in accept-all, newer proposals still apply',()=>{
+ const store=new Map(),c={id:'00000000-0000-4000-8000-000000000001',name:'Synthetic',created_at:'x'};
+ const profiles=installGhostProfiles({one:(sql,key)=>sql.includes('FROM characters')?c:store.has(key)?{value:store.get(key)}:undefined,run:(sql,key,value)=>store.set(key,value),transaction:f=>f()});
+ const e=(value,source='Synthetic AI')=>({value,interpretation:'',kind:'hypothesis',source,visibility:'creator'});
+ const meta=()=>{const g=profiles.get(c.id);return {expected_version:g.version,template_version:g.template.version,profile_version:g.profile_version};};
+ const old=profiles.propose(c.id,{...meta(),model:'Synthetic AI',values:{occupation:e('AI guess'),residence:e('AI town')}});
+ const manual=profiles.propose(c.id,{...meta(),model:MANUAL_SOURCE,values:{occupation:{...e('Owner text',MANUAL_SOURCE),kind:'fact'}}});
+ profiles.decide(c.id,manual.id,{expected_version:meta().expected_version,decision:'accept',values:manual.values});
+ const newer=profiles.propose(c.id,{...meta(),model:'Synthetic AI 2',values:{birth_date:e('1990')}});
+ const result=profiles.acceptAll(c.id);
+ assert.equal(result.values.occupation.value,'Owner text');assert.equal(result.values.residence.value,'AI town');assert.equal(result.values.birth_date.value,'1990');
+ assert.equal(result.skipped_fields,1);assert.ok(old.id&&newer.id);
+});
+
 test('Grok type alias and unknown text values import without invented metadata; validation identifies the actual field',()=>{
  const e={value:null,type:'hypothesis',source:'Synthetic fixture',interpretation:'',visibility:'creator'};
  const parsed=parseGhostImport(JSON.stringify({values:{birth_date:e}}),'fixture');
@@ -72,7 +87,7 @@ test('private ghost review supports authenticated uploads and explicit field dec
  const route='/api/characters/'+c.id+'/ghost',headers={'Tailscale-User-Login':login};
  assert.equal((await fetch(remote+'/ghost-profile/'+c.id)).status,403);
  assert.equal(await new Promise((resolve,reject)=>http.get(remote+'/ghost-profile/'+c.id,{headers:{...headers,'Sec-Fetch-Site':'cross-site','Sec-Fetch-Mode':'navigate','Sec-Fetch-Dest':'document'}},r=>{r.resume();resolve(r.statusCode);}).on('error',reject)),200);
- for(const asset of ['ghost-review.js','ghost-profile.js','ghost-import.js','ghost-review.css'])assert.equal((await fetch(remote+'/'+asset,{headers})).status,200);
+ for(const asset of ['ghost-review.js','ghost-profile.js','profile-autosave.js','ghost-import.js','ghost-review.css'])assert.equal((await fetch(remote+'/'+asset,{headers})).status,200);
  const {csrf}=await (await fetch(remote+'/api/session',{headers})).json(),g=await (await fetch(remote+route,{headers})).json();
  const values={birth_date:{value:null,type:'hypothesis',source:'Fixture',interpretation:'',visibility:'creator'}};
  const payload={expected_version:g.version,template_version:g.template.version,profile_version:g.profile_version,model:'Synthetic Grok',values};
@@ -83,6 +98,10 @@ test('private ghost review supports authenticated uploads and explicit field dec
  assert.equal(p.status,'pending');assert.equal(p.values.birth_date.value,'');
  const decision=await post(route+'/proposals/'+p.id+'/decision',{expected_version:0,decision:'accept',values:p.values},{Origin:origin,'X-LU-CSRF':csrf});assert.equal(decision.status,200);
  const saved=await decision.json();assert.equal(saved.version,1);assert.equal(saved.proposals[0].actor,login);
+ const manual={expected_version:saved.version,template_version:saved.template.version,values:{birth_date:{value:'1990',kind:'hypothesis',source:'Fixture',interpretation:'',visibility:'creator'}}};
+ assert.equal((await post(route+'/manual',manual,{Origin:origin})).status,403);
+ assert.equal((await post(route+'/manual',manual,{Origin:'https://evil.test','X-LU-CSRF':csrf})).status,403);
+ const manuallySaved=await post(route+'/manual',manual,{Origin:origin,'X-LU-CSRF':csrf});assert.equal(manuallySaved.status,200);assert.equal((await manuallySaved.json()).values.birth_date.kind,'hypothesis');
 });
 
 test('ghost profile: shared template, preserved legacy/canon, explicit review, stale conflict, export/restore and private MCP projection',async t=>{

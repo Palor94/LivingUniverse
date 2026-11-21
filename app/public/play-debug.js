@@ -9,10 +9,26 @@ import {layoutProblems} from './layout-check.js';
 export function installPlayDebug({esc,api,toast,phone=false,trail=window.__luTrail}){
   let box=null,timer=null,checks=null;
   const time=v=>v?String(v).slice(11,19):'';
+  const measurementLine=m=>esc(t('ux.result',{clicks:m.clicks,seconds:(m.ms/1000).toFixed(1)}));
+  function taskBody(){
+    if(!trail?.startTask)return '';
+    const active=trail.activeTask(),results=trail.measurements(),last=results.at(-1),pending=results.filter(m=>!m.saved);
+    return `<section class="pdbg-task"><h4>${t('ux.title')}</h4>${active?`<p><b>${esc(t('ux.task.'+active.task))}</b> · ${measurementLine(active)}</p><div class="pdbg-task-actions"><button type="button" data-pdbg="task-end">${t('ux.finish')}</button><button type="button" class="subtle" data-pdbg="task-cancel">${t('common.cancel')}</button></div>`:`<p class="muted">${t('ux.lead')}</p><div class="pdbg-task-actions">${['talk','background','other'].map(task=>`<button type="button" class="subtle" data-pdbg="task-${task}">${esc(t('ux.start',{task:t('ux.task.'+task)}))}</button>`).join('')}</div>`}
+      ${last?`<p>${t('ux.last')} <b>${esc(t('ux.task.'+last.task))}</b> · ${measurementLine(last)}</p>`:''}
+      ${pending.length?`<p><button type="button" data-pdbg="task-save" ${saving?'disabled':''}>${t(saving?'ux.saving':'ux.retry',{count:pending.length})}</button></p>`:last?`<p class="muted">${t('ux.saved')}</p>`:''}</section>`;
+  }
+  let saving=false;
+  async function saveTasks(){
+    if(saving)return;saving=true;paint();
+    try{for(const {saved,...record} of trail.measurements().filter(m=>!m.saved)){await api('/api/dev/ux-measurements',record);trail.taskSaved(record.id);}}
+    catch{toast(t('ux.saveFailed'),true);}
+    finally{saving=false;paint();}
+  }
   function body(){
     const ctx=trail?.context()||{},calls=trail?.api(10)||[],flight=trail?.inflight()||[],errors=trail?.errors(8)||[],steps=trail?.steps(15)||[];
     const kv=o=>Object.entries(o||{}).filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>`<tr><th>${esc(k)}</th><td>${esc(typeof v==='object'?JSON.stringify(v):v)}</td></tr>`).join('');
     return `<header class="pdbg-head"><b>${t('pdbg.title')}</b><span class="muted">F9</span><button type="button" class="subtle" data-pdbg="close" aria-label="${esc(t('common.close'))}">✕</button></header>
+      ${taskBody()}
       <section><h4>${t('pdbg.state')}</h4><table class="pdbg-table">${kv(ctx.play)}<tr><th>${t('pdbg.window')}</th><td>${innerWidth}×${innerHeight}</td></tr></table></section>
       <section><h4>${t('pdbg.inflight',{count:flight.length})}</h4>${flight.map(r=>`<p class="pdbg-line">${esc(r.method)} <code>${esc(r.route)}</code> · ${r.ms} ms</p>`).join('')||`<p class="muted">–</p>`}</section>
       <section><h4>${t('pdbg.requests')}</h4>${calls.slice().reverse().map(r=>`<p class="pdbg-line ${r.status>=500||r.status===0?'pdbg-bad':r.status>=400||r.ms>=2000?'pdbg-warn':''}">${time(r.at)} ${esc(r.method)} <code>${esc(r.route)}</code> ${r.status||'×'} · ${r.ms} ms${r.request_id?' · #'+esc(r.request_id):''}</p>`).join('')||`<p class="muted">–</p>`}</section>
@@ -26,12 +42,18 @@ export function installPlayDebug({esc,api,toast,phone=false,trail=window.__luTra
     const scroll=box.scrollTop;box.innerHTML=body();box.scrollTop=scroll;
     for(const b of box.querySelectorAll('[data-pdbg]'))b.onclick=()=>actions[b.dataset.pdbg]?.();
   }
-  const snapshot=()=>({at:new Date().toISOString(),window:[innerWidth,innerHeight],context:trail?.context()||{},steps:trail?.steps(40)||[],requests:trail?.api(40)||[],inflight:trail?.inflight()||[],errors:trail?.errors(20)||[],layout:layoutProblems(document.body)});
+  const snapshot=()=>({at:new Date().toISOString(),window:[innerWidth,innerHeight],context:trail?.context()||{},task:trail?.activeTask?.()||null,measurements:trail?.measurements?.()||[],steps:trail?.steps(40)||[],requests:trail?.api(40)||[],inflight:trail?.inflight()||[],errors:trail?.errors(20)||[],layout:layoutProblems(document.body)});
   const actions={
     close:()=>toggle(false),
     check:()=>{checks=layoutProblems(document.body);paint();},
     copy:async()=>{try{await navigator.clipboard.writeText(JSON.stringify(snapshot(),null,1));toast(t('pdbg.copied'));}catch{toast(t('pdbg.copyFailed'),true);}},
     report:()=>reportBug({api,toast,esc,state:snapshot()}),
+    'task-talk':()=>{trail.startTask('talk',phone?'phone':'desktop');paint();},
+    'task-background':()=>{trail.startTask('background',phone?'phone':'desktop');paint();},
+    'task-other':()=>{trail.startTask('other',phone?'phone':'desktop');paint();},
+    'task-end':()=>{trail.finishTask();void saveTasks();},
+    'task-cancel':()=>{trail.cancelTask();paint();},
+    'task-save':()=>saveTasks(),
   };
   function toggle(open=!box){
     if(!open){clearInterval(timer);box?.remove();box=null;checks=null;return;}

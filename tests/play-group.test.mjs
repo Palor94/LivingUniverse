@@ -46,7 +46,7 @@ test('group scene: two people at the same place answer in one turn; save point r
     // Suggestion rules (2026-11-15): one reaction plus two diverging ones, Palor's own voice for
     // the people here only plus his flirting part, earlier suggestions not repeated.
     const last=requests.at(-1);
-    assert.match(last.system,/Az 1\. közvetlen reakció/);assert.doesNotMatch(last.system,/pózváltás/);
+    assert.match(last.system,/kizárólag a történet továbbhaladását szolgálja/);assert.doesNotMatch(last.system,/pózváltás/);
     assert.ok(last.user.includes('PALOR BESZÉDMÓDJA')&&last.user.includes('HANG-ALADAR')&&last.user.includes('Na jó, de most komolyan'));
     assert.ok(!last.user.includes('HANG-MAS')&&last.user.includes('FLORT-TITKOS'));
     assert.match(last.user,/"choices" NE ismételje[^\n]*\n- Sziasztok!\n- Mi a helyzet\?\n- Kértek egy kávét\?/);
@@ -81,5 +81,23 @@ test('group scene: two people at the same place answer in one turn; save point r
     await call(`/api/play/conversations/${h.id}/end`,{});
     const iev=app.db.prepare("SELECT payload_json FROM world_events WHERE json_extract(payload_json,'$.play_conversation_id')=?").get(h.id);
     assert.equal(JSON.parse(iev.payload_json).intimate,true,'its save point is intimate (news never carries it)');
+    // A12: an explicit selection may include the fifth present man rather than the first four.
+    const extras=[];
+    for(const name of ['Teszt Cecil','Teszt Dénes','Teszt Emil']){
+      const c=await mk(name);extras.push(c);
+      app.db.prepare('INSERT INTO application_settings(key,value) VALUES(?,?)').run('ghost:character:'+c.id,JSON.stringify({version:1,values:{goals:entry('Dolgozni.')},history:[],proposals:[]}));
+      await call('/api/world-engine/places',{character_id:c.id,location_id:work.id,role:'work'});
+    }
+    const beforeCalls=requests.length;
+    for(const character_ids of [[],[a.id],[a.id,b.id,...extras.map(c=>c.id)],[a.id,a.id],[null,b.id],'bad']){
+      assert.equal((await call('/api/play/group-talk',{opener:true,character_ids})).status,400);
+    }
+    for(const invalid of [palor.id,'missing-character'])assert.equal((await call('/api/play/group-talk',{opener:true,character_ids:[b.id,invalid]})).status,409);
+    assert.equal(requests.length,beforeCalls,'invalid choices never reach the model');
+    const chosen=(await call('/api/play/group-talk',{opener:true,character_ids:[b.id,extras[2].id]})).data;
+    assert.deepEqual(chosen.participants.map(p=>p.id),[b.id,extras[2].id]);
+    assert.equal((await call('/api/play/group-talk',{conversation_id:chosen.id,text:'Szia.',character_ids:[a.id,b.id]})).status,400,'participants cannot be replaced inside an existing group');
+    const continued=(await call('/api/play/group-talk',{conversation_id:chosen.id,text:'Sziasztok.'})).data;
+    assert.deepEqual(continued.participants.map(p=>p.id),[b.id,extras[2].id]);
   }finally{await app.close();}
 });

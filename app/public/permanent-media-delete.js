@@ -1,3 +1,5 @@
+import {t} from './i18n.js';
+
 export async function deleteSelectedImage({selected,capability,request}){
   if(!Array.isArray(selected)||selected.length!==1||selected[0].kind!=='image')throw Error('Pontosan egy képet jelölj ki a végleges törléshez.');
   const media=selected[0];if(capability?.media_id!==media.id||!capability.version||!capability.csrf)throw Error('A kijelölt kép törlési adatai még nem érhetők el.');
@@ -11,10 +13,11 @@ export function installPermanentDeleteUI({$,$$,api,toast,render}){
   let gallery=[],viewer=null,targets=[],capabilities=new Map(),loading=false,busy=false,epoch=0,progress='';
   function paint(){
     const eligible=targets.filter(m=>capabilities.get(m.id)&&!capabilities.get(m.id).protected),protectedCount=targets.filter(m=>capabilities.get(m.id)?.protected).length;
-    for(const b of $$('#permanent-delete,#library-permanent-delete,#viewer-permanent-delete')){
+    for(const b of $$('#library-permanent-delete,#viewer-permanent-delete')){
+      if(b.id==='library-permanent-delete')b.hidden=!!viewer||!targets.length;
       b.disabled=busy||loading||!eligible.length;
-      b.textContent=busy?'Törlés folyamatban… '+progress:targets.length>1?'Törlés ('+targets.length+')':'Törlés';
-      b.title=busy?'Várd meg a törlés eredményét.':loading?'A kijelölt képek védelmének ellenőrzése…':!targets.length?'Jelölj ki egy vagy több képet.':protectedCount===targets.length?'Védett: jóváhagyott kanonikus referenciák.':!eligible.length?'A kijelölt képek törlési állapota nem érhető el.':'A kijelölt képek végleges törlése minden szereplő-hozzárendeléssel. Nincs megerősítő ablak.'+(protectedCount?' '+protectedCount+' védett referencia kimarad.':'');
+      b.textContent=busy?t('permanent.busy',{progress}):b.id==='library-permanent-delete'?t('permanent.selected',{count:targets.length}):t('permanent.viewer');
+      b.title=busy?t('permanent.wait'):loading?t('permanent.checking'):!targets.length?t('permanent.selectFirst'):protectedCount===targets.length?t('permanent.protected'):!eligible.length?t('permanent.unavailable'):t('permanent.hint')+(protectedCount?' '+t('permanent.skipped',{count:protectedCount}):'');
     }
   }
   async function choose(){
@@ -58,7 +61,6 @@ export function installPermanentDeleteUI({$,$$,api,toast,render}){
     void choose();
   }
   function controls(){
-    $('.topbar').insertAdjacentHTML('beforeend','<button type="button" id="permanent-delete" class="danger" disabled>Törlés</button>');$('#permanent-delete').onclick=erase;
     $('#dialog').addEventListener('close',()=>{viewer=null;void choose();});paint();
   }
   return {controls,selection,media};

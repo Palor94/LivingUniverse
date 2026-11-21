@@ -1,4 +1,4 @@
-import {generateSogniImage} from './sogni-provider.mjs';
+import {generateSogniImage,estimateSogniImage} from './sogni-provider.mjs';
 // Provider URLs and request shapes are application-owned, never tool arguments.
 export const imageProviderSpecs=Object.freeze({
   openai:{endpoint:'https://api.openai.com/v1/images/edits',key:'OPENAI_API_KEY',models:['gpt-image-2.5-sunburst','gpt-image-2.5-flare','gpt-image-2','gpt-image-1.5'],maxReferences:16},
@@ -6,6 +6,9 @@ export const imageProviderSpecs=Object.freeze({
   sogni:{key:'SOGNI_API_KEY',models:['krea-identity-edit','dark-beast-krea2-identity-edit','qwen','qwen-lightning','flux-3-klein','gpt-image-2','gpt-image-2.5-sunburst','gpt-image-2.5-flare'],maxReferences:16,referenceLimits:{'krea-identity-edit':2,'dark-beast-krea2-identity-edit':2,qwen:3,'qwen-lightning':3,'flux-3-klein':10}}
 });
 export class GenerationError extends Error{constructor(code,message,status=400){super(message);this.code=code;this.status=status;}}
+export const sogniTextModels=Object.freeze(['krea-2-turbo','z-turbo','z-image','flux-3-klein','dark-beast-krea2','qwen-2512','qwen-2512-lightning','gpt-image-2','gpt-image-2.5-sunburst','gpt-image-2.5-flare']);
+export function configuredSogniText(config={},env=process.env){const chosen=config?.providers?.sogni_text;return {provider:'sogni',model:sogniTextModels.includes(chosen?.model)?chosen.model:null,available:chosen?.enabled===true&&sogniTextModels.includes(chosen.model)&&!!env.SOGNI_API_KEY,max_estimated_capacity_units:typeof chosen?.max_estimated_capacity_units==='number'&&Number.isFinite(chosen.max_estimated_capacity_units)&&chosen.max_estimated_capacity_units>0?chosen.max_estimated_capacity_units:null};}
+export async function generateSogniText({manifest,config,env=process.env,estimate=false,...options}){const current=configuredSogniText(config,env);if(!current.available||current.model!==manifest.model||manifest.task!=='text_to_image')throw new GenerationError('PROVIDER_DISABLED','Enable the explicitly selected Sogni text-to-image model.',403);if(current.max_estimated_capacity_units&&manifest.max_estimated_capacity_units>current.max_estimated_capacity_units)throw new GenerationError('COST_LIMIT','The configured capacity ceiling changed.',409);return (estimate?estimateSogniImage:generateSogniImage)({manifest,references:[],apiKey:env.SOGNI_API_KEY,...options});}
 const issue=(code,message,status=400)=>new GenerationError(code,message,status);
 export const sogniLoraNames=Object.freeze({'krea2-mystic-x':'Mystic X','krea2-realism-engine':'Realism Engine v3'});
 function sogniLoras(chosen={}){
@@ -19,8 +22,15 @@ export function configuredImageProviders(config={},env=process.env){
     const price=chosen?.estimated_cost_usd;
     return [name,{provider:name,model:valid?chosen.model:null,available:valid&&!!env[spec.key],max_references:spec.referenceLimits?.[chosen?.model]??spec.maxReferences,
       estimated_cost_usd:typeof price==='number'&&Number.isFinite(price)&&price>=0?price:null,
+      max_estimated_capacity_units:typeof chosen?.max_estimated_capacity_units==='number'&&Number.isFinite(chosen.max_estimated_capacity_units)&&chosen.max_estimated_capacity_units>0?chosen.max_estimated_capacity_units:null,
       references:true,regional_binding:false,identity_guaranteed:false,output_count:1,...(lora?{loras:lora.loras,lora_strengths:lora.lora_strengths,model_label:chosen?.model==='krea-identity-edit'?'Krea 2 Identity Edit v1.2':chosen?.model}:{} )}];
   }));
+}
+export async function estimateProviderImage({manifest,references,config,env=process.env,...options}){
+  const current=configuredImageProviders(config,env).sogni;
+  if(manifest.provider!=='sogni'||!current.available||current.model!==manifest.model)throw issue('PROVIDER_DISABLED','Sogni is not enabled for this plan.',403);
+  if(!references.length||references.length>current.max_references)throw issue('REFERENCE_LIMIT','Choose supported approved references.');
+  return estimateSogniImage({manifest,references,apiKey:env.SOGNI_API_KEY,...options});
 }
 export async function generateProviderImage({manifest,references,config,env=process.env,fetchImpl=fetch,requestKey,onProviderJob,sogniOptions={}}){
   const spec=imageProviderSpecs[manifest.provider],current=configuredImageProviders(config,env)[manifest.provider];

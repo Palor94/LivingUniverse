@@ -34,12 +34,12 @@ export function installPlayAssets({db,root,one,all,run,transaction,fail,worldEng
   if(!all('PRAGMA table_info(play_generation_jobs)').some(c=>c.name==='outfit'))db.exec('ALTER TABLE play_generation_jobs ADD COLUMN outfit TEXT');
   // 'intimate' (2026-11-12): waist-up, bare upper body, for intimate beats; the game fades it
   // out below the waist. Only a few calm expressions are needed.
-  const OUTFITS=['dressed','shirtless','intimate'],OUTFIT_FOLDER={shirtless:'felmeztelen',intimate:'intim'};
+  const OUTFITS=['dressed','shirtless','intimate','police'],OUTFIT_FOLDER={shirtless:'felmeztelen',intimate:'intim',police:'rendőregyenruha'};
   const INTIMATE_EXPRESSIONS=['alap','mosoly','flortol'];
   const expressionsFor=outfit=>FIGURE_EXPRESSIONS.filter(x=>outfit!=='intimate'||INTIMATE_EXPRESSIONS.includes(x.file));
   // An existing "félmeztelen" folder (written by hand) is reused, so no second shirtless folder appears.
   const outfitPath=(figureFolder,outfit)=>outfit==='dressed'?[]:outfit==='shirtless'?[['felmeztelen','félmeztelen'].find(n=>existsSync(path.join(root,figureFolder,n)))||OUTFIT_FOLDER[outfit]]:[OUTFIT_FOLDER[outfit]];
-  const outfitOf=v=>{const o=v??'dressed';if(!OUTFITS.includes(o))throw fail('outfit is dressed, shirtless or intimate.');return o;};
+  const outfitOf=v=>{const o=v??'dressed';if(!OUTFITS.includes(o))throw fail('outfit is dressed, shirtless, intimate or police.');return o;};
   const iso=()=>new Date().toISOString();
   const w=worldEngine.internals;
   const cast=()=>[...w.meetable().map(c=>({id:c.id,name:c.name})),...(w.palor()?[{id:w.palor().id,name:w.palor().name}]:[])];
@@ -92,6 +92,8 @@ export function installPlayAssets({db,root,one,all,run,transaction,fail,worldEng
         // Waist-up intimate set, once the shirtless base exists (owner 2026-11-12: for everyone).
         if(bare.has('alap')){const close=new Set(sprites.forCharacter(c.id,{outfit:'intimate'}).map(s=>s.expression));
           for(const x of expressionsFor('intimate').filter(x=>!close.has(x.file)&&(x.file==='alap'||close.has('alap'))).slice(0,2))push({target:'figure',outfit:'intimate',character_id:c.id,name:c.name,expression:x.file,priority:x.file==='alap'?10:6,why:x.file==='alap'?'no waist-up intimate figure yet':'intimate expression',reference_policy:refs?'approved_references':'text_only'});}}
+      if(p.police?.folder){const police=new Set(sprites.forCharacter(c.id,{outfit:'police'}).map(s=>s.expression));
+        for(const x of FIGURE_EXPRESSIONS.filter(x=>!police.has(x.file)&&(x.file==='alap'||police.has('alap'))).slice(0,2))push({target:'figure',outfit:'police',character_id:c.id,name:c.name,expression:x.file,priority:x.file==='alap'?24:11,why:x.file==='alap'?'no police-uniform base figure yet':'police-uniform expression',reference_policy:refs?'approved_references':'text_only'});}
     }
     if(!target||target==='background'){
       const t=await locationTree.load(),cov=backgroundCoverage();
@@ -132,6 +134,7 @@ export function installPlayAssets({db,root,one,all,run,transaction,fail,worldEng
       let prompt=expression==='alap'?p.base:p.base.replace(/Expression: .*$/m,'Expression: '+x.en+'.');
       // Shirtless: the same man and framing, bare upper body, his ordinary trousers and shoes kept on.
       if(outfit==='shirtless')prompt=prompt.replace(/Clothing: .*$/m,'Clothing: shirtless – bare upper body, wearing his ordinary everyday trousers and shoes; nothing else changes. Keep exactly the same trousers and shoes in every expression version. Non-sexual, relaxed standing pose.');
+      if(outfit==='police')prompt=prompt.replace(/Clothing: .*$/m,'Clothing: a neat, realistic dark-navy Hungarian police uniform appropriate for this adult male: fitted uniform shirt, matching trousers, sturdy black duty shoes, simple belt and restrained generic shoulder details. No readable name, badge number, agency logo or invented insignia. Keep exactly the same uniform in every police expression.');
       // Intimate: the same man waist-up; the frame ends at the waist and the game fades it out there.
       if(outfit==='intimate')prompt=prompt.replace('full-body character figure','waist-up character figure')
         .replace(/Pose: .*$/m,'Pose: upper body only, facing the viewer with a slight three-quarter turn, shoulders relaxed, arms relaxed at his sides.')
@@ -309,6 +312,7 @@ export function installPlayAssets({db,root,one,all,run,transaction,fail,worldEng
     return {character_id:c.id,name:c.name,origin:o.origin,origin_reason:o.reason,origin_basis:o.origin_basis,media_origin:o.media_origin,independently_verified:o.independently_verified,origin_policy:o.origin_policy,reference_photos_allowed:origin.mayUseReferences(c.id),everyday_references_allowed:origin.mayUseEverydayReferences(c.id),reference_proofs:origin.referenceProofs(c.id),
       approved_appearance:one('SELECT appearance FROM canon WHERE character_id=? ORDER BY rowid DESC LIMIT 1',c.id)?.appearance||null,
       references:p.references??approvedReferences(c.id),...(p.references?{reference_policy:p.reference_policy,source_folder:p.source_folder,available_reference_count:p.available_reference_count,generation_ready:p.generation_ready,generation_blocked:p.generation_blocked}:{}),figures:{folder:p.folder,have,missing:FIGURE_EXPRESSIONS.map(x=>x.file).filter(f=>!have.includes(f)),shirtless:(()=>{const bare=sprites.forCharacter(c.id,{outfit:'shirtless'}).map(s=>s.expression);return {folder:path.join(p.folder,'felmeztelen'),have:bare,missing:FIGURE_EXPRESSIONS.map(x=>x.file).filter(f=>!bare.includes(f))};})(),
+        ...(p.police?.folder?{police:(()=>{const police=sprites.forCharacter(c.id,{outfit:'police'}).map(s=>s.expression);return {folder:p.police.folder,have:police,missing:FIGURE_EXPRESSIONS.map(x=>x.file).filter(f=>!police.includes(f))};})()}:{ }),
         intimate:(()=>{const close=sprites.forCharacter(c.id,{outfit:'intimate'}).map(s=>s.expression);return {folder:path.join(p.folder,'intim'),have:close,missing:INTIMATE_EXPRESSIONS.filter(f=>!close.includes(f))};})()},
       shared_scenes:one("SELECT count(*) n FROM play_inserts WHERE kind='scene' AND character_id=?",c.id).n,
       jobs:all('SELECT id,target,status,expression,outfit,updated_at FROM play_generation_jobs WHERE character_id=? ORDER BY updated_at DESC LIMIT 10',c.id)};

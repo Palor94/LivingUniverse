@@ -14,10 +14,37 @@ import {generateProviderImage,GenerationError} from '../app/image-providers.mjs'
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=','base64');
 const sha=b=>createHash('sha256').update(b).digest('hex');
-async function fixture({generate,clock}={}){
+test('snapshot orders freeze the current participant-only scene, bind both approved identities and place only after explicit selection',async()=>{
+  const f=await fixture();try{const [p,c]=f.bindings,lid=randomUUID(),conversation=randomUUID();f.app.db.prepare('UPDATE characters SET name=? WHERE id=?').run('Palor',p.character_id);f.app.db.prepare("INSERT INTO locations(id,name,name_key,tag_id,created_at) VALUES(?,?,'synthetic-cafe',NULL,'2026-11-17')").run(lid,'Szintetikus kávézó');f.app.db.prepare("INSERT INTO play_conversations(id,character_id,location_id,channel,world_day,slot,status,created_at,mode) VALUES(?,?,?,'in_person','2026-11-17','nap','open',?,'normal')").run(conversation,c.character_id,lid,new Date().toISOString());f.app.db.prepare('INSERT INTO play_lines VALUES(?,?,?,?,?)').run(randomUUID(),conversation,'palor','Beszélgessünk a könyvről.',new Date().toISOString());
+    const target={target:'snapshot',character_id:c.character_id,location_id:lid,conversation_id:conversation},context=await f.app.playImageWorker.context(target);assert.equal(context.characters.length,2);assert.equal(JSON.stringify(context).includes('PRIVATE ADMIN SECRET'),false);assert.match(context.brief.prompt,/Beszélgessünk a könyvről/);
+    const before=f.app.db.prepare('SELECT * FROM canon').all(),order=await f.app.playImageWorker.prepare({...target,request_key:'snapshot_fixture_001',max_estimated_capacity_units:3});assert.equal(order.plan.manifest.play_target.conversation_id,conversation);assert.equal(f.calls(),0);await f.approve(order.plan);await f.app.imageGeneration.execute(order.run_id);await f.app.imageGeneration.settle();assert.equal(f.app.playImageWorker.view(order.run_id).status,'prepared');
+    const result=await f.app.playImageWorker.place(order.run_id,0);assert.equal(result.status,'placed');assert.equal(result.selected.status,'done');assert.equal(f.calls(),1);assert.equal(f.app.db.prepare("SELECT COUNT(*) n FROM play_inserts WHERE kind='scene'").get().n,1);await f.app.playImageWorker.place(order.run_id,0);assert.equal(f.app.db.prepare("SELECT COUNT(*) n FROM play_inserts WHERE kind='scene'").get().n,1);assert.deepEqual(f.app.db.prepare('SELECT * FROM canon').all(),before);
+  }finally{await f.close();}
+});
+test('desktop scoped session binds verified provider estimates, authenticates approval and reserves before dispatch',async()=>{
+  const f=await fixture({estimate:async()=>({source:'sogni',capacity_units:2,usd:0.01,spark:null})});try{
+    const plan=await f.prepare('scoped_generation_fixture',{provider:'sogni',max_estimated_capacity_units:3});const quoted=await f.app.imageGeneration.estimateRun(plan.run_id,{manifest_hash:plan.manifest_hash,acknowledge_external_upload:true},'fixture-owner');
+    const context=await(await fetch(f.base+'/api/generation-sessions')).json(),post=async(path,body,csrf=context.csrf)=>{const response=await fetch(f.base+'/api/generation-sessions'+path,{method:'POST',headers:{Origin:f.base,'Content-Type':'application/json','X-LU-Generation-CSRF':csrf},body:JSON.stringify(body)});return {status:response.status,value:await response.json()};};
+    const scope={run_ids:[plan.run_id],expires_at:new Date(Date.now()+1800000).toISOString(),max_images:1,max_capacity_units:3,max_usd:0.02};assert.equal((await post('',scope,'wrong')).status,403);const session=(await post('',scope)).value;assert.equal(f.calls(),0);
+    assert.equal((await post('/'+session.id+'/execute',{run_id:plan.run_id})).value.code,'SESSION_EXPIRED');assert.equal(f.calls(),0);await post('/'+session.id+'/approve',{scope_hash:session.scope_hash,acknowledge_external_upload_and_cost:true});assert.equal(f.calls(),0);
+    assert.equal((await post('/'+session.id+'/execute',{run_id:plan.run_id})).status,200);await f.app.imageGeneration.settle();assert.equal(f.calls(),1);assert.equal(f.app.imageGeneration.view(plan.run_id).status,'succeeded');assert.equal(f.app.generationSessions.get(session.id).reservations[0].manifest_hash,quoted.manifest_hash);await post('/'+session.id+'/revoke',{});assert.equal(f.app.generationSessions.get(session.id).reservations.length,1);
+  }finally{await f.close();}
+});
+test('two outputs recover partial registration locally, preserve variant feedback, protect any promoted variant and restore receipts',async()=>{
+  const second=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64'),f=await fixture({generate:async()=>({outputs:[{bytes:png},{bytes:second}],request_id:'fixture_batch'})});
+  try{const before=f.app.db.prepare('SELECT * FROM canon').all(),plan=await f.prepare('batch_reference_fixture',{provider:'sogni',output_count:2});assert.equal(plan.manifest.n,2);await f.approve(plan);
+    f.app.db.exec("CREATE TRIGGER fail_second BEFORE INSERT ON image_generation_output_items WHEN NEW.item_index=1 BEGIN SELECT RAISE(ABORT,'fixture'); END;");await f.call('execute_image_generation',{run_id:plan.run_id});await f.app.imageGeneration.settle();assert.equal(f.app.imageGeneration.view(plan.run_id).status,'generated');assert.equal(f.app.imageGeneration.view(plan.run_id).outputs.length,1);f.app.db.exec('DROP TRIGGER fail_second');
+    await f.call('execute_image_generation',{run_id:plan.run_id});await f.app.imageGeneration.settle();const result=f.app.imageGeneration.view(plan.run_id);assert.equal(result.status,'succeeded',JSON.stringify(result.events));assert.equal(result.outputs.length,2);assert.equal(f.calls(),1);assert.notEqual(result.outputs[0].media_id,result.outputs[1].media_id);assert.deepEqual(f.app.db.prepare('SELECT * FROM canon').all(),before);
+    await f.call('submit_generation_feedback',{request_key:'variant_feedback_fixture',run_id:plan.run_id,media_id:result.outputs[1].media_id,character_id:f.bindings[0].character_id,decision:'unreviewed',face_verdict:'uncertain',body_verdict:'unknown'});
+    const snapshot=await(await fetch(f.base+'/api/export')).json();assert.equal(snapshot.image_generation_output_items.length,2);
+    const c=f.bindings[0];f.app.db.prepare('INSERT INTO canon VALUES(?,?,?,?,?,?,?)').run(randomUUID(),c.character_id,c.revision_id,'Approved output',JSON.stringify([{media_id:result.outputs[1].media_id,role:'face',sha256:sha(second)}]),'Explicit fixture approval',new Date().toISOString());assert.equal((await f.privateCall(plan.run_id,'withdraw',{manifest_hash:plan.manifest_hash})).value.code,'CANON_REFERENCE_PROTECTED');assert.ok(f.app.imageGeneration.view(plan.run_id).outputs.every(output=>output.active));
+  }finally{await f.close();}
+});
+async function fixture({generate,clock,estimate}={}){
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'lu-generation-')),root=path.join(temp,'media'),dataDir=path.join(temp,'data');await fs.mkdir(root);await fs.mkdir(dataDir);
   const database=path.join(dataDir,'universe.sqlite'),config={enabled:true,token:randomBytes(32).toString('hex'),origin:'https://laptop.example.ts.net',login:'creator@example.test',approval_mode:'trusted',database_id:databaseIdentity(database)};
   let calls=0;const options={root,dataDir,mcpWrites:config,mobile:{enabled:true,origin:config.origin,login:config.login},imageGeneration:{providers:{xai:{enabled:true,model:'grok-imagine-image-2.0',estimated_cost_usd:0.1},openai:{enabled:true,model:'gpt-image-2.5-sunburst'},sogni:{enabled:true,model:'krea-identity-edit'}}},generationTestOptions:{env:{XAI_API_KEY:'fixture-key',OPENAI_API_KEY:'fixture-openai',SOGNI_API_KEY:'fixture-sogni'},availability:async()=> 'local',...(clock?{clock}:{}),generate:async args=>{calls++;return generate?generate(args):{bytes:png,request_id:'fixture_request',usage:{total_tokens:10},revised_prompt:null};}}};
+  if(estimate)options.generationTestOptions.estimate=estimate;
   const app=await createApp(options);await new Promise(r=>app.server.listen(0,'127.0.0.1',r));await new Promise(r=>app.mobileServer.listen(0,'127.0.0.1',r));
   const base='http://127.0.0.1:'+app.server.address().port,remote='http://127.0.0.1:'+app.mobileServer.address().port,writeConfig=path.join(dataDir,'mcp-writes.json');await fs.writeFile(writeConfig,JSON.stringify({...config,app_url:base}));const writer=await createWriteClient({database,writeConfig});
   const call=async(name,args)=>(await writer.call(name,args)).data;
@@ -100,6 +127,30 @@ test('LoRA changes require a fresh approved immutable plan and preserve the conf
     const fresh=await f.prepare('new_sogni_loras_fixture',{provider:'sogni'});assert.deepEqual(fresh.manifest.loras,['krea2-mystic-x','krea2-realism-engine']);assert.deepEqual(fresh.manifest.lora_strengths,[1,0.8]);assert.equal(fresh.manifest.model_label,'Krea 2 Identity Edit v1.2');
     assert.deepEqual(f.app.imageGeneration.view(old.run_id).manifest.loras,[]);assert.equal(fresh.status,'pending');await f.approve(fresh);await f.call('execute_image_generation',{run_id:fresh.run_id});await f.app.imageGeneration.settle();assert.equal(f.app.imageGeneration.view(fresh.run_id).status,'succeeded');assert.equal(f.calls(),1);
   }finally{await f.close();}
+});
+
+test('B17/B20 estimates require explicit upload permission, bind a new manifest hash, enforce cap/expiry and allow safe play during generation',async()=>{
+ let now=Date.now(),estimates=0,release;const gate=new Promise(resolve=>{release=resolve;});
+ const f=await fixture({clock:()=>now,estimate:async({references})=>{estimates++;assert.deepEqual(references[0].bytes,png);return {source:'sogni',capacity_units:8,usd:null,spark:null,estimated_at:new Date(now).toISOString()};},generate:async()=>{await gate;return {bytes:png,request_id:'budget-test'};}});
+ try{
+   const canon=f.app.db.prepare('SELECT * FROM canon').all(),binding=f.bindings[0],endpoint=f.base+'/api/characters/'+binding.character_id+'/generation',context=await (await fetch(endpoint)).json();
+   const post=async(suffix,body,headers={})=>{const r=await fetch(endpoint+suffix,{method:'POST',headers:{Origin:f.base,'Content-Type':'application/json','X-LU-Generation-CSRF':context.csrf,...headers},body:JSON.stringify(body)});return {status:r.status,value:await r.json()};};
+   const prepare=async(key,cap)=>(await post('',{request_key:key,prompt:'Synthetic adult reading.',revision_id:binding.revision_id,reference_ids:binding.reference_ids,max_estimated_capacity_units:cap})).value;
+   let plan=await prepare('estimate_low_cap',5);
+   assert.equal((await post('/'+plan.run_id+'/estimate',{manifest_hash:plan.manifest_hash,acknowledge_external_upload:true},{'X-LU-Generation-CSRF':'wrong'})).status,403);
+   assert.equal((await post('/'+plan.run_id+'/estimate',{manifest_hash:plan.manifest_hash})).value.code,'APPROVAL_REQUIRED');assert.equal(estimates,0);
+   const oldHash=plan.manifest_hash;plan=(await post('/'+plan.run_id+'/estimate',{manifest_hash:oldHash,acknowledge_external_upload:true})).value;assert.notEqual(plan.manifest_hash,oldHash);
+   assert.equal((await f.privateCall(plan.run_id,'decision',{decision:'approve',manifest_hash:oldHash,acknowledge_external_upload_and_cost:true})).value.code,'STALE_PLAN');
+   assert.equal((await f.approve(plan)).value.code,'COST_LIMIT');assert.equal(f.calls(),0);
+   plan=await prepare('estimate_adequate_cap',10);plan=(await post('/'+plan.run_id+'/estimate',{manifest_hash:plan.manifest_hash,acknowledge_external_upload:true})).value;
+   assert.equal((await f.approve(plan)).status,200);await f.app.imageGeneration.execute(plan.run_id);
+   const queue=await (await fetch(f.base+'/api/generation-jobs')).json();assert.equal(queue.jobs.find(job=>job.run_id===plan.run_id).status,'running');
+   const settings=await fetch(f.base+'/api/play/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text_speed:'fast'})});assert.equal(settings.status,200,'ordinary play remains available');
+   const profile=await fetch(f.base+'/api/characters/'+binding.character_id+'/profile-field',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({field:'biography',expected:'',value:'Synthetic local note'})});assert.equal(profile.status,200);
+   release();await f.app.imageGeneration.settle();assert.equal(f.app.imageGeneration.view(plan.run_id).status,'succeeded');assert.equal(f.calls(),1);assert.deepEqual(f.app.db.prepare('SELECT * FROM canon').all(),canon);
+   plan=await prepare('estimate_expiry_case',10);plan=(await post('/'+plan.run_id+'/estimate',{manifest_hash:plan.manifest_hash,acknowledge_external_upload:true})).value;now+=300001;
+   assert.equal((await f.approve(plan)).value.code,'ESTIMATE_EXPIRED');assert.equal(f.calls(),1);
+ }finally{release();await f.close();}
 });
 
 test('changed bytes, stale canon, provider changes and unapproved media block submission without paid calls',async()=>{

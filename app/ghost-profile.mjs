@@ -1,5 +1,7 @@
 import {appearanceFieldGuidance} from './public/profile-appearance-guide.js';
-import {normalizeGhostValues} from './public/ghost-import.js';
+import {normalizeGhostValues,MANUAL_SOURCE} from './public/ghost-import.js';
+// True when the owner saved this field by hand after the proposal was made.
+export const overridesProposal=(record,id,p)=>(record.manual?.[id]??-1)>(p.base_version??-1);
 import {randomUUID} from 'node:crypto';
 import {digest,profileVersion} from './character-edit.mjs';
 import {validateTemplatePatch,applyTemplatePatch} from './profile-template.mjs';
@@ -48,11 +50,20 @@ export function validateEntry(e,f){
 }
 // Additive, portable records use the existing backed-up settings table. No character
 // columns, media, relationships or appearance-canon records are rewritten.
-export function installGhostProfiles({one,run,transaction,characterPolicy}){
+export function installGhostProfiles({one,all=()=>[],run,transaction,characterPolicy}){
   const read=(key,fallback)=>{const row=one('SELECT value FROM application_settings WHERE key=?',key);return row?JSON.parse(row.value):structuredClone(fallback);};
   const write=(key,value)=>run('INSERT INTO application_settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',key,JSON.stringify(value));
   const template=()=>({...read('ghost:template',defaultTemplate),character:templateCharacter,...(characterPolicy?.description?{character_policy:characterPolicy.description}:{})});
   function get(cid){const c=one('SELECT * FROM characters WHERE id=?',cid);if(!c)throw error('Nincs ilyen szereplő.',404);const record=read('ghost:character:'+cid,{version:0,values:{},history:[],proposals:[]});return {...record,template:template(),character_id:cid,profile_version:profileVersion(c),legacy:Object.fromEntries(['biography','appearance','personality','speech_style','sexuality'].map(k=>[k,c[k]||'']))};}
+  function readiness({palorId=null,placedLocationIds=new Set()}={}){
+    const figures=new Map(all("SELECT character_id,count(*) n FROM character_sprites WHERE missing=0 AND outfit='dressed' GROUP BY character_id").map(row=>[row.character_id,row.n]));
+    const homes=new Set(all("SELECT character_id,location_id FROM world_places WHERE role='home'").filter(row=>placedLocationIds.has(row.location_id)).map(row=>row.character_id));
+    const known=new Set();if(palorId){for(const row of all('SELECT source_id,target_id FROM world_relationship_levels WHERE level>0 AND (source_id=? OR target_id=?)',palorId,palorId))known.add(row.source_id===palorId?row.target_id:row.source_id);
+      for(const row of all("SELECT source_id,target_id FROM relationships WHERE trim(description)<>'' AND (source_id=? OR target_id=?)",palorId,palorId))known.add(row.source_id===palorId?row.target_id:row.source_id);
+      for(const row of all('SELECT DISTINCT character_id FROM play_conversations WHERE rewound_at IS NULL'))known.add(row.character_id);}
+    return {characters:all('SELECT id FROM characters').map(({id})=>{const g=get(id),filled=g.template.fields.filter(field=>{const entry=g.values[field.id],value=entry?entry.value:field.source?g.legacy[field.source]:null;return value!==null&&value!==undefined&&String(value).trim()!=='';}).length;
+      return {id,profile_filled:filled,profile_total:g.template.fields.length,profile_percent:Math.round(filled/g.template.fields.length*100),figures:figures.get(id)||0,has_routine:!!String(g.values.weekly_routine?.value||'').trim(),has_home:homes.has(id),knows_palor:known.has(id),is_palor:id===palorId,occupation:String(g.values.occupation?.value||'')};})};
+  }
   function persistTemplate(body,actor='local-creator'){
     const old=template();if(body.expected_version!==old.version)throw error('A sablon közben megváltozott.',409);
     const next=validateTemplate({version:old.version+1,fields:body.fields});
@@ -89,8 +100,31 @@ export function installGhostProfiles({one,run,transaction,characterPolicy}){
       for(const [id,e] of Object.entries(body.values)){if(!Object.hasOwn(p.values,id))throw error('Csak a javasolt mezők fogadhatók el.');validateEntry(e,t.fields.find(f=>f.id===id));}
       characterPolicy?.assertValues(body.values,cid,{requireKnown:true});
       record.history.push({version:current.version,values:current.values,actor,proposal_id:pid,at:new Date().toISOString()});record.values={...record.values,...body.values};record.version++;p.accepted_values=body.values;
+      // Owner rule 2026-11-15: remember at which version the owner set a field by hand, so no
+      // proposal made before that (accept-all, carried-over proposals) can overwrite it.
+      for(const [id,e] of Object.entries(body.values))if(p.model===MANUAL_SOURCE&&e.source===MANUAL_SOURCE)record.manual={...record.manual,[id]:record.version};
     }
     p.status=body.decision==='accept'?'accepted':'rejected';p.decided_at=new Date().toISOString();p.actor=actor;write('ghost:character:'+cid,record);return get(cid);});}
+  function saveManual(cid,body,actor='local-creator'){return transaction(()=>{
+    const current=get(cid);if(body.expected_version!==current.version||body.template_version!==current.template.version)throw error('A profil vagy sablon közben megváltozott. A piszkozat megmaradt.',409);
+    const values=normalizeGhostValues(body.values,current.template.fields);
+    if(!object(values)||!Object.keys(values).length||Object.keys(values).length>100)throw error('Válassz legalább egy profilmezőt.');
+    const mirrors=new Map();
+    for(const [id,entry] of Object.entries(values)){
+      const field=current.template.fields.find(f=>f.id===id);if(!field)throw error('Ismeretlen sablonmező.');validateEntry(entry,field);
+      if(field.source){if(!['biography','personality','appearance','speech_style','sexuality'].includes(field.source))throw error('Ismeretlen korábbi profilmező.');if(!object(body.expected_legacy)||!Object.hasOwn(body.expected_legacy,field.source))throw error('A korábbi profilmező értéke szükséges.');
+        if(current.legacy[field.source]!==body.expected_legacy[field.source]&&current.legacy[field.source]!==String(entry.value??''))throw error('A profilmező másik eszközön megváltozott. A piszkozat megmaradt.',409);
+        mirrors.set(field.source,String(entry.value??''));}
+      entry.source=MANUAL_SOURCE;
+    }
+    characterPolicy?.assertValues(values,cid,{requireKnown:true});
+    const {template,character_id,profile_version,legacy,...record}=current,at=new Date().toISOString();
+    record.history.push({version:current.version,values:current.values,actor,manual:true,at});record.values={...current.values,...values};record.version++;
+    for(const id of Object.keys(values))record.manual={...record.manual,[id]:record.version};
+    // The source fields are validated by validateTemplate; no canonical table is touched.
+    for(const [field,value] of mirrors)run('UPDATE characters SET '+field+'=? WHERE id=?',value,cid);
+    write('ghost:character:'+cid,record);return get(cid);
+  });}
   // Owner request (2026-11-14): "Mindet elfogadom" accepts every pending proposal of a character,
   // even stale ones, oldest first, so a newer proposal overwrites the same field of an older one.
   // Fields missing from the current template or failing validation are left out; the character
@@ -101,7 +135,7 @@ export function installGhostProfiles({one,run,transaction,characterPolicy}){
     if(!pending.length)throw error('Nincs elbírálatlan javaslat.',409);
     const merged={},applied=new Map();let skipped_fields=0;
     for(const p of pending){const own={};
-      for(const [id,e] of Object.entries(p.values||{})){const f=t.fields.find(f=>f.id===id);try{if(!f)throw 0;validateEntry(e,f);own[id]=e;merged[id]=e;}catch{skipped_fields++;}}
+      for(const [id,e] of Object.entries(p.values||{})){const f=t.fields.find(f=>f.id===id);try{if(!f||overridesProposal(record,id,p))throw 0;validateEntry(e,f);own[id]=e;merged[id]=e;}catch{skipped_fields++;}}
       applied.set(p.id,own);}
     if(!Object.keys(merged).length)throw error('Egyik javaslat mezője sem fogadható el a jelenlegi sablonnal.',409);
     characterPolicy?.assertValues(merged,cid,{requireKnown:true});
@@ -109,7 +143,8 @@ export function installGhostProfiles({one,run,transaction,characterPolicy}){
     record.history.push({version:current.version,values:current.values,actor,proposal_ids:pending.map(p=>p.id),at});record.values={...record.values,...merged};record.version++;
     for(const p of pending){p.status='accepted';p.decided_at=at;p.actor=actor;p.accepted_values=applied.get(p.id);}
     write('ghost:character:'+cid,record);return {...get(cid),accepted:pending.length,skipped_fields};});}
-  return {get,template,saveTemplate,updateTemplate,propose,decide,acceptAll,handle({p,req,body,json}){
+  return {get,template,saveTemplate,updateTemplate,propose,decide,saveManual,readiness,acceptAll,handle({p,req,body,json}){
+    const manual=p.match(/^\/api\/characters\/([a-f0-9-]{36})\/ghost\/manual$/i);if(manual){if(req.method!=='POST')throw error('Nem támogatott művelet.',405);json(saveManual(manual[1],body));return true;}
     if(p==='/api/ghost-template'){if(req.method==='GET'){json(template());return true;}if(req.method==='PUT'){json(saveTemplate(body));return true;}}
     const all=p.match(/^\/api\/characters\/([a-f0-9-]{36})\/ghost\/accept-all$/i);if(all){if(req.method!=='POST')throw error('Nem támogatott művelet.',405);json(acceptAll(all[1]));return true;}
     const m=p.match(/^\/api\/characters\/([a-f0-9-]{36})\/ghost(?:\/proposals(?:\/([a-f0-9-]{36})\/decision)?)?$/i);if(!m)return false;

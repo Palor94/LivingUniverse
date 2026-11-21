@@ -24,6 +24,11 @@ test('phone play: same identity and origin rules, CSRF on changes, answers come 
     assert.equal((await request(remote,'/play')).status,403,'no Tailscale identity, no play');
     const page=await request(remote,'/play',null,'GET',auth);assert.equal(page.status,200);assert.match(page.text,/play-mobile\.js/);assert.match(page.headers['content-security-policy'],/script-src 'self'/);
     assert.equal((await request(remote,'/play-mobile.js',null,'GET',auth)).status,200);
+    assert.equal((await request(remote,'/play.webmanifest')).status,403,'installation assets still require the owner identity');
+    const manifest=await request(remote,'/play.webmanifest',null,'GET',auth);assert.equal(manifest.status,200);assert.match(manifest.headers['content-type'],/application\/manifest\+json/);
+    const install=JSON.parse(manifest.text);assert.equal(install.start_url,'/play');assert.equal(install.display,'standalone');
+    for(const icon of install.icons){const response=await request(remote,icon.src,null,'GET',auth);assert.equal(response.status,200);assert.match(response.headers['content-type'],/image\/png/);}
+    assert.equal((await request(remote,'/service-worker.js',null,'GET',auth)).status,200);
     const script=await request(remote,'/play.js',null,'GET',auth);assert.equal(script.status,200);assert.match(script.text,/installPlayUI/);
     assert.equal((await request(remote,'/client.js',null,'GET',auth)).status,404,'the desktop studio is not exposed');
     // Everything the phone page loads, followed import by import through the phone listener
@@ -37,6 +42,10 @@ test('phone play: same identity and origin rules, CSRF on changes, answers come 
     const settings=await request(remote,'/api/play/settings',null,'GET',auth);assert.equal(settings.status,200);assert.deepEqual(settings.data,(await request(local,'/api/play/settings')).data);
     assert.equal((await request(remote,'/api/play/settings',{adult:false},'POST',auth)).status,403,'a change needs the session token');
     const csrf=(await request(remote,'/api/session',null,'GET',auth)).data.csrf;
+    const measurement={id:'33333333-2222-4333-8444-555555555555',task:'talk',surface:'phone',clicks:2,ms:1500};
+    assert.equal((await request(remote,'/api/dev/ux-measurements',measurement,'POST',auth)).status,403);
+    assert.equal((await request(remote,'/api/dev/ux-measurements',measurement,'POST',{...auth,Origin:origin,'X-LU-CSRF':csrf})).status,201);
+    assert.equal((await request(local,'/api/dev/weekly')).data.ux[0].surface,'phone');
     assert.equal((await request(remote,'/api/play/settings',{adult:false},'POST',{...auth,Origin:'https://evil.ts.net','X-LU-CSRF':csrf})).status,403);
     const saved=await request(remote,'/api/play/settings',{text_speed:'fast'},'POST',{...auth,Origin:origin,'X-LU-CSRF':csrf});assert.equal(saved.status,200,saved.text);
     assert.equal((await request(local,'/api/play/settings')).data.text_speed,'fast','written through the desktop app');

@@ -41,12 +41,12 @@ export async function videoSignal(id,api){
 
 // Runs until everything is done or stop() is called; onProgress gets the running count.
 export function createSignalsWorker(api){
-  let running=false;
+  let running=false,working=false;
   // Saving is local and free: a short "busy" answer (e.g. another catalogue write at that
   // moment) is waited out a few times instead of ending the whole run.
   async function send(items){for(let i=0;;i++){try{return await api('/api/signals',{items});}catch(e){if(i>=3||!running)throw e;await new Promise(r=>setTimeout(r,2000*(i+1)));}}}
   async function start(onProgress){
-    if(running)return;running=true;let done=0;
+    if(working)return;running=true;working=true;let done=0;
     try{
       while(running){
         const {items}=await api('/api/signals/queue?limit=24');if(!items.length)break;
@@ -58,7 +58,7 @@ export function createSignalsWorker(api){
         // Videos one at a time (each request carries its stills).
         for(const x of videos){if(!running)break;const r=await videoSignal(x.id,api).catch(e=>({media_id:x.id,error:e.message}));await send([r]);done++;onProgress?.(done);}
       }
-    }finally{running=false;}
+    }finally{running=false;working=false;}
     return done;
   }
   return {start,stop:()=>{running=false;},get running(){return running;}};

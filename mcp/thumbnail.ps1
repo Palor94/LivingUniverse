@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 try {
     Add-Type -AssemblyName System.Drawing
     $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
@@ -25,7 +26,7 @@ try {
         $sourceX = 0; $sourceY = 0; $sourceW = $image.Width; $sourceH = $image.Height
         if ($null -ne $request.crop) {
             $c = $request.crop
-            if ($c.x -lt 0 -or $c.y -lt 0 -or $c.w -lt .01 -or $c.h -lt .01 -or ($c.x+$c.w) -gt 1 -or ($c.y+$c.h) -gt 1) { throw 'Invalid crop' }
+            if ($c.x -lt 0 -or $c.y -lt 0 -or $c.w -lt .01 -or $c.h -lt .01 -or ([double]$c.x+[double]$c.w) -gt (1.0+1e-12) -or ([double]$c.y+[double]$c.h) -gt (1.0+1e-12)) { throw 'Invalid crop' }
             $sourceX = [int][Math]::Floor($c.x*$image.Width+.5)
             $sourceY = [int][Math]::Floor($c.y*$image.Height+.5)
             $sourceW = [Math]::Max(1,[int][Math]::Floor(($c.x+$c.w)*$image.Width+.5)-$sourceX)
@@ -60,4 +61,4 @@ try {
         }
         exit 1
     } finally { $image.Dispose(); $stream.Dispose() }
-} catch { [Console]::Error.Write('Thumbnail conversion unavailable.'); exit 1 }
+} catch { [Console]::Error.Write($_.Exception.GetType().FullName+': '+$_.Exception.Message+' (line '+$_.InvocationInfo.ScriptLineNumber+')'); exit 1 }

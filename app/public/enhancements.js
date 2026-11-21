@@ -37,7 +37,6 @@ export function installEnhancements(ctx){
   const remember=p=>{pending.add(p);p.finally(()=>pending.delete(p)).catch(()=>{});return p;};
   function profile(c){
     const form=$('#profile-form');if(!form)return;
-    $('input[name="name"]',form)?.closest('label')?.insertAdjacentHTML('beforeend',`<small>${t('enh.nameHint')}</small>`);
     for(const input of $$('input,textarea,select',form)){
       input.dataset.saved=input.value;
       input.addEventListener(input.tagName==='SELECT'?'change':'blur',()=>{if(input.value===input.dataset.saved)return;const value=input.value;const status=$('#save-status');if(status)status.textContent=t('enh.saving');remember(api('/api/characters/'+c.id+'/profile-field',{field:input.name,value,expected:input.dataset.saved})).then(async result=>{input.dataset.saved=value;if(status)status.textContent=result.folder_sync?.completed?.length?t('enh.savedFolder'):t('enh.savedAuto');const stored=getState().characters.find(x=>x.id===c.id);if(stored)stored[input.name]=value;if(input.name==='name'){await refresh();if(getView()==='profile'&&ctx.getActiveCharacter?.()===c.id){const title=$('#content .heading h1');if(title)title.textContent=value;}}}).catch(e=>{if(status)status.textContent=t('enh.notSaved')+e.message;toast(e.message,true);});});
@@ -47,9 +46,10 @@ export function installEnhancements(ctx){
       const input=$('#palor-relationship');if(input){input.dataset.saved=input.value;let expected=relation?.description??null;input.onblur=()=>{if(input.dataset.saved===input.value)return;const value=input.value;remember(api('/api/relationships',{source_id:c.id,target_id:p.id,description:value,expected})).then(()=>{input.dataset.saved=value;expected=value.trim()||null;toast(t('enh.palorSaved'));}).catch(e=>toast(e.message,true));};}
     }
     if(p&&p.id!==c.id){$('#add-relationship').textContent=t('enh.otherRelationship');}
-    form.insertAdjacentHTML('afterbegin',`<small class="saved">${t('enh.autosaveNote')}</small>`);
   }
-  function covers(){for(const canvas of $$('canvas[data-cover-src]')){if(canvas.dataset.loaded)continue;canvas.dataset.loaded='1';const image=new Image();image.onload=()=>{const crop=JSON.parse(canvas.dataset.crop);const w=image.naturalWidth,h=image.naturalHeight;canvas.width=400;canvas.height=canvas.closest('.portrait')?470:300;const source={x:crop.x*w,y:crop.y*h,w:crop.w*w,h:crop.h*h};const scale=Math.max(canvas.width/source.w,canvas.height/source.h),dw=source.w*scale,dh=source.h*scale;canvas.getContext('2d').drawImage(image,source.x,source.y,source.w,source.h,(canvas.width-dw)/2,(canvas.height-dh)/2,dw,dh);};image.onerror=()=>{canvas.replaceWith(document.createTextNode(t('enh.coverUnavailable')));};image.src=canvas.dataset.coverSrc;}}
+  function covers(){for(const canvas of $$('canvas[data-cover-src]')){if(canvas.dataset.loaded)continue;canvas.dataset.loaded='1';const image=new Image();image.onload=()=>{const crop=JSON.parse(canvas.dataset.crop);const w=image.naturalWidth,h=image.naturalHeight;canvas.width=400;canvas.height=canvas.closest('.portrait')?470:canvas.closest('.profile-cover')?520:300;const source={x:crop.x*w,y:crop.y*h,w:crop.w*w,h:crop.h*h};const scale=Math.max(canvas.width/source.w,canvas.height/source.h),dw=source.w*scale,dh=source.h*scale;
+    // Too tall for the frame: keep the top (the head) instead of cutting it off in the middle.
+    canvas.getContext('2d').drawImage(image,source.x,source.y,source.w,source.h,(canvas.width-dw)/2,dh>canvas.height?0:(canvas.height-dh)/2,dw,dh);};image.onerror=()=>{canvas.replaceWith(document.createTextNode(t('enh.coverUnavailable')));};image.src=canvas.dataset.coverSrc;}}
   let previewObserver;const previewVideos=new Set();
   function cleanupPreviews(){if(previewObserver)previewObserver.disconnect();for(const v of previewVideos){v._cleanupPreview?.();v.pause();v.removeAttribute('src');v.load();}previewVideos.clear();}
   function listing(){

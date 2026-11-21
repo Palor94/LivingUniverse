@@ -1,3 +1,4 @@
+import {cloudAvailabilityMany} from './duplicates.mjs';
 // Local media signals: free, offline facts about the creator's own media that help the media
 // director choose well. Nothing here is uploaded or paid for.
 //   - dHash (64-bit "difference hash") per picture → near-duplicate groups ("same moment").
@@ -76,7 +77,7 @@ export function exifTime(b){
   return null;
 }
 
-export function installMediaSignals({db,one,all,run,transaction,fail,root,dataDir}){
+export function installMediaSignals({db,one,all,run,transaction,fail,root,dataDir,availability=cloudAvailabilityMany}){
   db.exec(SIGNALS_SQL);
   const iso=()=>new Date().toISOString();
   const framesDir=path.join(dataDir,'video-frames');
@@ -91,13 +92,10 @@ export function installMediaSignals({db,one,all,run,transaction,fail,root,dataDi
   }
 
   // What the browser worker should look at next: pictures without a hash, videos without frames.
-  function queue(limit=24){
-    limit=Math.max(1,Math.min(60,Number(limit)||24));
-    const images=all(`SELECT m.id,m.kind FROM active_media m LEFT JOIN media_signals s ON s.media_id=m.id
-      WHERE m.kind='image' AND s.media_id IS NULL ORDER BY m.relative_path LIMIT ?`,limit);
-    const videos=images.length>=limit?[]:all(`SELECT m.id,m.kind FROM active_media m LEFT JOIN media_signals s ON s.media_id=m.id
-      WHERE m.kind='video' AND s.media_id IS NULL ORDER BY m.relative_path LIMIT ?`,Math.min(6,limit-images.length));
-    return {items:[...images,...videos]};
+  async function queue(limit=24){
+    limit=Math.max(1,Math.min(60,Number(limit)||24));const items=[];
+    for(let offset=0;items.length<limit;offset+=256){const rows=all(`SELECT m.id,m.kind,m.relative_path FROM active_media m LEFT JOIN media_signals s ON s.media_id=m.id WHERE m.kind IN ('image','video') AND s.media_id IS NULL ORDER BY m.relative_path LIMIT 256 OFFSET ?`,offset);if(!rows.length)break;const states=await availability(rows.map(row=>path.resolve(root,row.relative_path)));for(const row of rows)if(states.get(path.resolve(root,row.relative_path))==='local'&&items.length<limit)items.push({id:row.id,kind:row.kind});if(rows.length<256)break;}
+    return {items};
   }
 
   async function readHead(rel){
@@ -216,7 +214,7 @@ export function installMediaSignals({db,one,all,run,transaction,fail,root,dataDi
   async function handle({p,req,res,body,json,url}){
     const m=req.method;
     if(p==='/api/signals/status'&&m==='GET')return json(status()),true;
-    if(p==='/api/signals/queue'&&m==='GET')return json(queue(url?.searchParams.get('limit'))),true;
+    if(p==='/api/signals/queue'&&m==='GET')return json(await queue(url?.searchParams.get('limit'))),true;
     if(p==='/api/signals'&&m==='POST')return json(await ingest(body?.items)),true;
     if(p==='/api/signals/plan'&&m==='GET'){const d=Number(url?.searchParams.get('duration'));return json({times:framePlan(d)}),true;}
     if(p==='/api/signals/groups'&&m==='GET')return json({groups:groups()}),true;

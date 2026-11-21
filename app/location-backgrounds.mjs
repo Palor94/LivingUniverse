@@ -229,6 +229,7 @@ export function installLocationBackgrounds({root,one,all,run,transaction,fail,au
     if(p==='/api/backgrounds/scan'&&req.method==='POST'){json(await scanFolders());return true;}
     if(p==='/api/backgrounds/zip'&&req.method==='POST'){if(!Buffer.isBuffer(body.zip))throw fail('Choose a ZIP file.',415);json(await importZip(body.zip,body.filename));return true;}
     if(p==='/api/backgrounds/upload'&&req.method==='POST'){
+      if(Buffer.isBuffer(body.bytes)){json(await save(body.location_id,body.bytes,{source:'Kézi feltöltés'+(body.filename?' · '+body.filename:'')}));return true;}
       const m=typeof body.data_url==='string'&&body.data_url.match(/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=]+)$/);
       if(!m)throw fail('Choose a JPEG or PNG image.');
       json(await save(body.location_id,Buffer.from(m[2],'base64'),{source:'Kézi feltöltés'+(typeof body.filename==='string'?' · '+body.filename.slice(0,200):'')}));return true;

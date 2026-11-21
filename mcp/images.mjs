@@ -1,6 +1,6 @@
 import {referenceCrop} from '../app/reference-crop.mjs';
-import {spawn} from 'node:child_process';
-import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {imageDecoderPool} from '../app/windows-image-decoder.mjs';
 
 export const MAX_IMAGE_BYTES=196608,MAX_SOURCE_BYTES=20*1024*1024,MAX_EDGE=768;
 export const MAX_REFERENCE_BYTES=3*1024*1024,MAX_REFERENCE_EDGE=2048;
@@ -11,24 +11,26 @@ export function dimensions(b){
   if(b[0]===255&&b[1]===216){let p=2;while(p+4<b.length){if(b[p++]!==255)break;while(b[p]===255)p++;const marker=b[p++];if(marker===218||marker===217)break;const n=b.readUInt16BE(p);if(n<2||p+n>b.length)break;if([192,193,194].includes(marker)&&n>=8)return {height:b.readUInt16BE(p+3),width:b.readUInt16BE(p+5)};p+=n;}}
   throw Error('Unsupported image format.');
 }
+const defaultPool=imageDecoderPool();
+export function createImageDecoder({convert=defaultPool,now=Date.now,failureTtl=600000}={}){
+  const failed=new Map(),pending=new Map();
+  return async function decode(bytes,reference=false,crop=null){
+    const maxBytes=reference?MAX_REFERENCE_BYTES:MAX_IMAGE_BYTES,maxEdge=reference?MAX_REFERENCE_EDGE:MAX_EDGE;
+    const d=dimensions(bytes),region=reference?referenceCrop(crop):null;
+    if(!d.width||!d.height||d.width*d.height>40000000||bytes.length>MAX_SOURCE_BYTES)throw Error('Image exceeds safe limits.');
+    const key=createHash('sha256').update(bytes).update(JSON.stringify([maxBytes,maxEdge,region])).digest('hex'),old=failed.get(key);
+    if(old&&now()-old.at<failureTtl)throw Error(old.message);failed.delete(key);
+    let job=pending.get(key);if(job)return job;
+    job=(async()=>{
+      const response=await convert({data:bytes.toString('base64'),reference,crop:region}),result=response.data;
+      if(typeof result!=='string'||!/^[A-Za-z0-9+/]+={0,2}$/.test(result))throw Error('Invalid thumbnail.');
+      const output=Buffer.from(result,'base64'),size=dimensions(output);
+      if(output.length>maxBytes||size.width>maxEdge||size.height>maxEdge||output[0]!==255||output[1]!==216)throw Error('Image exceeds output bound.');
+      return {type:'image',mimeType:'image/jpeg',data:output.toString('base64')};
+    })().catch(error=>{failed.set(key,{at:now(),message:String(error.message||error).slice(0,1024)});if(failed.size>256)failed.delete(failed.keys().next().value);throw error;}).finally(()=>pending.delete(key));
+    pending.set(key,job);return job;
+  };
+}
+const decodeImage=createImageDecoder();
 export const thumbnail=bytes=>decodeImage(bytes,false);
 export const referenceImage=(bytes,crop=null)=>decodeImage(bytes,true,crop);
-async function decodeImage(bytes,reference,crop=null){
-  const maxBytes=reference?MAX_REFERENCE_BYTES:MAX_IMAGE_BYTES,maxEdge=reference?MAX_REFERENCE_EDGE:MAX_EDGE;
-  const d=dimensions(bytes);if(!d.width||!d.height||d.width*d.height>40000000||bytes.length>MAX_SOURCE_BYTES)throw Error('Image exceeds safe limits.');
-  if(process.platform!=='win32')throw Error('Thumbnail conversion requires the configured Windows image decoder.');
-  const script=await readFile(new URL('./thumbnail.ps1',import.meta.url),'utf8');
-  const result=await new Promise((resolve,reject)=>{
-    const child=spawn('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{windowsHide:true,stdio:['pipe','pipe','pipe']});
-    const chunks=[];let size=0,done=false;const finish=(err,value)=>{if(done)return;done=true;clearTimeout(timer);err?reject(err):resolve(value);};
-    const timer=setTimeout(()=>{child.kill();finish(Error('Thumbnail conversion timed out.'));},15000);
-    child.on('error',()=>finish(Error('Thumbnail converter unavailable.')));child.stdin.on('error',()=>{});child.stderr.resume();
-    child.stdout.on('data',chunk=>{size+=chunk.length;if(size>Math.ceil(maxBytes/3)*4+1024){child.kill();finish(Error('Image exceeds output bound.'));}else chunks.push(chunk);});
-    child.on('close',code=>finish(code?Error('Thumbnail conversion unavailable.'):null,Buffer.concat(chunks).toString('ascii').trim()));
-    child.stdin.end(JSON.stringify({data:bytes.toString('base64'),reference,crop:referenceCrop(crop)}));
-  });
-  if(!/^[A-Za-z0-9+/]+={0,2}$/.test(result))throw Error('Invalid thumbnail.');
-  const output=Buffer.from(result,'base64'),d2=dimensions(output);
-  if(output.length>maxBytes||d2.width>maxEdge||d2.height>maxEdge||output[0]!==255||output[1]!==216)throw Error('Image exceeds output bound.');
-  return {type:'image',mimeType:'image/jpeg',data:output.toString('base64')};
-}

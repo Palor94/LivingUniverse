@@ -1,10 +1,19 @@
+import {installDevTasksUI} from './dev-tasks.js';
+import {openAssetGeneration} from './asset-generation.js';
+import {createGenerationWatcher} from './generation-jobs.js';
+import {cancelUndoWindows,confirmBox,undoWindow,notify} from './interactions.js';
+import './app-install.js';
+import {parseAppRoute,appRouteHash,startupRoute,readStartupPreference} from './app-routes.js';
 import {installWorldReviewUI} from './world-review.js';
+import {requestJson,appendStatusRetry} from './api-json.js';
+import {renderSystemErrors} from './system-error-summary.js';
+import {compactCharacterSubtitle,matchesReadiness,sortReadyCharacters} from './character-readiness.js';
 import {createSignalsWorker} from './media-signals.js';
 import {raceOptions,bindNameSuggestion} from './character-options.js?v=instant-race-names-20261031-1';
 import {approveCharacterReference,approvedReferenceUrl} from './character-reference-crops.js';
 import {installPermanentDeleteUI} from './permanent-media-delete.js?v=bulk-20261031-1';
 import {installGhostProfile} from './ghost-profile.js';
-import {mountLocationCanvas} from './location-canvas.js';
+import {mountLocationHub} from './location-hub.js';
 import {installLocationEditor} from './location-editor.js';
 import {installCharacterGeneration} from './character-generation.js';
 import {installEventTimeline} from './story-events.js';
@@ -48,23 +57,28 @@ const worldReviewUI=installWorldReviewUI({api,openDialog,mediaDialog,toast,getSt
 let locationCanvas=null;
 const ghostProfile=installGhostProfile({$,esc,api,action,toast});
 const permanentDeleteUI=installPermanentDeleteUI({$,$$,api,toast,render});
-let view=location.hash==='#locations'?'location-catalogue':'home',activeCharacter=null,query='',folder='',kind='image',offset=0,profileTab='profile';
+const initialRoute=startupRoute(location.hash,readStartupPreference(localStorage));
+let view=initialRoute.view,activeCharacter=initialRoute.cid,query=history.state?.lu?.query||'',folder='',kind='image',offset=0,profileTab=initialRoute.tab,pendingGhostReview=null;
+let handledHash=location.hash,locationTab=initialRoute.placeTab||'tree',locationSelection=initialRoute.placeId||null;
 const extras=installEnhancements({getActiveCharacter:()=>view==='profile'?activeCharacter:null,openCharacter:async cid=>{$('#dialog').close();await navigate('profile',cid);},$,$$,esc,api,action,toast,openDialog,refresh,render,mediaDialog,getState:()=>state,getView:()=>view,getKind:()=>kind,setKind:async value=>{kind=value;offset=0;if(view==='profile')await renderProfile();else await renderLibrary();}});
 const tagging=installTaxonomyUI({$,$$,esc,api,action,toast,openDialog,refresh,reload:async reset=>{if(reset)offset=0;await (view==='profile'?renderProfile():renderLibrary());}});
 const suggestionsUI=installSuggestionsUI({$,$$,esc,api,action,toast,openDialog,refresh,render,mediaDialog,getState:()=>state});
 const places=installLocationsUI({getView:()=>view,$,$$,esc,api,openDialog,toast,refresh,render,mediaDialog,selectTag:id=>tagging.selectTag(id),reload:async reset=>{if(reset)offset=0;await (view==='profile'?renderProfile():renderLibrary());}});
 const eventTimeline=installEventTimeline({$,$$,esc,api,action,toast,openDialog,getState:()=>state,openCharacter:cid=>navigate('profile',cid)});
-const characterGeneration=installCharacterGeneration({$,$$,esc,api,mediaDialog,onSaved:async cid=>{if(view!=='profile'||activeCharacter!==cid)return;query='';folder='';kind='image';offset=0;profileTab='media';sorting.reset();tagging.reset();places.reset();await refresh();await renderProfile();toast('A generált kép elmentve a profil médiái közé. A legújabb generált kép van elöl.');}});
+const openGenerationJob=job=>job.kind?openAssetGeneration({kind:job.kind,targetId:job.target_id,api,onSaved:()=>render()}):navigate('profile',job.character_id,{tab:'generation'});
+const generationWatcher=createGenerationWatcher({read:()=>api('/api/generation-jobs'),onUpdate:jobs=>{let chip=$('#generation-jobs-chip');if(!chip){chip=document.createElement('button');chip.id='generation-jobs-chip';chip.className='generation-jobs-chip';$('.topbar').append(chip);}const active=jobs.filter(job=>['running','generated'].includes(job.status));chip.hidden=!active.length;chip.textContent=t('gen.active',{count:active.reduce((sum,job)=>sum+(job.count||1),0)});chip.onclick=action(()=>openGenerationJob(active[0]));},onComplete:job=>{const notice=toast(t(job.kind?'gen.completedAsset':'gen.completed',{name:job.name,count:job.count||1}));const open=document.createElement('button');open.type='button';open.textContent=t('gen.view');open.onclick=action(async()=>{notice.remove();await openGenerationJob(job);});notice.card.append(open);}});
+const characterGeneration=installCharacterGeneration({$,$$,esc,api,mediaDialog,onSaved:()=>generationWatcher.poll(),onOpenGallery:async cid=>navigate('profile',cid,{tab:'media'})});
 const sorting=installSorting({onSelectionChange:items=>permanentDeleteUI.selection(items),afterFinish:mid=>duplicateReview.returnAfterSave(mid),locationDialog:ids=>places.bulk(ids),structuredTags:ids=>tagging.bulk(ids),$,$$,esc,api,action,toast,openDialog,refresh,render,mediaDialog,getState:()=>state,getView:()=>view,reload:()=>view==='profile'?renderProfile():renderLibrary(),resetPage:()=>{offset=0;}});
 const folderReview=installReconciliationUI({$,$$,esc,api,action,toast,openDialog,render,refresh,foldersDialog,mediaDialog});
 const quickTag=installQuickTag({$,$$,esc,api,toast,mediaDialog,getState:()=>state});
 const mediaReview=installMediaReviewUI({$,$$,esc,api,toast});
 const imageWorkshop=installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog:id=>mediaDialog(id),openProfile:cid=>navigate('profile',cid),openMediaReview:tab=>{mediaReview.show?.(tab);return navigate('media-review');},getState:()=>state});
-const worldEngineUI=installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay:()=>navigate('play'),openProfile:cid=>navigate('profile',cid)});
+const devTasksUI=installDevTasksUI({api,esc,toast});
+const worldEngineUI=installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay:()=>navigate('play'),openProfile:(cid,tab)=>navigate('profile',cid,{tab})});
 const devTools=installDevToolsUI({$,$$,esc,api,toast,heading});
 const characterFactory=installCharacterFactoryUI({$,$$,esc,api,toast,heading,openProfile:cid=>navigate('profile',cid)});
 const identityUI=installIdentityUI({$,$$,esc,api,toast,heading,openMedia:mid=>mediaDialog(mid)});
-const playUI=installPlayUI({$,$$,esc,api,toast,exit:()=>navigate('home')});
+const playUI=installPlayUI({$,$$,esc,api,toast,exit:()=>navigate('home'),openStudio:(tab,id)=>navigate('location-catalogue',null,{placeTab:tab,placeId:id}),openScreen:next=>navigate(next)});
 const duplicateReview=installDuplicatesUI({$,$$,esc,api,action,toast,openDialog,mediaDialog,refresh,getState:()=>state});
 const characterAlphabet='a á b c cs d dz dzs e é f g gy h i í j k l ly m n ny o ó ö ő p q r s sz t ty u ú ü ű v w x y z zs'.split(' ');
 const characterLetterRank=new Map(characterAlphabet.map((letter,index)=>[letter,index]));
@@ -80,35 +94,51 @@ const characterNameOrder={compare(a,b){
 let toastTimer;
 let storageInfo=null; // resource-root info never changes while the app runs; fetched once.
 // Success messages fade after a few seconds; errors stay until dismissed so they can't be missed.
-function toast(message,error=false){
-  // An error shown to the owner is a step of the debug trail too (F9, bug reports, sandbox checks).
-  if(error)try{window.__luTrail?.error(message,'üzenet');}catch{}
-  const box=$('#toast'),text=document.createElement('span'),close=document.createElement('button');
-  const hide=()=>{clearTimeout(toastTimer);box.style.display='none';};
-  text.textContent=message;close.type='button';close.className='toast-close';close.textContent='✕';close.setAttribute('aria-label',t('common.dismiss'));close.onclick=hide;
-  box.replaceChildren(text,close);box.classList.toggle('error',error);box.setAttribute('role',error?'alert':'status');box.style.display='flex';
-  clearTimeout(toastTimer);if(!error)toastTimer=setTimeout(hide,3500);
-}
-async function api(route,data,method){const r=await fetch(route,{method:method||(data?'POST':'GET'),headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});const result=await r.json();if(!r.ok)throw Object.assign(Error(result.error?translateServerMessage(result.error)+(r.status>=500&&result.request_id?' (#'+result.request_id+')':''):t('common.actionFailed')),{status:r.status,requestId:r.headers.get('x-request-id')});return result;}
-function action(fn){return async e=>{try{await fn(e);}catch(err){toast(err.message,true);}};}
+function toast(message,error=false,retry=null){if(error)try{window.__luTrail?.error(message,'üzenet');}catch{}return notify(message,error,retry);}
+
+async function api(route,data,method){return requestJson(route,{method:method||(data?'POST':'GET'),headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});}
+function reportRequestError(err){toast(err.message||t('common.unexpected'),true,err.transport?async()=>{try{await render();}catch(next){reportRequestError(next);}}:null);}
+function action(fn){return async e=>{try{await fn(e);}catch(err){reportRequestError(err);}};}
 async function refresh(){state=await api('/api/state');state.characters.sort((a,b)=>characterNameOrder.compare(a.name,b.name));$('#character-count').textContent=state.characters.length;$('#inbox-count').textContent=state.stats.inbox;}
 function openDialog(title,content){$('#dialog-content').innerHTML=`<div class="dialog-head"><h2>${esc(title)}</h2><button id="close-dialog" class="subtle" aria-label="${esc(t('common.closeDialog'))}">✕</button></div><div class="dialog-body">${content}</div>`;$('#close-dialog').onclick=()=>$('#dialog').close();if(!$('#dialog').open)$('#dialog').showModal();}
 function heading(kicker,title,description,actions=''){return `<div class="heading"><div><div class="eyebrow">${esc(kicker)}</div><h1>${esc(title)}</h1><p>${esc(description)}</p></div><div class="actions">${actions}</div></div>`;}
 function cover(c,cls='portrait'){const coverUrl=c.cover_frame?'/api/characters/'+encodeURIComponent(c.id)+'/cover-frame?v='+encodeURIComponent(c.cover_frame.captured_at):'/thumb/'+encodeURIComponent(c.cover_id||'')+'?w=640';let crop=null;try{crop=JSON.parse(c.cover_crop||'null');}catch{}return `<div class="${cls}">${c.cover_id?crop&&crop.media_id===c.cover_id?`<canvas class="cover-canvas" data-cover-src="${coverUrl}" data-crop="${esc(JSON.stringify(crop))}" aria-label="${esc(t('cover.label',{name:c.name}))}"></canvas>`:`<img src="${coverUrl}" alt="${esc(c.name)}" loading="lazy">`:`<span class="monogram">${esc(c.name.slice(0,1))}</span>`}${cls==='portrait'?`<span class="badge">${t('cover.mediaBadge',{count:c.media_count||0})}</span>${c.is_group?`<span class="badge group-badge">${t('group.badge')}</span>`:''}`:''}</div>`;}
-function bindImages(){for(const img of $$('img'))img.onerror=()=>{const label=document.createElement('div');label.className='broken-label';label.textContent=t('common.previewUnavailable');img.replaceWith(label);};extras.covers();}
-async function navigate(next,cid=null){await extras.flush();characterGeneration.cleanup();sorting.reset();places.reset();view=next;activeCharacter=cid;query='';folder='';kind='image';offset=0;profileTab='profile';history.replaceState(null,'',next==='location-catalogue'?'#locations':location.pathname+location.search);await render();}
+function bindImages(){for(const img of $$('img')){const unavailable=()=>{
+  const card=img.closest('.canon-ref'),open=card?.querySelector('[data-open-ref]');
+  const label=document.createElement(open?'button':'div');label.className=open?'broken-label reference-unavailable':'broken-label';label.textContent=t(open?'ref.unavailableOpen':'common.previewUnavailable');
+  if(open){label.type='button';label.onclick=()=>open.click();}img.replaceWith(label);
+};img.onerror=unavailable;if(img.complete&&!img.naturalWidth&&img.getAttribute('src'))unavailable();}extras.covers();}
+let characterListReturn=null,navigationSequence=0;
+async function navigate(next,cid=null,{restoreCharacterList=false,tab='profile',historyMode='push',scrollY=null,restoreQuery=null,placeTab='tree',placeId=null}={}){
+  cancelUndoWindows();const sequence=++navigationSequence;
+  const returning=next==='characters'&&restoreCharacterList?characterListReturn:null;
+  if(view==='characters')characterListReturn=['profile','ghost-template'].includes(next)?{y:window.scrollY,query}:null;
+  else if(!['profile','ghost-template'].includes(view))characterListReturn=null;
+  await Promise.all([extras.flush(),ghostProfile.flush()]);if(sequence!==navigationSequence)return;
+  if(historyMode==='push')history.replaceState({lu:{y:window.scrollY,query}},'',location.href);
+  characterGeneration.cleanup();sorting.reset();places.reset();locationTab=placeTab;locationSelection=placeId;view=next;activeCharacter=cid;query=restoreQuery??returning?.query??'';folder='';kind='image';offset=0;profileTab=['profile','media','canon','events','generation'].includes(tab)?tab:'profile';
+  const hash=appRouteHash({view,cid:activeCharacter,tab:profileTab,placeTab:locationTab,placeId:locationSelection});
+  if(historyMode!=='none'&&location.hash!==hash)history[historyMode==='replace'?'replaceState':'pushState']({lu:{y:scrollY??returning?.y??0,query}},'',hash);
+  handledHash=location.hash;
+  await render();
+  // Rendering a profile includes its asynchronous fields. Scroll only when the destination
+  // has its final height, and never let an older navigation move the newer screen.
+  if(sequence===navigationSequence)window.scrollTo({top:scrollY??returning?.y??0,left:0,behavior:'instant'});
+}
 async function render(){
   locationCanvas?.destroy();locationCanvas=null;
+  if(view!=='tasks')devTasksUI.leave();
   if(view!=='play')playUI.leave();
   if(view!=='media-review')mediaReview.leave();
   if(view!=='image-workshop')imageWorkshop.leave();
   if(view!=='system')devTools.leave();
   if(view!=='identity')identityUI.leave();
   if(view!=='factory')characterFactory.leave();
+  if(view!=='profile')ghostProfile.cleanup();
   extras.cleanupPreviews();
   await refresh();for(const b of $$('#navigation button'))b.classList.toggle('active',b.dataset.view===(view==='profile'||view==='ghost-template'?'characters':view));
   $('#breadcrumb').textContent=t('view.'+view);
-  if(view==='ghost-template')await renderTemplateCharacter();else if(view==='characters')renderCharacters();else if(view==='profile')await renderProfile();else if(view==='world')await renderWorld();else if(view==='play')await playUI.render($('#content'));else if(view==='home')await renderHome();else if(view==='quick-tag')await quickTag.render($('#content'));else if(view==='media-review')await mediaReview.render($('#content'));else if(view==='image-workshop')await imageWorkshop.render($('#content'));else if(view==='location-catalogue')await renderLocationCanvas();else if(view==='system')await devTools.render($('#content'));else if(view==='identity')await identityUI.render($('#content'));else if(view==='factory')await characterFactory.render($('#content'));else await renderLibrary();bindImages();
+  if(view==='ghost-template')await renderTemplateCharacter();else if(view==='characters')await renderCharacters();else if(view==='profile')await renderProfile();else if(view==='tasks')await devTasksUI.render($('#content'));else if(view==='world')await renderWorld();else if(view==='play')await playUI.render($('#content'));else if(view==='home')await renderHome();else if(view==='quick-tag')await quickTag.render($('#content'));else if(view==='media-review')await mediaReview.render($('#content'));else if(view==='image-workshop')await imageWorkshop.render($('#content'));else if(view==='location-catalogue')await renderLocationCanvas();else if(view==='system')await devTools.render($('#content'));else if(view==='identity')await identityUI.render($('#content'));else if(view==='factory')await characterFactory.render($('#content'));else await renderLibrary();bindImages();
   if(view!=='home')void refreshBadges();
 }
 // Menu badges: open jobs on Kezdőlap, an unapproved place plan on Helyszínek, pictures
@@ -126,26 +156,35 @@ async function refreshBadges(){
   if(Date.now()-badgesAt<60000)return;badgesAt=Date.now();
   try{const [s,tidy]=await Promise.all([api('/api/quick-tag/summary'),api('/api/tidy')]);paintBadges(s,tidy);}catch{}
 }
-function renderCharacters(){
-  const filtered=state.characters.filter(c=>(c.name+' '+c.aliases).toLocaleLowerCase('hu').includes(query.toLocaleLowerCase('hu')));
-  $('#content').innerHTML=heading(t('characters.kicker'),t('characters.title'),t('characters.lead'),`<button id="folders-button" class="subtle">${t('characters.organizeFolders')}</button><button id="add-character" class="primary">${t('characters.new')}</button>`)+
-  `<div class="metrics"><div class="metric"><b>${state.characters.length}</b><span>${t('metric.characters')}</span></div><div class="metric"><b>${state.stats.images}</b><span>${t('metric.pictures')}</span></div><div class="metric"><b>${state.stats.videos}</b><span>${t('metric.videos')}</span></div><div class="metric"><b>${state.stats.inbox}</b><span>${t('metric.inbox')}</span></div></div>`+
-  (!state.stats.media?`<div class="onboarding"><div><strong>${t('onboarding.title')}</strong><p>${t('onboarding.text')}</p></div><button id="scan-button" class="primary">${t('onboarding.button')}</button></div>`:'')+
-  `<div class="toolbar"><input id="character-search" aria-label="${esc(t('characters.searchLabel'))}" placeholder="${esc(t('characters.searchPlaceholder'))}" value="${esc(query)}"><span class="count">${t('characters.count',{count:filtered.length})}</span></div>`+
-  `<div class="panel"><button id="open-template-character" class="subtle">${t('characters.template')}</button><p>${t('characters.templateText')}</p></div>`+
-  (state.characters.length?`<p id="no-character-match" class="muted"${filtered.length?' hidden':''}>${t('characters.noMatch')}</p><div class="character-grid">${state.characters.map(c=>`<button class="character-card" data-character="${c.id}"${filtered.includes(c)?'':' hidden'}>${cover(c)}<div class="card-info"><b>${esc(c.name)}</b><small>${esc(c.aliases||t('characters.noAliases'))}</small></div></button>`).join('')}</div>`:`<div class="empty"><div class="symbol">◈</div><h2>${t('characters.emptyTitle')}</h2><p>${t('characters.emptyText')}</p><button id="empty-add" class="subtle">${t('characters.createManually')}</button></div>`);
+let characterFilter='all',characterSort='name';
+async function renderCharacters(){
+  let statusError=null,statuses=new Map();
+  try{const result=await api('/api/characters/readiness');statuses=new Map((Array.isArray(result.characters)?result.characters:[]).map(status=>[status.id,status]));}catch(error){statusError=error;}
+  if(view!=='characters')return;
+  const order=sortReadyCharacters(state.characters,statuses,characterSort);
+  const subtitle=c=>{const status=statuses.get(c.id),text=compactCharacterSubtitle(c.aliases,status?.occupation);return text||t(status?.profile_filled===0?'characters.emptyProfile':'characters.subtitleUnknown');};
+  const badges=c=>{const status=statuses.get(c.id);if(!status)return '<span class="character-ready-badge">'+t('characters.readinessUnknown')+'</span>';
+    return '<span class="character-ready-badge">'+t('characters.profilePercent',{percent:status.profile_percent})+'</span>'+
+      ['figures','routine','home','known'].map(kind=>{if(kind==='known'&&status.is_palor)return '<span class="character-ready-badge ready">'+t('characters.badge.palor')+'</span>';const present={figures:status.figures>0,routine:status.has_routine,home:status.has_home,known:status.knows_palor}[kind];return '<span class="character-ready-badge '+(present?'ready':'missing')+'">'+t('characters.badge.'+kind+'.'+(present?'yes':'no'))+'</span>';}).join('');};
+  $('#content').innerHTML=heading(t('characters.kicker'),t('characters.title'),t('characters.lead'),'<button id="folders-button" class="subtle">'+t('characters.organizeFolders')+'</button><button id="add-character" class="primary">'+t('characters.new')+'</button>')+
+    '<div class="metrics"><div class="metric"><b>'+state.characters.length+'</b><span>'+t('metric.characters')+'</span></div><div class="metric"><b>'+state.stats.images+'</b><span>'+t('metric.pictures')+'</span></div><div class="metric"><b>'+state.stats.videos+'</b><span>'+t('metric.videos')+'</span></div><div class="metric"><b>'+state.stats.inbox+'</b><span>'+t('metric.inbox')+'</span></div></div>'+
+    (!state.stats.media?'<div class="onboarding"><div><strong>'+t('onboarding.title')+'</strong><p>'+t('onboarding.text')+'</p></div><button id="scan-button" class="primary">'+t('onboarding.button')+'</button></div>':'')+
+    '<div class="toolbar"><input id="character-search" aria-label="'+esc(t('characters.searchLabel'))+'" placeholder="'+esc(t('characters.searchPlaceholder'))+'" value="'+esc(query)+'"><label>'+t('characters.filterLabel')+'<select id="character-filter">'+['all','empty','figure','routine','home','known','unknown'].map(value=>'<option value="'+value+'"'+(value===characterFilter?' selected':'')+'>'+t('characters.filter.'+value)+'</option>').join('')+'</select></label><label>'+t('characters.sortLabel')+'<select id="character-sort">'+['name','profile-desc','profile-asc','missing'].map(value=>'<option value="'+value+'"'+(value===characterSort?' selected':'')+'>'+t('characters.sort.'+value)+'</option>').join('')+'</select></label><span class="count"></span></div><div id="character-readiness-status" role="status"></div>'+
+    (state.characters.length?'<p id="no-character-match" class="muted" hidden>'+t('characters.noMatch')+'</p><div class="character-grid">'+order.map(c=>'<a class="character-card" href="'+appRouteHash({view:'profile',cid:c.id})+'" data-character="'+c.id+'">'+cover(c)+'<div class="card-info"><b>'+esc(c.name)+'</b><small class="character-subtitle" title="'+esc([c.aliases,statuses.get(c.id)?.occupation].filter(Boolean).join(' — '))+'">'+esc(subtitle(c))+'</small><span class="character-ready-badges">'+badges(c)+'</span></div></a>').join('')+'</div>':'<div class="empty"><div class="symbol">◈</div><h2>'+t('characters.emptyTitle')+'</h2><p>'+t('characters.emptyText')+'</p><button id="empty-add" class="subtle">'+t('characters.createManually')+'</button></div>')+
+    '<div class="panel template-character-panel"><button id="open-template-character" class="subtle">'+t('characters.template')+'</button><p>'+t('characters.templateText')+'</p></div>';
   $('#open-template-character').onclick=action(()=>navigate('ghost-template'));
   $('#add-character').onclick=action(()=>newCharacter());$('#folders-button').onclick=action(()=>foldersDialog());if($('#scan-button'))$('#scan-button').onclick=action(scanMedia);if($('#empty-add'))$('#empty-add').onclick=action(()=>newCharacter());
-  // Filter the existing cards in place: rebuilding the grid lost drawn cover crops and image fallbacks.
-  $('#character-search').oninput=e=>{
-    query=e.target.value;const q=query.toLocaleLowerCase('hu');let shown=0;
-    for(const card of $$('[data-character]')){const c=state.characters.find(x=>x.id===card.dataset.character);const match=!!c&&(c.name+' '+c.aliases).toLocaleLowerCase('hu').includes(q);card.hidden=!match;shown+=match;}
-    $('.toolbar .count').textContent=t('characters.count',{count:shown});
-    if($('#no-character-match'))$('#no-character-match').hidden=shown>0;
+  const cards=new Map($$('[data-character]').map(card=>[card.dataset.character,card]));
+  const apply=()=>{const q=query.toLocaleLowerCase('hu');let shown=0;for(const c of state.characters){const card=cards.get(c.id),match=(c.name+' '+c.aliases).toLocaleLowerCase('hu').includes(q)&&matchesReadiness(statuses.get(c.id),characterFilter);if(card)card.hidden=!match;shown+=match;}
+    $('.toolbar .count').textContent=t('characters.count',{count:shown});if($('#no-character-match'))$('#no-character-match').hidden=shown>0;
   };
-  for(const c of $$('[data-character]'))c.onclick=action(()=>navigate('profile',c.dataset.character));
+  $('#character-search').oninput=e=>{query=e.target.value;apply();};$('#character-filter').onchange=e=>{characterFilter=e.target.value;apply();};
+  $('#character-sort').onchange=e=>{characterSort=e.target.value;const grid=$('.character-grid');if(grid)for(const c of sortReadyCharacters(state.characters,statuses,characterSort))grid.appendChild(cards.get(c.id));};
+  for(const card of cards.values())card.onclick=action(async event=>{if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();await navigate('profile',card.dataset.character);});
+  if(statusError){const host=$('#character-readiness-status');host.textContent=statusError.message;appendStatusRetry(host,()=>renderCharacters());}
+  apply();
 }
-async function renderTemplateCharacter(){await ghostProfile.renderTemplate($('#content'),()=>navigate('characters'));}
+async function renderTemplateCharacter(){await ghostProfile.renderTemplate($('#content'),()=>navigate('characters',null,{restoreCharacterList:true}));}
 function genderOptions(){return `<option value="">${t('common.choose')}</option><option value="férfi">${t('gender.male')}</option><option value="hím">${t('gender.animalMale')}</option><option value="nem-bináris">${t('gender.nonbinary')}</option>`;}
 function newCharacter(initial='',hooks={}){
   openDialog(t('newCharacter.title'),`<form id="new-character-form" class="form-grid"><label>${t('newCharacter.name')}<input name="name" required maxlength="200" value="${esc(initial)}" placeholder="${esc(t('newCharacter.namePlaceholder'))}" autofocus></label><label>${t('newCharacter.gender')}<select name="gender">${genderOptions()}</select></label><p class="muted">${t('newCharacter.hint')}</p><div class="dialog-footer"><button class="primary">${t('newCharacter.submit')}</button></div></form>`);
@@ -178,24 +217,37 @@ async function fetchMedia(cid){const context=mediaContext();const params=new URL
 function pager(total){return total?`<div class="pager"><button id="prev-page" ${offset===0?'disabled':''}>${t('common.previous')}</button><span>${t('common.pageRange',{from:offset+1,to:Math.min(offset+48,total),total})}</span><button id="next-page" ${offset+48>=total?'disabled':''}>${t('common.next')}</button></div>`:'';}
 function bindFilters(reload,restoreSearch=()=>{}){restoreSearch($('#media-search'));const search=$('#media-search');search.oninput=e=>{query=e.target.value;clearTimeout(search._searchTimer);search._searchTimer=setTimeout(action(async()=>{if(!search.isConnected)return;offset=0;await reload();}),350);};$('#kind-filter').onchange=action(async e=>{kind=e.target.value;offset=0;await reload();});$('#folder-filter').onchange=action(async e=>{folder=e.target.value;offset=0;await reload();});if($('#prev-page'))$('#prev-page').onclick=action(async()=>{offset=Math.max(0,offset-48);await reload();});if($('#next-page'))$('#next-page').onclick=action(async()=>{offset+=48;await reload();});}
 async function renderLibrary(){const data=await fetchMedia();if(!data)return;const restoreSearch=retainMediaSearch($('#media-search'));$('#content').innerHTML=heading(t('library.kicker'),t('view.'+(view==='inbox'||view==='locations'?view:'library')),view==='inbox'?t('library.inboxLead'):view==='locations'?t('library.locationsLead'):t('library.libraryLead'),`<button id="library-folders" class="subtle">${t('characters.organizeFolders')}</button><button id="library-scan" class="primary">${t('scan.findNew')}</button>`)+filters()+`<div class="section-title"><span class="muted">${t('library.matching',{count:data.total})}</span></div>`+(data.items.length?`<div class="media-grid">${data.items.map(mediaCard).join('')}</div>`:`<div class="empty"><div class="symbol">▧</div><h2>${view==='inbox'?t('library.inboxEmptyTitle'):t('library.emptyTitle')}</h2><p>${view==='inbox'?t('library.inboxEmptyText'):t('library.emptyText')}</p></div>`)+pager(data.total);$('#library-scan').onclick=action(scanMedia);$('#library-folders').onclick=action(foldersDialog);bindFilters(renderLibrary,restoreSearch);bindMedia();}
+// Proposed relationship lines (e.g. the first meeting with Palor). Accepting appends to the owner's
+// text on the server; nothing is shown when there is nothing to decide.
+async function relationshipSuggestions(c){
+  const host=$('#relationship-suggestions');if(!host)return;
+  let items=[];try{items=(await api('/api/characters/'+c.id+'/relationship-suggestions')).items;}catch{return;}
+  if(!host.isConnected||!items.length)return;
+  host.innerHTML=items.map(s=>`<div class="pf-pending rel-suggestion"><div class="pf-pending-text"><strong>Kapcsolati javaslat · ${esc(s.target_name)}</strong><small>${esc(s.text)}</small></div><div class="pf-pending-actions"><button type="button" class="primary" data-rel-accept="${s.id}">Hozzáadom</button><button type="button" data-rel-dismiss="${s.id}">Elvetem</button></div></div>`).join('');
+  for(const b of host.querySelectorAll('[data-rel-accept],[data-rel-dismiss]'))b.onclick=action(async()=>{const id=b.dataset.relAccept||b.dataset.relDismiss;await api('/api/relationship-suggestions/'+id+'/decision',{decision:b.dataset.relAccept?'accept':'dismiss'});toast(b.dataset.relAccept?'A kapcsolathoz hozzáadva.':'Javaslat elvetve.');await refresh();await renderProfile();});
+}
 async function renderProfile(){
-  await extras.flush();
+  await Promise.all([extras.flush(),ghostProfile.flush()]);
   characterGeneration.cleanup();
   const profileContext=mediaViewContext();const c=await api('/api/characters/'+activeCharacter);if(profileContext!==mediaViewContext())return;const data=profileTab==='media'?await fetchMedia(c.id):null;if(profileContext!==mediaViewContext()||(profileTab==='media'&&!data))return;const restoreSearch=retainMediaSearch($('#media-search'));const approved=c.canon?JSON.parse(c.canon.references_json):[];
   $('#content').innerHTML=heading(t('profile.kicker'),c.name,c.aliases||t('profile.noAliases'),`<button id="back-characters" class="subtle">${t('profile.back')}</button>${c.deletion_block===null?`<button id="delete-empty-character" class="danger">${t('profile.delete')}</button>`:''}`)+`<div class="tabs"><button id="profile-tab" class="${profileTab==='profile'?'active':''}">${t('tabs.profile')}</button><button id="collection-tab" class="${profileTab==='media'?'active':''}">${t('tabs.media')}</button><button id="events-tab" class="${profileTab==='events'?'active':''}">${t('tabs.events')}</button><button id="canon-tab" class="${profileTab==='canon'?'active':''}">${t('tabs.canon',{count:approved.length})}</button><button id="generation-tab" class="${profileTab==='generation'?'active':''}">${t('tabs.generation')}</button></div><div id="profile-content"></div>`;
   if($('#delete-empty-character'))$('#delete-empty-character').onclick=()=>deleteEmptyCharacter(c);
-  $('#back-characters').onclick=action(()=>navigate('characters'));for(const [sel,tab] of [['#profile-tab','profile'],['#collection-tab','media'],['#canon-tab','canon'],['#events-tab','events'],['#generation-tab','generation']])$(sel).onclick=action(async()=>{profileTab=tab;offset=0;await renderProfile();});
+  $('#back-characters').onclick=action(()=>navigate('characters',null,{restoreCharacterList:true}));for(const [sel,tab] of [['#profile-tab','profile'],['#collection-tab','media'],['#canon-tab','canon'],['#events-tab','events'],['#generation-tab','generation']])$(sel).onclick=action(()=>navigate('profile',c.id,{tab}));
   void characterFactory.profileStatus(c.id,$('.tabs'));
   if(profileTab==='generation'){await characterGeneration.render(c);return;}
   if(profileTab==='events'){await eventTimeline.render(c);return;}
   if(profileTab==='media'){$('#profile-content').innerHTML=filters()+(data.items.length?`<div class="media-grid">${data.items.map(mediaCard).join('')}</div>`:`<div class="empty"><h2>${t('profile.noMediaTitle')}</h2><p>${t('profile.noMediaText')}</p></div>`)+pager(data.total);bindFilters(renderProfile,restoreSearch);bindMedia();return;}
   if(profileTab==='canon'){await renderCanon(c,approved);return;}
-  $('#profile-content').innerHTML=`<div class="profile-layout"><div><div class="panel">${cover(c,'profile-cover')}<div class="eyebrow">${t('profile.identityKicker')}</div><h2>${c.canon?t('profile.identityKept'):t('profile.identityReady')}</h2><p>${c.canon?t('profile.identityKeptText'):t('profile.identityReadyText')}</p><div class="note">${t('profile.clothingNote')}</div></div><div class="panel"><h2>${t('profile.relationships')}</h2>${c.relationships.length?c.relationships.map(r=>`<div class="relationship"><b>${esc(r.target_name)}</b><div>${esc(r.description)}</div><button data-edit-relationship="${r.target_id}" class="subtle">${t('common.edit')}</button></div>`).join(''):`<p>${t('profile.noRelationships')}</p>`}<button id="add-relationship" class="subtle">${t('profile.addRelationship')}</button></div></div><form id="profile-form" class="panel form-grid"><div class="eyebrow">${t('profile.legacyKicker')}</div><div class="two-cols"><label>${t('profile.name')}<input name="name" readonly required maxlength="200" value="${esc(c.name)}"><a href="/character-rename.html?character=${encodeURIComponent(c.id)}">${t('profile.renameLink')}</a></label><label>${t('profile.aliases')}<input name="aliases" value="${esc(c.aliases)}" placeholder="${esc(t('profile.aliasesPlaceholder'))}"></label></div><label>${t('profile.race')}<select name="race">${raceOptions(c.race)}</select></label><label>${t('profile.biography')}<textarea name="biography" placeholder="${esc(t('profile.biographyPlaceholder'))}">${esc(c.biography)}</textarea></label><label>${t('profile.appearance')}<textarea name="appearance" placeholder="${esc(t('profile.appearancePlaceholder'))}">${esc(c.appearance)}</textarea><small>${t('profile.appearanceHint')}</small></label><label>${t('profile.personality')}<textarea name="personality" placeholder="${esc(t('profile.personalityPlaceholder'))}">${esc(c.personality)}</textarea></label><label>${t('profile.speech')}<textarea name="speech_style" maxlength="30000" rows="6" placeholder="${esc(t('profile.speechPlaceholder'))}">${esc(c.speech_style)}</textarea></label><label>${t('profile.sexuality')}<textarea name="sexuality" maxlength="30000" placeholder="${esc(t('profile.sexualityPlaceholder'))}">${esc(c.sexuality)}</textarea></label><label>${t('profile.notes')}<textarea name="notes" placeholder="${esc(t('profile.notesPlaceholder'))}">${esc(c.notes)}</textarea><small>${t('profile.notesHint')}</small></label><div class="actions"><button class="primary">${t('profile.save')}</button><span id="save-status" class="saved"></span></div></form></div><div id="structured-profile"></div>`;
-  $('#profile-form').onsubmit=action(async e=>{e.preventDefault();const values=Object.fromEntries(new FormData(e.target));await api('/api/characters/'+c.id,{...values,expected:Object.fromEntries([...e.target.querySelectorAll('input,textarea,select')].filter(input=>input.name).map(input=>[input.name,input.dataset.saved??c[input.name]]))},'PUT');await refresh();toast(t('profile.saved'));await renderProfile();});
-  // Group switch: one record standing for several different people.
-  $('#add-relationship').closest('.panel').insertAdjacentHTML('beforebegin',`<div class="panel group-panel"><label class="completion-choice"><input type="checkbox" id="character-is-group" ${c.is_group?'checked':''}><span><b>${t('group.toggle')}</b><small>${t('group.hint')}</small></span></label><p id="group-status" class="saved" role="status"></p></div>`);
+  // Owner layout (2026-11-15): compact header (portrait, names, pending proposals), one profile
+  // editor below, relationships and notes folded away. No explanatory boilerplate.
+  $('#profile-content').innerHTML=`<section class="panel profile-head">${cover(c,'profile-cover')}<div class="profile-head-main"><form id="profile-form" class="profile-head-fields"><label class="pf-name">${t('profile.name')}<span><input name="name" readonly required maxlength="200" value="${esc(c.name)}"><a href="/character-rename.html?character=${encodeURIComponent(c.id)}" title="${esc(t('profile.renameLink'))}">Átnevezés</a></span></label><label class="pf-aliases">${t('profile.aliases')}<input name="aliases" value="${esc(c.aliases)}" placeholder="${esc(t('profile.aliasesPlaceholder'))}"></label><label class="pf-race">${t('profile.race')}<select name="race">${raceOptions(c.race)}</select></label><label class="pf-group-toggle"><input type="checkbox" id="character-is-group" ${c.is_group?'checked':''}> ${t('group.toggle')}</label><details class="pf-notes"><summary>${t('profile.notes')}</summary><textarea name="notes" placeholder="${esc(t('profile.notesPlaceholder'))}">${esc(c.notes)}</textarea></details><span id="save-status" class="saved"></span><span id="group-status" class="saved" role="status"></span></form><div id="ghost-pending"></div><div id="relationship-suggestions"></div></div></section><div id="structured-profile"></div><details class="panel pf-relationships"><summary>${t('profile.relationships')} · ${c.relationships.length}</summary><div class="pf-relationships-body">${c.relationships.length?c.relationships.map(r=>`<div class="relationship"><b>${esc(r.target_name)}</b><div>${esc(r.description)}</div><button data-edit-relationship="${r.target_id}" class="subtle">${t('common.edit')}</button></div>`).join(''):`<p>${t('profile.noRelationships')}</p>`}<button id="add-relationship" class="subtle">${t('profile.addRelationship')}</button></div></details>`;
+  // Every header field autosaves (enhancements.profile); there is no form-wide submit any more.
+  $('#profile-form').onsubmit=e=>e.preventDefault();
   $('#character-is-group').onchange=action(async e=>{const box=e.target;box.disabled=true;try{await api('/api/characters/'+c.id+'/group',{group:box.checked});await refresh();$('#group-status').textContent=box.checked?t('group.marked'):t('group.unmarked');}catch(err){box.checked=!box.checked;throw err;}finally{box.disabled=false;}});
-  $('#add-relationship').onclick=()=>relationshipDialog(c);for(const b of $$('[data-edit-relationship]'))b.onclick=()=>relationshipDialog(c,c.relationships.find(r=>r.target_id===b.dataset.editRelationship));bindImages();extras.profile(c);await ghostProfile.render(c,null,$('#structured-profile'));
+  $('#add-relationship').onclick=()=>relationshipDialog(c);for(const b of $$('[data-edit-relationship]'))b.onclick=()=>relationshipDialog(c,c.relationships.find(r=>r.target_id===b.dataset.editRelationship));bindImages();extras.profile(c);
+  void relationshipSuggestions(c);
+  const reviewId=pendingGhostReview;pendingGhostReview=null;
+  await ghostProfile.render(c,reviewId,$('#structured-profile'),{pendingHost:$('#ghost-pending'),onChanged:async id=>{pendingGhostReview=id??null;await renderProfile();}});
 }
 function deleteEmptyCharacter(c){
   openDialog(t('delete.title'),`<form id="delete-character-form" class="form-grid"><p>${t('delete.confirm',{name:esc(c.name)})}</p><p id="delete-character-status" role="status"></p><div class="dialog-footer"><button type="button" id="delete-character-cancel">${t('common.cancel')}</button><button class="danger">${t('delete.submit')}</button></div></form>`);
@@ -291,34 +343,41 @@ async function paintSystem(fresh=false){
   box.innerHTML=`<h2>⚠ ${t('sys.title')}</h2><ul class="sys-list">${bad.map(x=>`<li><b>${esc(x.name)}</b>: ${esc(t(x.problem==='missing'?'sys.taskMissing':'sys.taskBroken',{problems:x.problems?.map(p=>t('sys.part.'+p)).join(', ')||''}))}<br><small class="muted">${esc(t('sys.taskFix',{program:x.expected.program,script:x.expected.script,folder:x.expected.folder}))}</small></li>`).join('')}
     ${s.tailscale&&s.tailscale!=='Running'?`<li><b>Tailscale</b>: ${t('sys.tailscaleDown',{state:s.tailscale})}</li>`:''}
     ${s.restart_needed?`<li><b>${t('sys.restartTitle')}</b>: ${t('sys.restartNeeded',{count:s.changed_count})} <button id="sys-restart" class="primary">${t('sys.restartNow')}</button></li>`:''}
-    ${s.gateway?'':`<li><b>Grok gateway</b>: ${t('sys.gatewayDown')}</li>`}${s.tunnel!==true?`<li><b>ChatGPT</b>: ${t(s.tunnel_status?.reason==='authentication_failed'?'sys.tunnelAuth':s.tunnel_status?.running===false?'sys.tunnelDown':'sys.tunnelUnverified')}</li>`:''}${(s.errors||[]).length?`<li><b>${t('sys.errorsTitle',{count:s.errors.length})}</b><br>${s.errors.map(e=>`<small class="muted">${esc(new Date(e.at).toLocaleString('hu-HU'))} · ${esc(e.method||'')} ${esc(e.route||e.source||'')}: ${esc(e.message)}</small>`).join('<br>')}<br><small class="muted">${t('sys.errorsWhere')}</small></li>`:''}</ul><button id="sys-recheck" class="subtle">${t('sys.recheck')}</button>`;
+    ${s.gateway?'':`<li><b>Grok gateway</b>: ${t('sys.gatewayDown')}</li>`}${s.tunnel!==true?`<li><b>ChatGPT</b>: ${t(s.tunnel_status?.reason==='authentication_failed'?'sys.tunnelAuth':s.tunnel_status?.running===false?'sys.tunnelDown':'sys.tunnelUnverified')}</li>`:''}${renderSystemErrors(s.errors,state.characters||[],esc)}</ul><button id="sys-recheck" class="subtle">${t('sys.recheck')}</button>`;
   $('#sys-recheck').insertAdjacentHTML('afterend',` <button id="sys-details" class="subtle">${t('sys.details')}</button>`);
+  for(const button of $$('[data-system-character]'))button.onclick=action(()=>navigate('profile',button.dataset.systemCharacter,{tab:'canon'}));
   $('#sys-recheck').onclick=action(()=>paintSystem(true));$('#sys-details').onclick=action(()=>navigate('system'));
   // Restart from the home screen (2026-11-13): the same guarded restart as on Rendszerállapot
   // (refused while work is running); the page reloads once the program answers again.
-  if($('#sys-restart'))$('#sys-restart').onclick=action(async()=>{if(!confirm(t('sys.restartConfirm')))return;await api('/api/dev/restart',{confirm:true});toast(t('sys.restarting'));
+  if($('#sys-restart'))$('#sys-restart').onclick=action(async()=>{if(!await confirmBox(t('sys.restartConfirm')))return;await api('/api/dev/restart',{confirm:true});toast(t('sys.restarting'));
     const wait=async(n=0)=>{await new Promise(r=>setTimeout(r,3000));try{await fetch('/api/system/status',{cache:'no-store'});if(n>2)return location.reload();}catch{}if(n<40)return wait(n+1);};wait();});
 }
 async function renderHome(){
   // Pictures with characters and a location tag leave "Rendezésre vár" (idempotent, cheap).
   const synced=await api('/api/quick-tag/sync',{}).catch(()=>({completed:0}));if(synced.completed){await refresh();toast(t('qt.sortingSynced',{count:synced.completed}));}
-  const [s,tidy,placement,newImages]=await Promise.all([api('/api/quick-tag/summary'),api('/api/tidy').catch(()=>null),api('/api/media/placement').catch(()=>null),api('/api/new-images').catch(()=>null)]);paintBadges(s,tidy);if(view!=='home')return;
-  const pct=(done,total)=>total?Math.round(100*done/total):100;
-  const card=(value,label,done,total)=>`<div class="home-card"><b>${value}</b><span>${label}</span><div class="home-progress"><i data-progress="${pct(done,total)}"></i></div><small class="muted">${t('home.done',{percent:pct(done,total)})}</small></div>`;
-  // One card per open job; each opens the screen that fixes it. Zero-count jobs are hidden.
+  const [s,tidy,placement,newImages,resume]=await Promise.all([api('/api/quick-tag/summary'),api('/api/tidy').catch(()=>null),api('/api/media/placement').catch(()=>null),api('/api/new-images').catch(()=>null),api('/api/play').catch(()=>null)]);paintBadges(s,tidy);if(view!=='home')return;
+  // One card per task, with its remaining count and the action in the same place.
   const size=bytes=>bytes>=1073741824?(bytes/1073741824).toFixed(1)+' GB':Math.max(1,Math.round(bytes/1048576))+' MB';
   const jobs=[
     ['single','◉','identity',s.identity.single],['pair','◎','identity',s.identity.pair],['other','⁂','identity',s.identity.other],
     ['locations','⌖','place',s.locations.untagged],['inbox','▧','collection',state.stats.inbox],
     ['covers','▣','character',tidy?.no_cover.length||0],['profiles','✎','character',tidy?.no_profile.length||0],['ghost','✦','character',tidy?.ghost_pending.reduce((n,c)=>n+c.count,0)||0],
     ['tree','⌗','place',tidy?.tree_draft?1:0],['removed','⌫','collection',tidy?.removed.count||0],['placement','⇢','collection',placement?.count||0],['newimages','⇣','collection',newImages?.count||0]
-  ].filter(j=>j[3]>0);
-  const job=([id,icon,tone,count])=>`<button type="button" class="tidy-card tone-${tone}" data-home-task="${id}"><span class="tidy-icon" aria-hidden="true">${icon}</span><span class="tidy-body"><b>${t('home.job.'+id)}</b><small>${id==='removed'?t('home.jobText.removed',{size:size(tidy.removed.bytes)}):t('home.jobText.'+id)}</small></span><span class="tidy-count">${id==='tree'?'!':count}</span></button>`;
+  ].filter(j=>j[3]>0||['locations','inbox'].includes(j[0]));
+  const totals={single:s.identity.analysed,pair:s.identity.analysed,other:s.identity.analysed,locations:s.locations.active,inbox:state.stats.media,covers:state.characters.length,profiles:state.characters.length};
+  const job=([id,icon,tone,count])=>{
+    // Queues without a known total have no invented completion percentage.
+    const total=Math.max(count,totals[id]||0),done=Math.max(0,total-count),ratio=total?100*done/total:100;
+    const percent=count?Math.min(99,Math.floor(ratio)):100;
+    return `<article class="tidy-card home-task-card tone-${tone}"><span class="tidy-icon" aria-hidden="true">${icon}</span><div class="tidy-body"><h3>${t('home.job.'+id)}</h3><b class="home-remaining">${t('home.remaining',{count})}</b><small>${id==='removed'?t('home.jobText.removed',{size:size(tidy.removed.bytes)}):t('home.jobText.'+id)}</small><div class="home-progress" role="progressbar" aria-label="${esc(t('home.job.'+id))}" aria-valuemin="0" aria-valuemax="${total||1}" aria-valuenow="${total?done:1}" aria-valuetext="${esc(t('home.remaining',{count}))}"><i data-progress="${ratio}"${count?' data-incomplete':''}></i></div>${Object.hasOwn(totals,id)?`<small>${t('home.done',{percent})}</small>`:''}<button type="button" data-home-task="${id}"${count?'':' disabled'}>${t(count?'home.openTask':'home.completed')}</button></div></article>`;
+  };
   $('#content').innerHTML=heading(t('home.kicker'),t('home.title'),t('home.lead'))
-    +`<div class="home-cards">${card(s.identity.people,t('home.people'),s.identity.analysed-s.identity.pictures,s.identity.analysed)}${card(s.locations.untagged,t('home.noLocation'),s.locations.active-s.locations.untagged,s.locations.active)}${card(state.stats.inbox,t('home.inbox'),state.stats.media-state.stats.inbox,state.stats.media)}</div>`
+    +`<section class="home-resume"><a class="button primary" id="home-resume" href="#/play">▶ ${esc(resume?t('home.resumeAt',{place:resume.nodes.find(n=>n.id===resume.node_id)?.short_name||resume.nodes.find(n=>n.id===resume.node_id)?.name||t('home.resumeUnknown'),time:[resume.clock.weekday,resume.clock.slot,resume.clock.time].filter(Boolean).join(' · ')}):t('home.resume'))}</a><label><input id="start-in-play" type="checkbox" ${readStartupPreference(localStorage)==='play'?'checked':''}> ${t('home.startPlay')}</label></section>`
     +`<h2>${t('home.tasks')}</h2>`+(jobs.length?`<div class="tidy-grid">${jobs.map(job).join('')}</div>`:`<div class="empty"><div class="symbol">✓</div><h2>${t('home.allDone')}</h2></div>`)
     +`<section class="sys-box" id="sys-box" hidden></section><section class="sig-box" id="sig-box"></section>`;
-  for(const bar of $$('[data-progress]'))bar.style.width=bar.dataset.progress+'%'; // CSSOM: allowed by the CSP, unlike inline style attributes
+  for(const bar of $$('[data-progress]'))bar.style.width=bar.hasAttribute('data-incomplete')?`min(${bar.dataset.progress}%, calc(100% - 4px))`:bar.dataset.progress+'%'; // CSSOM: allowed by the CSP
+  $('#home-resume').onclick=action(async event=>{if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();await navigate('play');});
+  $('#start-in-play').onchange=event=>{try{localStorage.setItem('lu-start-screen',event.target.checked?'play':'home');}catch{toast(t('home.preferenceUnavailable'),true);}};
   paintSignals();paintSystem();
   for(const b of $$('[data-home-task]'))b.onclick=action(async()=>{
     const id=b.dataset.homeTask;
@@ -335,7 +394,7 @@ async function renderHome(){
       return;}
     if(id==='ghost'){characterListDialog(t('home.job.ghost'),t('home.listText.ghost'),tidy.ghost_pending);
       $('.tidy-list').insertAdjacentHTML('beforebegin',`<p><button type="button" class="primary" id="ghost-accept-all">${esc(t('home.ghostAcceptAll'))}</button></p>`);
-      $('#ghost-accept-all').onclick=action(async e=>{if(!confirm(t('home.ghostAcceptAllConfirm')))return;e.target.disabled=true;
+      $('#ghost-accept-all').onclick=action(async e=>{if(!await confirmBox(t('home.ghostAcceptAllConfirm')))return;if(!await undoWindow(t('modal.acceptAll'),{key:'accept-profile-proposals'}))return;e.target.disabled=true;
         const r=await acceptAllGhostProposals(tidy.ghost_pending);$('#dialog').close();toast(t('home.ghostAcceptAllDone',r),r.skipped>0);await renderHome();});
       return;}
     if(id==='placement')return placementDialog(placement);
@@ -393,14 +452,14 @@ async function coverPicker(){
   $('#cover-save').onclick=action(async()=>{const result=await api('/api/tidy/covers',{choices:[...chosen].map(([character_id,media_id])=>({character_id,media_id}))});$('#dialog').close();await render();toast(t('home.cover.saved',{count:result.set}));});
   paint();bindImages();
 }
-async function renderLocationCanvas(){locationCanvas=await mountLocationCanvas({host:$('#content')});}
+async function renderLocationCanvas(){const sequence=navigationSequence,tab=locationTab,selection=locationSelection,instance=await mountLocationHub({host:$('#content'),api,toast,mediaDialog,initialTab:tab,initialSelection:selection,isCurrent:()=>view==='location-catalogue'&&sequence===navigationSequence,onRoute:(next,id)=>navigate('location-catalogue',null,{placeTab:next,placeId:id}),openPlay:async id=>{await navigate('play');await playUI.travelToPlace(id);}});if(sequence===navigationSequence)locationCanvas=instance;else instance.destroy();}
 function renderWorld(){return worldEngineUI.render($('#content'));}
 for(const b of $$('#navigation button'))b.onclick=action(()=>navigate(b.dataset.view));
 $('#backup').onclick=()=>{location.href='/api/export';toast(t('export.started'));};
 $('#restore').onclick=()=>$('#restore-file').click();
 $('#restore-file').onchange=action(async e=>{const f=e.target.files[0];if(!f)return;try{const backup=JSON.parse(await f.text());await api('/api/restore',backup);await navigate('characters');toast(t('restore.done'));}finally{e.target.value='';}});
 $('#dialog').addEventListener('close',()=>{for(const v of $$('#dialog video'))v.pause();});
-window.addEventListener('unhandledrejection',e=>{toast(e.reason?.message||t('common.unexpected'),true);e.preventDefault();});
+window.addEventListener('unhandledrejection',e=>{reportRequestError(e.reason||{});e.preventDefault();});
 permanentDeleteUI.controls();
 extras.controls();
 sorting.controls();
@@ -410,18 +469,24 @@ tagging.controls();
 suggestionsUI.controls();
 quickTag.controls();
 $('.sidebar-bottom').insertAdjacentHTML('afterbegin',`<button id="system-tool">${t('sidebar.system')}</button>`);$('#system-tool').onclick=action(()=>navigate('system'));
-$('.sidebar-bottom').insertAdjacentHTML('afterbegin',`<button id="location-library">${t('sidebar.locationReferences')}</button>`);$('#location-library').onclick=action(()=>navigate('locations'));
+$('.sidebar-bottom').insertAdjacentHTML('afterbegin',`<button id="location-library">${t('sidebar.locationReferences')}</button>`);$('#location-library').onclick=action(()=>navigate('location-catalogue',null,{placeTab:'backgrounds'}));
 $('.sidebar-bottom').insertAdjacentHTML('afterbegin',`<button id="folder-names-tool">${t('sidebar.folderNames')}</button>`);$('#folder-names-tool').onclick=action(folderNamesDialog);
 // Added before the first render so the button exists even if that render fails.
-$('.sidebar-bottom').insertAdjacentHTML('afterbegin',`<button id="location-editor-tool">${t('sidebar.locationEditor')}</button>`);$('#location-editor-tool').onclick=action(async()=>{openDialog(t('sidebar.locationEditor'),'<div id="location-editor-host"></div>');const editor=installLocationEditor({host:$('#location-editor-host'),api,onSaved:refresh});await editor.open();});
+$('.sidebar-bottom').insertAdjacentHTML('afterbegin',`<button id="location-editor-tool">${t('sidebar.locationEditor')}</button>`);$('#location-editor-tool').onclick=action(()=>navigate('location-catalogue'));
 // Phones hide the sidebar tools; this toggle (visible only on narrow screens) reveals them.
 $('#navigation').insertAdjacentHTML('beforeend',`<button id="sidebar-more" type="button" aria-expanded="false" aria-controls="sidebar-tools"><span>⋯</span> ${t('nav.more')}</button>`);
 $('.sidebar-bottom').id='sidebar-tools';
 $('#sidebar-more').onclick=()=>{const open=$('.sidebar').classList.toggle('tools-open');$('#sidebar-more').setAttribute('aria-expanded',String(open));};
-await render();
+const restoreRoute=()=>{if(location.hash===handledHash)return;const route=parseAppRoute(location.hash)||{view:'home',cid:null,tab:'profile'};handledHash=location.hash;void navigate(route.view,route.cid,{tab:route.tab,placeTab:route.placeTab,placeId:route.placeId,historyMode:'none',scrollY:history.state?.lu?.y||0,restoreQuery:history.state?.lu?.query||''}).catch(error=>{history.replaceState(history.state,'',appRouteHash({view,cid:activeCharacter,tab:profileTab,placeTab:locationTab,placeId:locationSelection}));handledHash=location.hash;reportRequestError(error);});};
+window.addEventListener('popstate',restoreRoute);window.addEventListener('hashchange',restoreRoute);
+window.addEventListener('pagehide',()=>{history.replaceState({lu:{y:window.scrollY,query}},'',location.href);});
+history.replaceState(history.state,'',appRouteHash({view,cid:activeCharacter,tab:profileTab,placeTab:locationTab,placeId:locationSelection}));handledHash=location.hash;
+try{await render();window.scrollTo({top:history.state?.lu?.y||0,behavior:'instant'});}catch(error){reportRequestError(error);}
 
 
 
+document.addEventListener('keydown',event=>{if(!document.body.classList.contains('play-mode')&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'&&!document.querySelector('dialog[open]')){event.preventDefault();void playUI.commands().catch(reportRequestError);}});
+void generationWatcher.start();window.addEventListener('focus',()=>void generationWatcher.poll());
 worldReviewUI.controls();
 // Sidebar tools: gather the many tool buttons into two collapsible menus (handlers stay attached).
 (function groupSidebarTools(){

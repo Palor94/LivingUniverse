@@ -208,7 +208,7 @@ test('a talk quotes his last replies as not to repeat and carries a scene state 
     assert.match(w.requests.at(-1).system,/"scene"/);
     // Suggestions: one reaction plus two diverging ones; the last suggestions and Palor's own
     // lines come back as not to repeat; intimate examples stay out of an ordinary talk.
-    assert.match(w.requests.at(-1).system,/Az 1\. közvetlen reakció/);assert.doesNotMatch(w.requests.at(-1).system,/pózváltás/);
+    assert.match(w.requests.at(-1).system,/kizárólag a történet továbbhaladását szolgálja/);assert.doesNotMatch(w.requests.at(-1).system,/pózváltás/);
     assert.match(w.requests.at(-1).user,/"choices" NE ismételje[^\n]*\n(- .*\n)*- Szia!\n- És\?\n/);
     for(const ch of reply.choices||[])assert.ok(w.requests.at(-1).user.includes('- '+ch));
   }finally{await w.close();}

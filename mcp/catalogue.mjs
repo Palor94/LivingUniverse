@@ -11,6 +11,7 @@ import {originalInfo,verifyOriginal,MAX_INLINE_IMAGE_BYTES,IMAGE_READ_CHUNK_BYTE
 import {profileVersion} from '../app/character-edit.mjs';
 import {createEventReader} from '../app/story-events.mjs';
 import {createLivingWorldReader} from '../app/living-world.mjs';
+import {createTalkHistory} from '../app/talk-history.mjs';
 import {analyzeReferenceCoverage} from './reference-coverage.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -34,6 +35,7 @@ export async function createCatalogue({database,mediaRoot,allowAdminNotes=false,
   for(const table of ['characters','media','depictions','media_notes','relationships','canon'])if(!tables.has(table)){db.close();fail('SCHEMA_UNSUPPORTED','The configured file is not the existing Living Universe catalogue.');}
   const all=(sql,...args)=>db.prepare(sql).all(...args),one=(sql,...args)=>db.prepare(sql).get(...args);
   const events=createEventReader(db,{creator:allowAdminNotes});
+  const talks=createTalkHistory({one,all});
   const living=createLivingWorldReader({one,all,events,fail:(message,status=400)=>Object.assign(new CatalogueError(status===404?'NOT_FOUND':status===403?'FORBIDDEN':'INVALID_ARGUMENT',message),{status})});
   const active=tables.has('media_hidden')?'NOT EXISTS(SELECT 1 FROM media_hidden h WHERE h.media_id=m.id)':'1';
   const redact=value=>String(value??'').split(root).join('[private location]').split(mediaRoot).join('[private location]').split(database).join('[private location]').replace(/[A-Za-z]:[\\/][^\r\n"<>]*/g,'[private location]').replace(/\\\\[^\r\n"<>]*/g,'[private location]').replace(/(^|[\s("'=])\/[^\s"'<>]+/g,'$1[private location]');
@@ -156,6 +158,24 @@ export async function createCatalogue({database,mediaRoot,allowAdminNotes=false,
       try{data=living.nextScenes(args);}catch(e){fail(e.code||(e.status===404?'NOT_FOUND':'INVALID_ARGUMENT'),e.message);}
     }else if(name==='list_character_memories'){
       try{if(args.creator===true&&!allowAdminNotes)fail('ADMIN_NOTES_DISABLED','Creator memory access requires local administrator-note permission.');data=living.listMemories({...args,creator:args.creator===true&&allowAdminNotes});}catch(e){fail(e.code||(e.status===404?'NOT_FOUND':'INVALID_ARGUMENT'),e.message);}
+    }else if(name==='list_conversations'){
+      shape(args,['character_id','perspective_character_id','kinds','from','to','tag','min_importance','search','limit','offset']);identifier(args.character_id);
+      if(args.perspective_character_id!==undefined)identifier(args.perspective_character_id);
+      const kinds=args.kinds===undefined?['talk','world']:Array.isArray(args.kinds)&&args.kinds.length&&args.kinds.every(k=>['talk','world'].includes(k))?args.kinds:fail('INVALID_ARGUMENT','kinds: talk and/or world.');
+      const day=v=>{if(v===undefined)return null;if(typeof v!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(v))fail('INVALID_ARGUMENT','Use a YYYY-MM-DD date.');return v;};
+      const imp=args.min_importance===undefined?null:Number.isInteger(args.min_importance)&&args.min_importance>=1&&args.min_importance<=5?args.min_importance:fail('INVALID_ARGUMENT','min_importance is 1-5.');
+      const limit=integer(args.limit,30,100),offset=integer(args.offset,0,100000);if(!limit)fail('INVALID_ARGUMENT','Limit must be positive.');
+      try{
+        const all=talks.timeline(args.character_id,{kinds,from:day(args.from),to:day(args.to),tag:args.tag===undefined?null:query(args.tag),min_importance:imp,search:args.search===undefined?null:query(args.search),limit:100000,offset:0});
+        const pov=args.perspective_character_id;
+        // A character knows only what he took part in (a talk he was merely mentioned in is not his).
+        const items=pov?all.items.filter(i=>i.participants.some(p=>p.id===pov)):all.items;
+        data={character_id:args.character_id,shared_history:all.shared_history,total:items.length,items:items.slice(offset,offset+limit),next_offset:offset+limit<items.length?offset+limit:null};
+      }catch(e){if(e instanceof CatalogueError)throw e;fail(e.status===404?'NOT_FOUND':'INVALID_ARGUMENT',e.message);}
+    }else if(name==='get_conversation'){
+      shape(args,['conversation_id','include_lines']);identifier(args.conversation_id);
+      try{data=talks.talk(args.conversation_id,{lines:args.include_lines===undefined?true:flag(args.include_lines)});if(data.rewound)fail('NOT_FOUND','This conversation was rewound; it did not happen.');}
+      catch(e){if(e instanceof CatalogueError)throw e;fail(e.status===404?'NOT_FOUND':'INVALID_ARGUMENT',e.message);}
     }else if(['search_events','get_character_timeline','get_event'].includes(name)){
       try{
         if(name==='get_event'){shape(args,['event_id','creator','perspective_character_id']);data=events.get(args.event_id,{creator:args.creator,perspective_character_id:args.perspective_character_id});}

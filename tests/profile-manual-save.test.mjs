@@ -1,0 +1,30 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {promises as fs} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {createApp} from '../app/server.mjs';
+
+test('A15 manual profile save is atomic with legacy mirrors, preserves hypothesis/canon and rejects stale edits',async t=>{
+  const base=await fs.mkdtemp(path.join(os.tmpdir(),'lu-manual-profile-')),app=await createApp({root:path.join(base,'media'),dataDir:path.join(base,'data'),mobile:null,mcpWrites:null,grokConfig:null});
+  t.after(async()=>{await app.close();await fs.rm(base,{recursive:true,force:true});});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const origin='http://127.0.0.1:'+app.server.address().port;
+  const call=async(route,body)=>{const r=await fetch(origin+route,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json()};};
+  const c=(await call('/api/characters',{name:'Teszt Ádám',gender:'férfi'})).data,route='/api/characters/'+c.id+'/ghost';
+  await call('/api/characters/'+c.id+'/canon',{appearance:'Szintetikus tesztkánon.',references:[],expected_revision_id:null,expected_references:[]});const canon=app.db.prepare('SELECT * FROM canon WHERE character_id=?').all(c.id);
+  const entry=value=>({value,kind:'hypothesis',source:'Kézi teszt',visibility:'creator',interpretation:'Megőrzendő értelmezés.'});
+  let g=(await call(route)).data;
+  const body=(values,from=g)=>({expected_version:from.version,template_version:from.template.version,values,expected_legacy:{...from.legacy}});
+  const stale=body({personality:entry('Első kézi szöveg.')});let r=await call(route+'/manual',stale);assert.equal(r.status,200);g=r.data;
+  assert.equal(g.values.personality.kind,'hypothesis');assert.equal(g.values.personality.interpretation,'Megőrzendő értelmezés.');assert.equal(g.manual.personality,g.version);assert.equal(g.proposals.length,0);
+  assert.equal((await call('/api/characters/'+c.id)).data.personality,'Első kézi szöveg.');assert.equal((await call(route+'/manual',stale)).status,409);
+  await call('/api/characters/'+c.id+'/profile-field',{field:'aliases',value:'Ádi',expected:''});
+  r=await call(route+'/manual',body({personality:entry('Második kézi szöveg.')}));assert.equal(r.status,200,'independent header autosave does not conflict');g=r.data;
+  await call('/api/characters/'+c.id+'/profile-field',{field:'personality',value:'Másik eszköz szövege.',expected:'Második kézi szöveg.'});
+  assert.equal((await call(route+'/manual',body({personality:entry('Elavult piszkozat.')}))).status,409);g=(await call(route)).data;
+  const beforeCharacter=(await call('/api/characters/'+c.id)).data,beforeGhost=structuredClone(g);
+  app.db.exec("CREATE TRIGGER synthetic_profile_failure BEFORE UPDATE OF personality ON characters BEGIN SELECT RAISE(ABORT,'synthetic mirror failure'); END");
+  r=await call(route+'/manual',body({identity:entry('Visszagörgetendő életrajz.'),personality:entry('Visszagörgetendő személyiség.')}));assert.equal(r.status,500);
+  assert.deepEqual((await call(route)).data,beforeGhost);assert.equal((await call('/api/characters/'+c.id)).data.biography,beforeCharacter.biography);
+  assert.deepEqual(app.db.prepare('SELECT * FROM canon WHERE character_id=?').all(c.id),canon);app.db.exec('DROP TRIGGER synthetic_profile_failure');
+  const readiness=(await call('/api/characters/readiness')).data.characters.find(status=>status.id===c.id);assert.ok(readiness.profile_filled>0);assert.equal(readiness.figures,0);assert.equal(readiness.has_home,false);assert.equal(readiness.has_routine,false);
+});

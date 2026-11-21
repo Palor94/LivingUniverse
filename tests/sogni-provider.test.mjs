@@ -5,10 +5,11 @@ import {EventEmitter} from 'node:events';
 import {promises as fs} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {configuredImageProviders,generateProviderImage} from '../app/image-providers.mjs';
+import {configuredImageProviders,generateProviderImage,generateSogniText,configuredSogniText} from '../app/image-providers.mjs';
 import {safeUpload} from '../app/safe-download.mjs';
 import {imageCredentialEnvironment} from '../app/sogni-credentials.mjs';
 import {generationTools} from '../mcp/generation.mjs';
+import {estimateSogniImage} from '../app/sogni-provider.mjs';
 
 const bytes=Buffer.from('synthetic PNG payload');
 function harness({states=['queued','running','completed'],artifact='https://storage.example/result.png?secret=signature',uploadError,fetchError,downloadBytes=bytes}={}){
@@ -44,6 +45,28 @@ test('requested Krea LoRAs retain order and fractional strength in the exact ups
   assert.equal(sent.model,'krea-identity-edit');assert.deepEqual(sent.loras,loras);assert.deepEqual(sent.loraStrengths,[1,0.8]);
   f.calls.length=0;f.args.manifest.lora_strengths=[1,1];await assert.rejects(generateProviderImage(f.args),{code:'PROVIDER_CHANGED'});assert.equal(f.calls.length,0);
   for(const change of [{loras:['unknown'],lora_strengths:[1]},{loras,lora_strengths:[1]},{loras,lora_strengths:[1,NaN]},{loras,lora_strengths:[1,3]},{loras,lora_strengths,model:'qwen'}])assert.equal(configuredImageProviders({providers:{sogni:{enabled:true,model:'krea-identity-edit',...change}}},{SOGNI_API_KEY:'fixture'}).sogni.available,false);
+});
+
+test('B17 estimate uploads only authorized bytes and accepts only a bounded non-generating refusal, without invented money',async()=>{
+ const f=harness(),posts=[];const fetchImpl=async(url,options)=>{if(options.method==='POST'){posts.push(options);return Response.json({details:{estimatedCapacity:{totalEstimatedCapacityUnits:2.4,tokenType:'spark'},confirmationRequired:true}},{status:400});}return f.args.fetchImpl(url,options);};
+ const estimate=await estimateSogniImage({...f.args,apiKey:'fixture',fetchImpl,upload:f.args.sogniOptions.upload});
+ assert.equal(estimate.capacity_units,2.4);assert.equal(estimate.usd,null);assert.equal(estimate.spark,null);assert.equal(posts.length,1);assert.equal(f.uploads.length,2);
+ const body=JSON.parse(posts[0].body);assert.equal(body.confirm_cost,false);assert.equal(body.max_estimated_capacity_units,0);assert.equal(body.safe_content_filter,true);assert.ok(posts[0].headers['Idempotency-Key'].endsWith('_estimate'));assert.deepEqual(f.jobs,[]);
+ for(const [status,body] of [[200,{data:{workflow:{workflowId:'unexpected'}}}],[400,{details:{estimatedCapacity:-1}}],[402,{details:{estimatedCapacity:2}}]]){
+   let submits=0;await assert.rejects(estimateSogniImage({...f.args,apiKey:'fixture',upload:f.args.sogniOptions.upload,fetchImpl:async(url,options)=>{if(options.method==='POST'){submits++;return Response.json(body,{status});}return f.args.fetchImpl(url,options);}}),{code:'ESTIMATE_UNAVAILABLE'});assert.equal(submits,1);
+ }
+});
+
+test('B17 approved capacity ceiling reaches the only paid workflow start unchanged',async()=>{
+ const f=harness();f.args.manifest.max_estimated_capacity_units=3.75;await generateProviderImage(f.args);const starts=f.calls.filter(c=>c.options?.method==='POST');assert.equal(starts.length,1);assert.equal(JSON.parse(starts[0].options.body).max_estimated_capacity_units,3.75);
+});
+
+test('B18 text-to-image variations never upload references and need a separately enabled exact model',async()=>{
+ const calls=[],config={providers:{sogni_text:{enabled:true,model:'z-turbo',max_estimated_capacity_units:10}}},env={SOGNI_API_KEY:'fixture'},manifest={provider:'sogni',task:'text_to_image',model:'z-turbo',provider_prompt:'Empty synthetic room.',size:'1536x1024',n:2,max_estimated_capacity_units:8};
+ const result=await generateSogniText({manifest,config,env,fetchImpl:async(url,options)=>{calls.push({url,options});return Response.json({data:{workflow:{workflowId:'fixture_text',status:'completed',steps:[{artifacts:[{url:'https://storage.example/1'},{url:'https://storage.example/2'}]}]}}});},upload:async()=>{throw Error('reference upload forbidden');},download:async()=>({contentType:'image/png',stream:Readable.from([bytes])})});
+ assert.equal(calls.length,1);const body=JSON.parse(calls[0].options.body),args=body.input.steps[0].arguments;assert.equal(body.input.steps[0].toolName,'generate_image');assert.equal(args.sourceImageIndex,undefined);assert.equal(args.numberOfVariations,2);assert.deepEqual(body.media_references,[]);assert.equal(body.max_estimated_capacity_units,8);assert.equal(result.outputs.length,2);
+ assert.equal(configuredSogniText(null,env).available,false);assert.equal(configuredSogniText({providers:{sogni:{enabled:true,model:'krea-identity-edit'}}},env).available,false);
+ await assert.rejects(generateSogniText({manifest:{...manifest,model:'unapproved'},config,env}),{code:'PROVIDER_DISABLED'});
 });
 
 test('model limits and credentials are enforced before any external request and MCP exposes Sogni',async()=>{

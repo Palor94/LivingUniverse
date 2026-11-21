@@ -12,6 +12,8 @@ import {DatabaseSync,backup} from 'node:sqlite';
 import {resolveDataDir} from '../app/server.mjs';
 
 const NAMES=['Albert','Ghor-Ka','Gyuszi','Gábor','Jessi','Jocó bácsi','Kazuto','Kevin','Kristóf','Krisztián','Laci','Matt','Raul - Brazil utazó','Ren','Ricsi','Serge','Tamás','Valentin','Zsolti','Zsombor','Zzap','Ádám'];
+// Second batch (owner, 2026-11-15 "Igen, írd meg"): the 13 characters that had no profile at all.
+NAMES.push('Csanád','Dávid','Grix','Doyoon','Gunwoo','Matyi','Szilárd','Hajun','Máté','Wonjae','Moon Ihan','Jiwan','Tóni');
 const MODEL='Claude (claude-opus-5-5) vázlat a meglévő profilból, 2026-11-15';
 const APP=process.env.LU_APP||'http://127.0.0.1:4317';
 const [cmd,file]=process.argv.slice(2),apply=process.argv.includes('--apply');

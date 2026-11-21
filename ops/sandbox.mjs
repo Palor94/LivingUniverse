@@ -36,7 +36,7 @@ const flag=name=>process.argv.includes('--'+name);
 
 // Writes that only change the database copy (never a media file). Everything else that is not
 // a GET is refused while the real media folder is attached.
-export const DB_ONLY_WRITES=[/^\/api\/play\//,/^\/api\/world-engine\//,/^\/api\/dev\//,/^\/api\/quick-tag\/sync$/,/^\/api\/workshop\/ideas\/note$/,/^\/api\/tidy\/collection-folder$/];
+export const DB_ONLY_WRITES=[/^\/api\/dev-tasks$/,/^\/api\/play\//,/^\/api\/world-engine\//,/^\/api\/dev\//,/^\/api\/quick-tag\/sync$/,/^\/api\/workshop\/ideas\/note$/,/^\/api\/tidy\/collection-folder$/];
 export function readOnlyGuard(handler,{allow=DB_ONLY_WRITES}={}){
   return (req,res)=>{
     const route=String(req.url||'').split('?')[0];
@@ -44,6 +44,17 @@ export function readOnlyGuard(handler,{allow=DB_ONLY_WRITES}={}){
     req.resume();
     res.writeHead(403,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});
     res.end(JSON.stringify({error:'Homokozó: ez a művelet a valódi médiafájlokat érinthetné, ezért itt tiltott. Indítsd --empty-media kapcsolóval, ha ki akarod próbálni.'}));
+  };
+}
+
+// A screenshot runner must verify the process, not just trust the port number.
+export function sandboxStatusGuard(handler){
+  return (req,res)=>{
+    if(req.method==='GET'&&req.url==='/api/dev/sandbox-status'){
+      res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});
+      return res.end(JSON.stringify({sandbox:true,ai:'mock'}));
+    }
+    return handler(req,res);
   };
 }
 
@@ -95,6 +106,7 @@ async function main(){
     ...(seed!==null?{playRandom:seededRandom(seed)}:{}),
     worldProvider:createMockProvider(req=>({reply:'(homokozó: ez egy próbaválasz, nem valódi AI)',mood:'alap',answer:'(homokozó: a Rendszer próbaválasza, nem valódi AI)'}))});
   if(!empty){const [handler]=app.server.listeners('request');app.server.removeAllListeners('request');app.server.on('request',readOnlyGuard(handler));}
+  {const [handler]=app.server.listeners('request');app.server.removeAllListeners('request');app.server.on('request',sandboxStatusGuard(handler));}
   await new Promise((ok,fail)=>{app.server.once('error',fail);app.server.listen(port,'127.0.0.1',ok);});
   console.log(`Sandbox ready: http://127.0.0.1:${port}\n  catalogue copy: ${dataDir}${report?' (from report '+report+')':''}${seed!==null?'\n  fixed randomness: seed '+seed:''}\n  media: ${empty?'empty folder (all actions allowed)':'real folder, READ ONLY'}\n  AI: mock (no paid calls). Ctrl+C stops it${flag('keep')?'':' and deletes the copy'}.`);
   let stopping=false;
@@ -105,6 +117,9 @@ async function main(){
     if(!flag('keep'))await removeCopy(dataDir);
     process.exit(0);};
   for(const s of ['SIGINT','SIGTERM','SIGBREAK','SIGHUP'])process.once(s,stop);
+  // Parent-owned screenshot runs can close SQLite and remove the copy on Windows,
+  // where child.kill('SIGINT') terminates without executing signal handlers.
+  process.on('message',message=>{if(message==='sandbox-stop')void stop();});
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))

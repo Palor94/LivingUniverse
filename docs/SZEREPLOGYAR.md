@@ -76,9 +76,6 @@ ChatGPT jöhet.
   program 5 percen belül észreveszi.
 - **Az arcfelismerő nincs telepítve:** a kártya alatt ezt kiírja, és a képeket ellenőrzés nélkül
   fogadja el.
-- **„nem engedélyezett” a galériánál:** a félmeztelen vagy intim jelenetet a program ugyanúgy csak
-  akkor engedi, mint a játék többi része: ha a szereplő (közös jelenetnél Palor is) származása ezt
-  megengedi. Ha nem, a jelenet kimarad, és nem tartja nyitva a rendelést.
 - **Mégsem kell a rendelés:** a kártyán a **Rendelés lezárása** gomb. A szereplő és az addig elkészült képek
   megmaradnak.
 
@@ -90,6 +87,31 @@ félmeztelen és az intim képeket a játék csak a megfelelő kapcsolati szinte
 
 **Kánon nem lesz semmiből automatikusan.** Ha egy képet jóváhagyott referenciának szeretnél, azt
 továbbra is te jelölöd ki (kivágással, a Kijelölés mentése gombbal).
+
+## Életpillanatok meglévő szereplőknek
+
+A Szereplőgyár oldalán, az űrlap alatt. Jelöld ki a szereplőket (Ctrl/Shift kattintással többet
+is), vagy nyomd meg a **Minden szereplőnek** gombot. Pipáld be, mit kérsz:
+
+- **Mindennapok (5 kép):** reggel, napközben, délután, este, szabadidő. A heti rutinja, a szokásai,
+  a foglalkozása és a lakóhelye alapján, csak abból, ami a profiljában szerepel.
+- **Palorral (3–5 kép):** csak ha a kapcsolatuk rögzítve van (kapcsolati megjegyzés vagy jóváhagyott
+  közös esemény). Ezek pontosan a rögzített kapcsolatot és eseményeket mutatják; ha nincs ilyen,
+  nem készül Palor-kép, és a program nem talál ki semmit.
+- **Félmeztelen (6 kép):** kanapén, túrán, ágyban, edzés közben, udvaron, fizikai munka közben, nem
+  strandon. Ha van rögzített kapcsolatuk, a kanapés, a túrás és az ágyas kép Palorral közös.
+
+A listában látod, kinek van rögzített kapcsolata Palorral, és kinek van már nyitott ilyen
+rendelése (annak nem ad fel újat). Utána a ChatGPT-nek elég: „nézd meg a nyitott rendeléseket”.
+
+**Új közös esemény:** ha később jóváhagyott közös esemény kerül egy szereplő és Palor profiljába, a
+program magától felad egy rendelést arra a pillanatra (eseményenként egy kép). A program első
+indításakor már meglévő eseményekre nem ad fel rendelést.
+
+A Szereplőgyárban a program nem vizsgálja a gyűjtemény eredetnyilatkozatát: a képenként vagy
+jelenetenként választott jelölés szerint készül a kép (az eredetet te ellenőrzöd). Az arcot a program a szereplő jóváhagyott referenciaképeivel veti
+össze; ha nincs ilyen, ellenőrzés nélkül fogadja el a képet. Ha a szereplőnek még nincs saját
+mappája, az első mentett képnél a program létrehozza.
 
 ## Mi hova kerül, milyen néven
 

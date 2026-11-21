@@ -1,3 +1,4 @@
+import {installPlayTurnRevisions} from './play-turn-revisions.mjs';
 // Play mode v1: Palor moves on the creator's location tree, sees who is where, and talks
 // live with characters (Grok via the world engine's capped ask()). Ending a conversation
 // is a save point: both sides get a memory, the character's level towards Palor may move
@@ -8,11 +9,12 @@ import {readFileSync,promises as fs} from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {SLOTS,LEVELS,WEEKDAYS,localDay,slotIndexAt,worldDayAt,weekdayOf,addDays,clip} from './world-common.mjs';
+import {createTalkHistory} from './talk-history.mjs';
 import {createLocationTree} from './location-tree.mjs';
 import {installSceneImages} from './scene-images.mjs';
 import {createMediaDirector,imageSize} from './media-director.mjs';
 import {partialJsonString} from './world-ai.mjs';
-import {ROLE_TEXT,moodOf,LEVEL_STYLE,CLOSENESS_RULES,TIME_MOOD,STAGE_ALLOW,BEATS,BEAT_WANT,MAX_DAILY_RISES,PACES,PACE_TEXT,PHONE_MOODS,cleanChoices} from './play/rules.mjs';
+import {ROLE_TEXT,describeActivity,moodOf,LEVEL_STYLE,CLOSENESS_RULES,TIME_MOOD,STAGE_ALLOW,BEATS,BEAT_WANT,MAX_DAILY_RISES,PACES,PACE_TEXT,PHONE_MOODS,cleanChoices} from './play/rules.mjs';
 import {createPlayScenes} from './play/scenes.mjs';
 import {palorVoice,speechOf,PALOR_VOICE_HEAD,CHOICE_RULES} from './play/palor-voice.mjs';
 import {createPlayRecords} from './play/records.mjs';
@@ -24,8 +26,19 @@ import {safeName as bgFolderName} from './background-zip.mjs';
 
 const STATE_KEY='play:state';
 
-export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=null,worldEngine,characterPolicy=null,sprites=null,locationTree=createLocationTree(dataDir),gameClock=null,now=gameClock?.now||(()=>new Date()),random=Math.random,mayUseReferences=()=>true,mayUseEverydayReferences=mayUseReferences,intimateAllowed=mayUseReferences}){
-  const figures=cid=>sprites?sprites.forCharacter(cid):[];
+export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=null,worldEngine,characterPolicy=null,sprites=null,locationTree=createLocationTree(dataDir),gameClock=null,now=gameClock?.now||(()=>new Date()),random=Math.random,mayUseReferences=()=>true,mayUseEverydayReferences=mayUseReferences,intimateAllowed=mayUseReferences,onMeeting=null}){
+  // A failed proposal (first meeting story event / relationship line) never blocks saving the talk.
+  const meetingSaved=eventId=>{try{onMeeting?.(eventId);}catch(e){console.error('first-meeting proposal failed:',e.message);}};
+  // A police uniform is presentation-only and appears only when the character's explicit
+  // weekly schedule places him at one of his work locations. Appointments/events do not
+  // silently change his uniform; the base everyday figure remains the fallback.
+  const figures=cid=>{
+    if(!sprites)return [];
+    const c=clock(),workLocation=scheduled(cid,c.day,SLOTS[c.slot_index].id);
+    if(workLocation&&one("SELECT 1 FROM world_places WHERE character_id=? AND location_id=? AND role='work'",cid,workLocation)&&sprites.forCharacter(cid,{outfit:'police'}).length)
+      return sprites.forCharacter(cid,{outfit:'police'});
+    return sprites.forCharacter(cid);
+  };
   // Shirtless set ("felmeztelen" subfolder): the play screen shows it only in undressing/intimate moments.
   const shirtless=cid=>sprites?sprites.forCharacter(cid,{outfit:'shirtless'}):[];
   const intimateFigures=cid=>sprites?sprites.forCharacter(cid,{outfit:'intimate'}):[];
@@ -63,11 +76,15 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   db.exec('CREATE INDEX IF NOT EXISTS play_conversations_character ON play_conversations(character_id,status);CREATE INDEX IF NOT EXISTS world_messages_from ON world_messages(from_character_id,world_day);');
   const PLAY_SETTINGS='play:settings';
   // The game is adult from the start (owner decision 2026-11-10); the switch can still turn it off.
-  const playSettings=()=>({adult:true,text_speed:'normal',auto_scene:true,story_rate:'normal',...(()=>{try{return JSON.parse(one('SELECT value FROM application_settings WHERE key=?',PLAY_SETTINGS)?.value||'{}');}catch{return {};}})()});
+  const playSettings=()=>({adult:true,text_speed:'normal',auto_scene:true,story_rate:'normal',quick_send:false,travel_always_ask:false,guest_image_provider:'openai',talk_view:'vn',...(()=>{try{return JSON.parse(one('SELECT value FROM application_settings WHERE key=?',PLAY_SETTINGS)?.value||'{}');}catch{return {};}})()});
   function savePlaySettings(body){
     const s=playSettings();
     if(body.adult!==undefined){if(typeof body.adult!=='boolean')throw fail('Choose on or off.');s.adult=body.adult;}
     if(body.auto_scene!==undefined){if(typeof body.auto_scene!=='boolean')throw fail('Choose on or off.');s.auto_scene=body.auto_scene;}
+    if(body.quick_send!==undefined){if(typeof body.quick_send!=='boolean')throw fail('Choose on or off.');s.quick_send=body.quick_send;}
+    if(body.travel_always_ask!==undefined){if(typeof body.travel_always_ask!=='boolean')throw fail('Choose on or off.');s.travel_always_ask=body.travel_always_ask;}
+    if(body.guest_image_provider!==undefined){if(!['openai','sogni'].includes(body.guest_image_provider))throw fail('Choose a supported portrait provider.');s.guest_image_provider=body.guest_image_provider;}
+    if(body.talk_view!==undefined){if(!['vn','chat'].includes(body.talk_view))throw fail('Válassz párbeszéd- vagy csevegő nézetet.');s.talk_view=body.talk_view;}
     if(body.text_speed!==undefined){if(!['slow','normal','fast','instant'].includes(body.text_speed))throw fail('Unknown text speed.');s.text_speed=body.text_speed;}
     if(body.story_rate!==undefined){if(!Object.hasOwn(STORY_RATES,body.story_rate))throw fail('Unknown story frequency.');s.story_rate=body.story_rate;}
     run('INSERT INTO application_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',PLAY_SETTINGS,JSON.stringify(s));return s;
@@ -258,10 +275,12 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       if(why.length)map.push({town_id:t.town_id,name:t.name,...(t.region?{region:true,note:t.note}:{}),why,places:t.places,steps:t.has_map_picture&&!redo[t.town_id]?['save_town_layout (the picture is fine; only place the pins)']:['draw the map','save_town_map','save_town_layout']});
     }
     const backgrounds=[],doors=[];
+    // Per-place override of the town split (owner, 2026-11-15: Gyuszi's house in Káloz goes to ChatGPT).
+    let override={};try{override=JSON.parse(one('SELECT value FROM application_settings WHERE key=?','play:order-worker')?.value||'{}');}catch{}
     for(const n of nodes){
       if(!n.location_id||n.archived||n.placed===false||['vehicle'].includes(kindOf(n))||!isPlaceNode(n))continue;
       const exits=neighbours(nodes,n.id).map(x=>({to_place_id:x.id,name:x.name,relation:x.relation})),own=images.get(n.location_id)||null,placed=savedExits(n.id);
-      const town=townOf(byId,n.id),worker=GROK_TOWNS.has(foldName(town?.short_name||town?.name))?'grok':'chatgpt';
+      const town=townOf(byId,n.id),worker=['grok','chatgpt'].includes(override[n.id])?override[n.id]:GROK_TOWNS.has(foldName(town?.short_name||town?.name))?'grok':'chatgpt';
       // Grok cannot hand a picture to the program: the owner saves it into this watched folder.
       const catName=one('SELECT name FROM locations WHERE id=?',n.location_id)?.name||n.name;
       // ZIP delivery (owner, 2026-11-14): "<catalogue name folder>/<suggested file>.png" per picture.
@@ -388,16 +407,48 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(posCache?.key===key)return posCache.map;
     const map=computePositions(c,cast);posCache={key,map};return map;
   }
+  // world:schedule:<character id> = {entries:[{days:[0-6, 0 = Sunday], slot, location_id, months?:[1-12]}]}.
+  // The first matching entry wins; a location missing from the catalogue is ignored.
+  function scheduled(cid,day,slotId){
+    let s;try{s=JSON.parse(one('SELECT value FROM application_settings WHERE key=?','world:schedule:'+cid)?.value||'null');}catch{return null;}
+    if(!Array.isArray(s?.entries))return null;
+    const wd=weekdayOf(day),month=Number(String(day).slice(5,7));
+    const hit=s.entries.find(e=>e.slot===slotId&&Array.isArray(e.days)&&e.days.includes(wd)&&(!Array.isArray(e.months)||e.months.includes(month)));
+    return hit&&one('SELECT 1 FROM locations WHERE id=?',hit.location_id)?hit.location_id:null;
+  }
+  const walkThrough=loc=>{const n=treeCache.nodes?.find(x=>x.location_id===loc);return !!n&&(isPassage(n)||isRegion(n));};
+  // Fantasy beings live only in Palor's wardrobe (owner, 2026-11-20, "Szereplők helye a világban"):
+  // ogres, goblins, orcs and the like never stand in the real world; outside the wardrobe the one
+  // non-human being is the Fenevad. A place is "in the wardrobe" when it or a place above it in the
+  // location tree is the wardrobe ("szekrény").
+  const inWardrobe=loc=>{const nodes=treeCache.nodes||[];let n=nodes.find(x=>x.location_id===loc);
+    for(let depth=0;n&&depth<40;depth++){if(/szekrény/i.test((n.name||'')+' '+(n.short_name||'')))return true;n=n.parent_id?nodes.find(x=>x.id===n.parent_id):null;}
+    return false;};
+  // Every non-human race is locked in for now (owner, 2026-11-21). The Fenevad is the one exception,
+  // also by name, so a later race change on his profile cannot lock him in by accident.
+  const wardrobeOnly=character=>(character.race||'human')!=='human'&&!/fenevad/i.test(character.name||'');
+  const raceOf=id=>one('SELECT race FROM characters WHERE id=?',id)?.race||'human';
+  // A wardrobe-only character placed outside (an old appointment, an event, a schedule) is moved to
+  // his own wardrobe place instead, or left off the map if he has none.
+  function keepInWardrobe(person,loc){
+    if(!loc||!wardrobeOnly({...person,race:raceOf(person.id)})||inWardrobe(loc))return loc;
+    const own=w.placesOf(person.id).filter(p=>inWardrobe(p.location_id));
+    return (own.find(p=>p.role==='home')||own[0])?.location_id||null;
+  }
   function computePositions(c,cast){
     const out=new Map(),slotId=SLOTS[c.slot_index].id;
     const events=all("SELECT payload_json FROM world_events WHERE rewound_at IS NULL AND world_day=? AND status IN ('applied','accepted') AND json_extract(payload_json,'$.slot')=? ORDER BY rowid",c.day,slotId).map(e=>{try{return JSON.parse(e.payload_json);}catch{return null;}}).filter(p=>p&&Array.isArray(p.character_ids));
     for(const c2 of cast){
       // An accepted meeting with Palor wins over everything else at that time.
       let loc=one("SELECT location_id FROM play_appointments WHERE character_id=? AND world_day=? AND slot=? AND status='accepted' ORDER BY created_at DESC LIMIT 1",c2.id,c.day,slotId)?.location_id||null;
-      if(loc){out.set(c2.id,loc);continue;}
+      if(loc){out.set(c2.id,keepInWardrobe(c2,loc));continue;}
       for(const p of events)if(p.location_id&&p.character_ids.includes(c2.id))loc=p.location_id;
+      // Weekly schedule (plan 3.2, 2026-11-15): a fixed place per weekday and day part.
+      if(!loc)loc=scheduled(c2.id,c.day,slotId);
       if(!loc){
-        const places=w.placesOf(c2.id);
+        // A street, stairwell or Káloz határa is walked through, never a place to be found in
+        // (owner, 2026-11-15): such a link is skipped and his other places are used.
+        const places=w.placesOf(c2.id).filter(p=>!walkThrough(p.location_id));
         // With several home places (house, bedroom, bathroom…) pick the one that fits the
         // time: bedroom at night, living room in the evening, else the plainest name.
         const homeRank=name=>c.slot_index===3?(/háló/i.test(name)?0:/nappali/i.test(name)?1:/fürdő|wc|mosdó/i.test(name)?9:2):(/nappali/i.test(name)?0:/háló/i.test(name)?1:/fürdő|wc|mosdó/i.test(name)?9:2);
@@ -408,7 +459,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       }
       // No linked place at all: where today's world last saw him (any day part).
       if(!loc&&!w.placesOf(c2.id).length)loc=one("SELECT json_extract(payload_json,'$.location_id') l FROM world_events WHERE rewound_at IS NULL AND world_day=? AND json_extract(payload_json,'$.location_id') IS NOT NULL AND EXISTS(SELECT 1 FROM json_each(payload_json,'$.character_ids') WHERE value=?) ORDER BY rowid DESC LIMIT 1",c.day,c2.id)?.l||null;
-      out.set(c2.id,indoor(loc,c2,c.slot_index));
+      out.set(c2.id,indoor(keepInWardrobe(c2,loc),c2,c.slot_index));
     }
     return out;
   }
@@ -461,7 +512,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   function closeStale(){
     const idleSince=new Date(now().getTime()-STALE_HOURS*3600e3).toISOString();
     // Calendar day here (not the world day): a night talk idle for hours is still left behind.
-    for(const c of all("SELECT p.id,p.character_id,c.name FROM play_conversations p JOIN characters c ON c.id=p.character_id WHERE p.status='open' AND p.rewound_at IS NULL AND p.world_day<? AND coalesce((SELECT max(l.created_at) FROM play_lines l WHERE l.conversation_id=p.id),p.created_at)<?",localDay(now()),idleSince)){
+    for(const c of all("SELECT p.id,p.character_id,c.name FROM play_conversations p JOIN characters c ON c.id=p.character_id WHERE p.status='open' AND p.rewound_at IS NULL AND p.world_day<? AND coalesce((SELECT max(l.created_at) FROM active_play_lines l WHERE l.conversation_id=p.id),p.created_at)<?",localDay(now()),idleSince)){
       if(inFlight.has(c.id)||inFlight.has(c.character_id)||inFlight.has('group:'+c.id))continue;
       run("UPDATE play_conversations SET status='closed',closed_at=?,summary_json=? WHERE id=? AND status='open'",iso(),JSON.stringify({title:'Félbehagyott beszélgetés',summary:`A beszélgetés ${c.name} és Palor között félbemaradt.`,level_delta:0}),c.id);
     }
@@ -492,7 +543,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   // What a trip or passing time can change in the overview (C1, 2026-11-14): the client merges
   // it instead of reloading the whole overview after every step.
   // Today's AI spending against the daily cap (real calendar day), for the small meter.
-  function aiSpend(){try{const cap=Number(worldEngine.settings?.()?.daily_cap_usd);const spent=one('SELECT cost_usd FROM world_usage WHERE day=?',localDay(gameClock?.realNow?.()||new Date()))?.cost_usd||0;return Number.isFinite(cap)?{spent:Math.round(spent*1000)/1000,cap}:null;}catch{return null;}}
+  function aiSpend(){try{const cap=Number(worldEngine.settings?.()?.daily_cap_usd);const usage=one('SELECT cost_usd,input_tokens,cached_tokens FROM world_usage WHERE day=?',localDay(gameClock?.realNow?.()||new Date())),spent=usage?.cost_usd||0;return Number.isFinite(cap)?{spent:Math.round(spent*1000)/1000,cap,cached_percent:usage?.input_tokens>0?Math.round(100*Math.min(usage.cached_tokens||0,usage.input_tokens)/usage.input_tokens):null}:null;}catch{return null;}}
   function stateDelta(nodes){
     const node=currentNode(nodes),pos=positions(),st=playState();
     return {node_id:node?.id||null,clock:clock(),ai:aiSpend(),tree_version:treeVersion(nodes),previous_id:st.previous_id||null,recent:(st.recent||[]).filter(id=>id!==node?.id).slice(0,5),
@@ -535,7 +586,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     // their latest event of this day part, else a plain description of the place role.
     const todayHere=node.location_id?all("SELECT title,summary,payload_json FROM world_events WHERE rewound_at IS NULL AND world_day=? AND status IN ('applied','accepted') AND json_extract(payload_json,'$.location_id')=? ORDER BY rowid",k.day,node.location_id).map(e=>({title:e.title,summary:clip(e.summary,240),slot:SLOTS.find(s=>s.id===JSON.parse(e.payload_json).slot)?.label||''})):[];
     const pid=w.palor()?.id;
-    const here=node.location_id?cast.filter(c=>pos.get(c.id)===node.location_id).map(c=>({id:c.id,name:c.name,cover_id:cover(c.id),sprites:figures(c.id),sprites_shirtless:shirtless(c.id),sprites_intimate:intimateFigures(c.id),height_cm:heightOf(c.id),activity:activityOf(c.id,node.location_id),level:pid?w.levelOf(c.id,pid)??null:null,stage:intimacyStage(c.id),
+    const here=node.location_id?cast.filter(c=>pos.get(c.id)===node.location_id).map(c=>({id:c.id,name:c.name,cover_id:cover(c.id),sprites:figures(c.id),sprites_shirtless:shirtless(c.id),sprites_intimate:intimateFigures(c.id),height_cm:heightOf(c.id),activity:shownActivityOf(c.id,node.location_id),level:pid?w.levelOf(c.id,pid)??null:null,stage:intimacyStage(c.id),
       mood:moodOf(all("SELECT title,summary FROM world_events WHERE rewound_at IS NULL AND world_day=? AND status IN ('applied','accepted') AND EXISTS(SELECT 1 FROM json_each(payload_json,'$.character_ids') WHERE value=?)",k.day,c.id)).key})):[];
     // Someone without a drawn figure stands in the scene as a photo figure: his best everyday
     // picture of himself (media director, portrait panel), cropped to where he stands.
@@ -567,36 +618,35 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const role=locationId?one('SELECT role FROM world_places WHERE character_id=? AND location_id=? LIMIT 1',cid,locationId)?.role:null;
     return ROLE_TEXT[role]||ROLE_TEXT.other;
   }
+  // The same, as the player reads it on the screen (owner, 2026-11-21): today's event when there
+  // is one, else a line from the place link's note and his weekly routine. Screen only: prompts
+  // keep activityOf, so creator-level routine text never enters a character's prompt.
+  function shownActivityOf(cid,locationId){
+    const k=clock(),slotId=SLOTS[k.slot_index].id;
+    const e=one("SELECT title,summary FROM world_events WHERE rewound_at IS NULL AND world_day=? AND status IN ('applied','accepted') AND json_extract(payload_json,'$.slot')=? AND EXISTS(SELECT 1 FROM json_each(payload_json,'$.character_ids') WHERE value=?) ORDER BY rowid DESC LIMIT 1",k.day,slotId,cid);
+    if(e)return clip(e.summary||e.title,220);
+    // Here because of a meeting with Palor: say so, not "Éppen itt van."
+    if(locationId&&one("SELECT 1 FROM play_appointments WHERE character_id=? AND world_day=? AND slot=? AND status='accepted' AND location_id=? LIMIT 1",cid,k.day,slotId,locationId))return 'Palorral beszélt meg itt találkozót, rá vár.';
+    const link=locationId?one("SELECT wp.role,wp.note,l.name place FROM world_places wp JOIN locations l ON l.id=wp.location_id WHERE wp.character_id=? AND wp.location_id=? ORDER BY CASE wp.role WHEN 'work' THEN 0 WHEN 'routine' THEN 1 WHEN 'home' THEN 2 ELSE 3 END LIMIT 1",cid,locationId):null;
+    let routine='';try{routine=JSON.parse(one('SELECT value FROM application_settings WHERE key=?','ghost:character:'+cid)?.value||'{}').values?.weekly_routine?.value||'';}catch{}
+    return describeActivity({role:link?.role||'other',slotIndex:k.slot_index,note:link?.note||'',routine:String(routine),place:link?.place||''});
+  }
   // Travel remembers where Palor came from (Back) and the last few places (quick return).
   // ---- relationship depth ---------------------------------------------------------------
   db.exec('CREATE TABLE IF NOT EXISTS play_appointments(id TEXT PRIMARY KEY,character_id TEXT NOT NULL,location_id TEXT NOT NULL,world_day TEXT NOT NULL,slot TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL)');
   // Invitations from characters (appointment status 'invited', 2026-11-12): which phone message
   // carried each one. A separate table, so positional inserts into play_appointments stay valid.
   db.exec('CREATE TABLE IF NOT EXISTS play_invitations(appointment_id TEXT PRIMARY KEY,message_id TEXT NOT NULL,created_at TEXT NOT NULL)');
-  // Everything Palor and one character share: level history both ways, their talks, what he
+  // Talk history (2026-11-15): shared read model with the MCP catalogue (app/talk-history.mjs).
+  const talkHistory=createTalkHistory({one,all});
+  const sharedHistoryOf=talkHistory.sharedHistoryOf;
+  // Talks he took part in (his own and group scenes; not ones he was only mentioned in), newest
+  // first, rewound ones left out, with the parsed summary.
+  const pastTalks=(cid,limit=200)=>talkHistory.talkRows(cid,{limit:limit+20}).filter(r=>r.character_id===cid||(r.participants_json||'').includes(cid)).slice(0,limit)
+    .map(r=>{let s={};try{s=JSON.parse(r.summary_json||'{}')||{};}catch{}return {...r,summary:s};});
+  const wrapStatus=fn=>{try{return fn();}catch(e){throw e.status?fail(e.message,e.status):e;}};
+  // Everything that Palor and one character share: level history both ways, their talks, what he
   // remembers of Palor, and who else he is close to.
-  // Past talks of one character with Palor (2026-11-15): his own and the group scenes he was in,
-  // newest first, rewound ones left out (they did not happen).
-  function pastTalks(cid,limit=200){
-    return all(`SELECT id,world_day,slot,channel,coalesce(mode,'normal') mode,status,participants_json,summary_json,created_at,closed_at,(SELECT count(*) FROM play_lines l WHERE l.conversation_id=c.id) line_count
-      FROM play_conversations c WHERE rewound_at IS NULL AND (character_id=? OR EXISTS(SELECT 1 FROM json_each(coalesce(participants_json,'[]')) WHERE value=?))
-      ORDER BY created_at DESC,rowid DESC LIMIT ?`,cid,cid,limit).map(r=>{let s={};try{s=JSON.parse(r.summary_json||'{}')||{};}catch{}return {...r,summary:s};});
-  }
-  // The running shared history (written at each save point, from his side). It lives in the
-  // summary of the newest one-on-one talk, so a rewound talk takes its version back with it.
-  const sharedHistoryOf=cid=>one(`SELECT json_extract(summary_json,'$.shared_history') h FROM play_conversations WHERE character_id=? AND coalesce(mode,'normal')<>'group' AND status='closed' AND rewound_at IS NULL AND json_extract(summary_json,'$.shared_history') IS NOT NULL ORDER BY closed_at DESC LIMIT 1`,cid)?.h||'';
-  // Admin view for the profile's events tab: every talk with its summary; lines load on demand.
-  function talkLog(cid){
-    if(!one('SELECT 1 FROM characters WHERE id=?',cid))throw fail('Character not found',404);
-    const names=new Map(all('SELECT id,name FROM characters').map(c=>[c.id,c.name]));
-    return {shared_history:sharedHistoryOf(cid),talks:pastTalks(cid).map(r=>{const s=r.summary;let ids=[];try{ids=JSON.parse(r.participants_json||'[]');}catch{}
-      return {id:r.id,world_day:r.world_day,slot:r.slot,channel:r.channel,mode:r.mode,status:r.status,line_count:r.line_count,closed_at:r.closed_at,
-        participants:r.mode==='group'?ids.map(id=>names.get(id)||'?'):[],title:s.title||'',summary:s.summary||'',character_memory:r.mode==='group'?'':s.character_memory||'',
-        level_delta:s.level_delta??null,reason:s.reason||'',milestone:s.milestone||'',intimate:!!s.intimate};})};
-  }
-  const talkLines=id=>{if(!one('SELECT 1 FROM play_conversations WHERE id=?',id))throw fail('Conversation not found',404);
-    return all('SELECT l.speaker,l.text,l.created_at,(SELECT name FROM characters WHERE id=s.character_id) speaker_name,(SELECT name FROM characters c JOIN play_conversations v ON v.character_id=c.id WHERE v.id=l.conversation_id) main_name FROM play_lines l LEFT JOIN play_line_speaker s ON s.line_id=l.id WHERE l.conversation_id=? ORDER BY l.rowid',id)
-      .map(l=>({speaker:l.speaker,name:l.speaker==='palor'?'Palor':l.speaker_name||l.main_name||'?',text:l.text,created_at:l.created_at}));};
   function relationshipDetail(cid){
     const pid=w.palor()?.id;if(!pid||!one('SELECT 1 FROM characters WHERE id=?',cid))throw fail('Character not found',404);
     const names=new Map(all('SELECT id,name FROM characters').map(c=>[c.id,c.name]));
@@ -610,6 +660,13 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       threads:w.threadsOf(cid)
     };
   }
+  function knownCharacter(cid){
+    const person=relationships().people.find(p=>p.id===cid);if(!person)throw fail('Character not found',404);
+    const detail=relationshipDetail(cid);
+    // Only shared conversation facts/plans. Creator notes, his private memories,
+    // friends and level-change reasons never enter this participant response.
+    return {person,labels:LEVELS,talks:detail.talks,threads:detail.threads.filter(x=>x.status==='open'),appointments:detail.appointments.filter(x=>['accepted','invited'].includes(x.status))};
+  }
   // Palor invites someone to meet at a place in a day part. He accepts if he likes Palor
   // at least a little and is free; then he will be there at that time.
   async function invite(body){
@@ -619,11 +676,13 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     // A day part already past today means the next world day (at 01:00 "morning" is the coming one).
     const day=idx<k.slot_index?addDays(k.day,1):k.day;
     const level=w.levelOf(c.id,w.palor()?.id)??0,busy=one("SELECT 1 FROM play_appointments WHERE character_id=? AND world_day=? AND slot=? AND status IN ('accepted','invited')",c.id,day,SLOTS[idx].id);
-    const status=level>=1&&!busy?'accepted':'declined';
+    // A wardrobe being cannot be invited out into the real world (owner, 2026-11-20).
+    const caged=wardrobeOnly({...c,race:raceOf(c.id)})&&!inWardrobe(node.location_id);
+    const status=level>=1&&!busy&&!caged?'accepted':'declined';
     const appointmentId=randomUUID();run('INSERT INTO play_appointments(id,character_id,location_id,world_day,slot,status,created_at) VALUES(?,?,?,?,?,?,?)',appointmentId,c.id,node.location_id,day,SLOTS[idx].id,status,iso());
     // An accepted invitation is a date (chance meetings on the road are appointments, not dates).
     if(status==='accepted')run('INSERT INTO play_dates(appointment_id,created_at) VALUES(?,?)',appointmentId,iso());
-    return {status,day,slot:SLOTS[idx].label,place:node.short_name,reason:status==='accepted'?null:busy?'busy':'not_close'};
+    return {status,day,slot:SLOTS[idx].label,place:node.short_name,reason:status==='accepted'?null:caged?'wardrobe':busy?'busy':'not_close'};
   }
   // A character's own invitation (world engine, status 'invited'): Palor accepts (it becomes a
   // date: he will be there, and missing it is noticed) or declines. He remembers either answer.
@@ -750,9 +809,9 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   }
 
   // ---- conversations ----------------------------------------------------------------
-  const lines=cid=>{const adult=playSettings().adult;return all(`SELECT l.speaker,l.text,l.created_at,pm.media_id,pm.kind media_kind,pm.level media_level,ls.character_id speaker_id,(SELECT name FROM characters WHERE id=ls.character_id) speaker_name,
+  const lines=cid=>{const adult=playSettings().adult;return all(`SELECT l.id,l.speaker,l.text,l.created_at,pm.media_id,pm.kind media_kind,pm.level media_level,ls.character_id speaker_id,COALESCE((SELECT name FROM characters WHERE id=ls.character_id),(SELECT name FROM play_guests WHERE 'guest:'||id=ls.character_id)) speaker_name,
         mt.beat,mt.spark,sc.media_id scene_id,sc.kind scene_kind,sc.level scene_level,sc.start_at scene_start,sc.display_json scene_display
-      FROM play_lines l LEFT JOIN play_line_media pm ON pm.line_id=l.id LEFT JOIN play_line_speaker ls ON ls.line_id=l.id LEFT JOIN play_line_meta mt ON mt.line_id=l.id LEFT JOIN play_line_scene sc ON sc.line_id=l.id WHERE l.conversation_id=? ORDER BY l.rowid`,cid)
+      FROM active_play_lines l LEFT JOIN play_line_media pm ON pm.line_id=l.id LEFT JOIN play_line_speaker ls ON ls.line_id=l.id LEFT JOIN play_line_meta mt ON mt.line_id=l.id LEFT JOIN play_line_scene sc ON sc.line_id=l.id WHERE l.conversation_id=? ORDER BY l.rowid`,cid)
     .map(({media_id,media_kind,media_level,speaker_id,speaker_name,beat,spark,scene_id,scene_kind,scene_level,scene_start,scene_display,...l})=>{let shown={};try{shown=JSON.parse(scene_display||'{}');}catch{}
       return {...l,...(speaker_id?{speaker_id,speaker_name}:{}),...(beat?{beat}:{}),...(Number.isInteger(spark)?{spark}:{}),
         ...(media_id&&(adult||media_level==='non_intimate')?{media:{media_id,kind:media_kind,level:media_level,blur:media_level!=='non_intimate'}}:{}),
@@ -760,16 +819,17 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   const participantsOf=c=>{try{return JSON.parse(c?.participants_json||'[]');}catch{return [];}};
   function conversationView(id,mood=null){const c=one('SELECT * FROM play_conversations WHERE id=?',id);if(!c)throw fail('Conversation not found',404);const ch=one('SELECT id,name,cover_id FROM characters WHERE id=?',c.character_id);
     const group=c.mode==='group'?participantsOf(c).map(pid=>one('SELECT id,name,cover_id FROM characters WHERE id=?',pid)).filter(Boolean):null;
-    return {id:c.id,status:c.status,channel:c.channel,mode:c.mode||'normal',character:{...ch,sprites:figures(ch.id),sprites_shirtless:shirtless(ch.id),sprites_intimate:intimateFigures(ch.id)},...(group?{participants:group}:{}),lines:lines(c.id),mood,summary:c.summary_json?JSON.parse(c.summary_json):null,...conversationExtras(c)};}
+    return {id:c.id,status:c.status,channel:c.channel,mode:c.mode||'normal',character:{...ch,sprites:figures(ch.id),sprites_shirtless:shirtless(ch.id),sprites_intimate:intimateFigures(ch.id)},...(group?{participants:group}:{}),guests:guestsOf(c.id).map(guestView),...(c.mode!=='group'&&guestsOf(c.id).length?{intimate_now:intimateNow(c.id)}:{}),lines:lines(c.id),revised_turns:turnRevisions.history(c.id),last_turn:c.status==='open'?turnRevisions.available(c.id):null,mood,summary:c.summary_json?JSON.parse(c.summary_json):null,...conversationExtras(c)};}
   // The last reply's suggested next lines for Palor and the running chemistry (sum of sparks).
   function conversationExtras(c){
-    if(c.status!=='open')return {chemistry:one('SELECT coalesce(sum(m.spark),0) n FROM play_line_meta m JOIN play_lines l ON l.id=m.line_id WHERE l.conversation_id=?',c.id).n};
-    const last=one("SELECT m.choices_json FROM play_lines l JOIN play_line_meta m ON m.line_id=l.id WHERE l.conversation_id=? AND l.speaker='character' ORDER BY l.rowid DESC LIMIT 1",c.id);
+    if(c.status!=='open')return {chemistry:one('SELECT coalesce(sum(m.spark),0) n FROM play_line_meta m JOIN active_play_lines l ON l.id=m.line_id WHERE l.conversation_id=?',c.id).n};
+    const last=one("SELECT m.choices_json FROM active_play_lines l JOIN play_line_meta m ON m.line_id=l.id WHERE l.conversation_id=? AND l.speaker='character' ORDER BY l.rowid DESC LIMIT 1",c.id);
     let choices=[];try{choices=JSON.parse(last?.choices_json||'[]');}catch{}
-    return {choices,chemistry:one('SELECT coalesce(sum(m.spark),0) n FROM play_line_meta m JOIN play_lines l ON l.id=m.line_id WHERE l.conversation_id=?',c.id).n};
+    return {choices,chemistry:one('SELECT coalesce(sum(m.spark),0) n FROM play_line_meta m JOIN active_play_lines l ON l.id=m.line_id WHERE l.conversation_id=?',c.id).n};
   }
   // One AI reply at a time per character: a double click never sends (and pays) twice.
   const inFlight=new Set();
+  const turnRevisions=installPlayTurnRevisions({db,one,all,run,transaction,fail,inFlight,conversationView,reply:body=>talkOnce(body,null,{advanceTime:false})});
   // Prompt window of a talk and when the running summary starts (memo_json).
   const HISTORY_WINDOW=20,MEMO_FROM=14;
   // IDs must be strings: an object or array reaching SQLite would be a 500 (audit 2026-11-10).
@@ -811,20 +871,173 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const cid=conv?.character_id||body.character_id;
     const c=w.meetable().find(x=>x.id===cid);if(!c)throw fail('Only characters with a Szellemprofil can talk in Play mode for now.',409);
     const channel=conv?.channel||(body.channel==='phone'?'phone':'in_person'),stage=intimacyStage(cid);
-    // Explicit profile details only where an intimate scene could be open (same rule as the talk).
-    const explicit=stage==='intimate'&&channel!=='phone';
+    // Owner 2026-11-18: the narrator follows the scene that is actually running. In person, with
+    // the adult switch on, explicit details are open (the character may already be in an intimate
+    // scene in a normal-mode talk; the relationship level alone does not show that).
+    const explicit=stage!=='none'&&channel!=='phone';
     const here=currentNode(await tree()),k=clock();
-    const look=[one('SELECT appearance FROM canon WHERE character_id=? ORDER BY rowid DESC LIMIT 1',cid)?.appearance,one('SELECT appearance FROM characters WHERE id=?',cid)?.appearance].filter(x=>String(x||'').trim()).map(x=>clip(x,2500));
-    const recent=conv?lines(conv.id).slice(-8).map(l=>(l.speaker==='palor'?'Palor':c.name)+': '+l.text).join('\n'):'';
-    const system='Te a játék Rendszere vagy (narrátor), nem szereplő. A játékos a játékon kívülről kérdez vagy utasít. Válaszolj magyarul, tárgyilagosan és pontosan, 1–6 mondatban, kizárólag az alábbi adatokból (profil, jóváhagyott megjelenés, az alkotó javításai, a jelenet). Ne találj ki semmit: ha valami nincs az adatokban, mondd meg, hogy nincs rögzítve. Mindenki felnőtt. '+(explicit?'Intim, testi részletek is leírhatók, nyíltan, ha az adatokban szerepelnek.':'Intim, testi részletekről most nem adsz leírást; mondd meg, hogy ez most nem elérhető.')+' Csak JSON: {"answer":"..."}';
+    const lookOf=id=>[one('SELECT appearance FROM canon WHERE character_id=? ORDER BY rowid DESC LIMIT 1',id)?.appearance,one('SELECT appearance FROM characters WHERE id=?',id)?.appearance].filter(x=>String(x||'').trim()).map(x=>clip(x,2500));
+    const look=lookOf(cid);
+    // Palor is in the scene too: his profile and approved look, so the narrator can describe both.
+    const pid=w.palor()?.id,palorLook=pid&&pid!==cid?lookOf(pid):[],palorProfile=pid&&pid!==cid?clip(w.profileText(w.profile(pid),{explicit}),3000):'';
+    const recent=conv?lines(conv.id).slice(-10).map(l=>(l.speaker==='palor'?'Palor':isGuestLine(l)?l.speaker_name:c.name)+': '+l.text).join('\n'):'';
+    const guests=conv?guestsOf(conv.id):[];
+    const system='Te a játék Rendszere vagy (narrátor), nem szereplő. A játékos a játékon kívülről kérdez vagy utasít. Válaszolj magyarul. '
+      +'Ha adatra kérdez, válaszolj tárgyilagosan, pontosan, 1–6 mondatban. '
+      +'Ha jelenetet, látványt, mozdulatot vagy érzést kér, írd meg élénken és részletesen, 4–10 mondatban, harmadik személyben, a beszélgetés eddigi menetének folytatásaként. '
+      +'A szereplők külsejét, testét és viselkedését a profilokból, a jóváhagyott megjelenésből, az alkotó javításaiból és a beszélgetés soraiból vedd: ezekből szabadon megfogalmazhatod és kibonthatod a leírást, új szöveget írhatsz. '
+      +'Új tényt a múltról, életrajzról, rokonokról ne találj ki, és ami a szereplő külsejéből sehol nincs megadva, azt ne állítsd biztosra. Mindenki felnőtt. '
+      +(explicit?'Intim, testi és szexuális részletek nyíltan, nyers szavakkal is leírhatók.':'Intim, testi részletekről most nem adsz leírást; mondd meg, hogy ez most nem elérhető.')+' Csak JSON: {"answer":"..."}';
     const user=[`SZEREPLŐ: ${c.name}`,'PROFIL:\n'+w.profileText(c.profile,{explicit}),...(look.length?['JÓVÁHAGYOTT MEGJELENÉS:\n'+look.join('\n')]:[]),...(directorText(cid)?[directorText(cid)]:[]),
+      ...(palorProfile||palorLook.length?['PALOR (a játékos szereplője):\n'+[palorProfile,...(palorLook.length?['JÓVÁHAGYOTT MEGJELENÉSE:\n'+palorLook.join('\n')]:[])].filter(Boolean).join('\n')]:[]),
+      ...(guests.length?['A JELENETHEZ CSATLAKOZOTT ÚJ SZEREPLŐ(K) (felnőtt férfiak):\n'+guests.map(g=>`- ${g.name}: ${g.description}`).join('\n')]:[]),
       `JELENET: ${channel==='phone'?'telefonos beszélgetés':here?.path||here?.name||'ismeretlen hely'}, ${k.weekday} ${k.slot}.`,...(recent?['A BESZÉLGETÉS VÉGE:\n'+recent]:[]),'A JÁTÉKOS UTASÍTÁSA: '+directive].join('\n\n');
-    let out=await w.ask(system,user,500);
+    let out=await w.ask(system,user,900);
     if(out?.__truncated)out={answer:partialJsonString(out.raw,'answer')||''};
     const answer=clip(String(out?.answer??'').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g,' ').replace(/<[^>]{1,200}>/g,''),2000);
     if(!answer)throw fail('The narrator did not answer. Try again.',502);
     run('INSERT INTO play_narrations VALUES(?,?,?,?,?,?)',randomUUID(),conv?.id||null,cid,clip(directive,600),answer,iso());
     return {question:directive,answer};
+  }
+  // ---- scene guests (owner, 2026-11-18) ----------------------------------------------------
+  // A brand-new man may join an in-person 1:1 scene (an intimate one too). He lives only in this
+  // conversation: no character record, no folder, no canon. The owner may save him as a real
+  // character with one click. Owner policy: every character is male; the invented guest is checked
+  // like a new profile. His lines are stored as character lines with speaker "guest:<id>".
+  // A profile picture is made at once with OpenAI (paid, one attempt, never retried), kept outside
+  // OneDrive until the guest is saved.
+  db.exec('CREATE TABLE IF NOT EXISTS play_guests(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL,name TEXT NOT NULL,description TEXT NOT NULL,image_file TEXT,image_status TEXT NOT NULL,image_note TEXT,saved_character_id TEXT,left_at TEXT,created_at TEXT NOT NULL)');
+  // Two pictures (owner, 2026-11-18): dressed, then a shirtless edit of that same picture, so the
+  // owner can decide whether to keep him; the play screen shows the shirtless one when the scene
+  // is intimate. Same face is the aim, not a guarantee.
+  if(!all('PRAGMA table_info(play_guests)').some(c=>c.name==='bare_file'))db.exec('ALTER TABLE play_guests ADD COLUMN bare_file TEXT;ALTER TABLE play_guests ADD COLUMN bare_status TEXT;');
+  if(!all('PRAGMA table_info(play_guests)').some(c=>c.name==='portrait_prompt'))db.exec('ALTER TABLE play_guests ADD COLUMN portrait_prompt TEXT');
+  // Framing as the avatars' intimate figures (owner 2026-11-18): vertical 2:3, from just above the
+  // head to just below the navel, nothing below the waist in the frame, natural pose, his setting
+  // behind him. The dressed picture uses the same frame, so the shirtless edit lines up with it.
+  const GUEST_FRAMING='Framing: vertical 2:3, from a small margin above the head down to the waist, just below the navel; the picture ends there and nothing below the waist is in the frame (no waistband, belt or trousers visible). Pose: natural and relaxed, upper body facing the viewer with a slight three-quarter turn, shoulders relaxed, arms relaxed. A real background of his setting behind him, softly out of focus. Camera at chest height, sharp focus.';
+  const GUEST_IMAGE_MODEL='gpt-image-2',MAX_GUESTS=2;
+  // Is the scene's generated text intimate right now? (owner 2026-11-18: the content decides, not
+  // the conversation mode). The reply's own flag when it gave one, else the wording of the last
+  // lines. Only switches the guest picture shown; nothing else depends on it.
+  if(!all('PRAGMA table_info(play_line_meta)').some(c=>c.name==='intimate'))db.exec('ALTER TABLE play_line_meta ADD COLUMN intimate INTEGER');
+  const INTIMATE_WORDS=/(fasz|vessz[őo]|farká|farok|dug(ok|om|ja|lak|ás)|basz|szop|kúr|kefél|meztelen|pucér|mellbimb|ánusz|segg|ondó|elélvez|nyög|lökés|merevedés|pénisz|herék|heréi|csikló|szex|ágyék|lágyék|levetk|vetkőz|naked|nude|cock|fuck)/iu;
+  function intimateNow(convId){
+    const flag=one("SELECT m.intimate FROM active_play_lines l JOIN play_line_meta m ON m.line_id=l.id WHERE l.conversation_id=? AND l.speaker='character' ORDER BY l.rowid DESC LIMIT 1",convId)?.intimate;
+    if(flag===0||flag===1)return flag===1;
+    return all('SELECT text FROM active_play_lines WHERE conversation_id=? ORDER BY rowid DESC LIMIT 3',convId).some(l=>INTIMATE_WORDS.test(l.text));
+  }
+  const guestsOf=convId=>all('SELECT id,name,description,image_status,image_note,bare_status,saved_character_id FROM play_guests WHERE conversation_id=? AND left_at IS NULL ORDER BY created_at,rowid',convId);
+  const guestDir=()=>path.join(dataDir,'play-guests');
+  const isGuestLine=l=>typeof l?.speaker_id==='string'&&l.speaker_id.startsWith('guest:');
+  const plainText=s=>String(s??'').replace(/[\u0000-\u001f\u007f]/g,' ').replace(/<[^>]{1,200}>/g,'').replace(/\s+/g,' ').trim();
+  const guestView=g=>({id:g.id,name:g.name,description:g.description,image:g.image_status,bare:g.bare_status||'off',...(g.image_note&&(g.image_status==='failed'||g.bare_status==='failed')?{image_note:g.image_note}:{}),saved:!!g.saved_character_id});
+  async function addGuest(body){
+    checkIds(body,['conversation_id']);
+    const hint=body.hint===undefined||body.hint===null?'':plainText(body.hint);if(hint.length>300)throw fail('A leírás legfeljebb 300 karakteres lehet.');
+    const conv=one('SELECT * FROM play_conversations WHERE id=?',body.conversation_id||'');if(!conv)throw fail('Conversation not found',404);
+    if(conv.status!=='open')throw fail('This conversation has ended.',409);
+    if(conv.channel!=='in_person'||conv.mode==='group')throw fail('Új szereplő csak személyes, kettes jelenethez csatlakozhat.',409);
+    if(guestsOf(conv.id).length>=MAX_GUESTS)throw fail('Egy jelenetben legfeljebb két új szereplő lehet.',409);
+    const lock='guest:'+conv.id;if(inFlight.has(lock)||inFlight.has(conv.id))throw fail('Épp történik valami a jelenetben. Várj egy kicsit.',409);
+    inFlight.add(lock);
+    try{
+      const c=one('SELECT id,name FROM characters WHERE id=?',conv.character_id),here=currentNode(await tree()),k=clock();
+      const recent=lines(conv.id).slice(-8).map(l=>(l.speaker==='palor'?'Palor':l.speaker_name||c.name)+': '+l.text).join('\n');
+      // Existing characters' names are taken too: a guest must never pass for one of them.
+      const taken=[...new Set(['Palor',c.name,...guestsOf(conv.id).map(g=>g.name),...all('SELECT name FROM characters').map(r=>r.name)])];
+      const system='Egy élő világban játszódó játék folyamatban lévő jelenetéhez kitalálsz egy új, ideiglenes mellékszereplőt, aki most csatlakozik. Mindig felnőtt férfi (hím), soha nem nő. Magyar környezet, hihető, konkrét figura, a jelenethez és a helyszínhez illik. Válaszolj magyarul. '
+        +'Csak JSON: {"name":"keresztnév vagy rövid megnevezés (pl. Bence vagy Idegen vadász)","description":"3–5 mondat: kora, testalkata, arca, haja, ruházata, kisugárzása, és miért van itt most","portrait":"angol nyelvű, részletes leírás a profilképéhez: a külseje (arc, haj, testalkat, ruházat) és a mögötte lévő, a helyszínhez illő háttér; a képkivágást a program adja meg"}';
+      const user=[`HELYSZÍN: ${here?.path||here?.name||'ismeretlen hely'}, ${k.weekday} ${k.slot}.`,`A JELENETBEN MÁR OTT VAN: Palor és ${c.name}.`,...(recent?['A BESZÉLGETÉS VÉGE:\n'+recent]:[]),...(hint?['A JÁTÉKOS KÉRÉSE AZ ÚJ SZEREPLŐRŐL: '+hint]:[]),'Ezeket a neveket ne használd: '+taken.join(', ')+'.'].join('\n\n');
+      let out=await w.ask(system,user,700);if(out?.__truncated)out={};
+      const name=clip(plainText(out?.name),60),description=clip(plainText(out?.description),1200),portrait=clip(plainText(out?.portrait),1500);
+      if(!name||!description)throw fail('Nem sikerült új szereplőt kitalálni. Próbáld újra.',502);
+      if(taken.some(n=>n.toLocaleLowerCase('hu')===name.toLocaleLowerCase('hu')))throw fail('A kitalált név foglalt. Próbáld újra.',409);
+      try{characterPolicy?.assertProfile?.({name,biography:'Nem: férfi. '+description,appearance:description},{create:true});}catch{throw fail('A kitalált szereplő nem felelt meg a szereplő-szabálynak (csak férfi lehet). Próbáld újra.',409);}
+      const gid=randomUUID(),wantImage=body.portrait===true&&playSettings().guest_image_provider!=='sogni';
+      run('INSERT INTO play_guests(id,conversation_id,name,description,image_status,bare_status,portrait_prompt,created_at) VALUES(?,?,?,?,?,?,?,?)',gid,conv.id,name,description,wantImage?'pending':'off',wantImage?'pending':'off',portrait||null,iso());
+      if(wantImage)guestPortrait(gid,portrait||description).catch(()=>{});
+      return conversationView(conv.id);
+    }finally{inFlight.delete(lock);}
+  }
+  // One OpenAI picture call: never retried (it may have been billed). Returns {bytes,tokens} or
+  // {error:'Hungarian reason'}.
+  async function openaiPicture(url,payload){
+    const key=process.env.OPENAI_API_KEY;if(!key)return {error:'Nincs beállítva OpenAI-kulcs.'};
+    try{characterPolicy?.assertPrompt?.(payload.prompt);}catch{return {error:'A képleírás nem felelt meg a szereplő-szabálynak.'};}
+    let response;
+    try{response=await fetch(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(180000),headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(payload)});}
+    catch{return {error:'A kapcsolat megszakadt; lehet, hogy a próbálkozás díjat számolt fel. Nem próbálom újra.'};}
+    if(!response.ok){await response.body?.cancel?.().catch(()=>{});return {error:'Az OpenAI elutasította (HTTP '+response.status+'). Nem próbálom újra.'};}
+    try{
+      const raw=await response.json(),b64=raw?.data?.[0]?.b64_json;
+      if(typeof b64!=='string'||!b64.length||b64.length>20*1024*1024||!/^[A-Za-z0-9+/]+={0,2}$/.test(b64))throw Error();
+      const bytes=Buffer.from(b64,'base64');if(!(bytes[0]===0xff&&bytes[1]===0xd8)&&!(bytes[0]===0x89&&bytes[1]===0x50))throw Error();
+      return {bytes,tokens:Number.isSafeInteger(raw.usage?.total_tokens)?raw.usage.total_tokens:null};
+    }catch{return {error:'A kapott kép nem volt olvasható.'};}
+  }
+  async function keepPicture(gid,suffix,bytes){
+    await fs.mkdir(guestDir(),{recursive:true});const file=gid+suffix+(bytes[0]===0xff?'.jpg':'.png');
+    await fs.writeFile(path.join(guestDir(),file),bytes,{flag:'wx'});return file;
+  }
+  async function guestPortrait(gid,prompt){
+    const note=[];const set=(sql,...args)=>run(sql,...args,gid);
+    const dressed=await openaiPicture('https://api.openai.com/v1/images/generations',{model:GUEST_IMAGE_MODEL,prompt:'Photorealistic photograph of one adult man, fully clothed in his everyday clothes. '+GUEST_FRAMING+' '+prompt,n:1,size:'1024x1536',quality:'medium',output_format:'jpeg'});
+    if(dressed.error)return set("UPDATE play_guests SET image_status='failed',bare_status='failed',image_note=? WHERE id=?",dressed.error);
+    const file=await keepPicture(gid,'-'+Date.now(),dressed.bytes);note.push('felöltözött: OpenAI '+GUEST_IMAGE_MODEL+(dressed.tokens?', '+dressed.tokens+' token':''));
+    set("UPDATE play_guests SET image_status='done',image_file=?,image_note=? WHERE id=?",file,note.join('; '));
+    await guestShirtless(gid,dressed.bytes,note);
+  }
+  // The shirtless version is an edit of the dressed picture, so it stays the same man.
+  async function guestShirtless(gid,dressedBytes,note=[]){
+    const set=(sql,...args)=>run(sql,...args,gid);
+    const bare=await openaiPicture('https://api.openai.com/v1/images/edits',{model:GUEST_IMAGE_MODEL,prompt:'Edit this photo: the same adult man with the same face, hair, skin, body build, expression and the same background, now shirtless (bare upper body, no shirt). '+GUEST_FRAMING+' Calm, natural and non-sexual. Photorealistic.',images:[{image_url:'data:'+(dressedBytes[0]===0xff?'image/jpeg':'image/png')+';base64,'+dressedBytes.toString('base64')}],n:1,size:'1024x1536',quality:'medium',output_format:'jpeg'});
+    if(bare.error){note.push('félmeztelen: '+bare.error);return set("UPDATE play_guests SET bare_status='failed',image_note=? WHERE id=?",note.join('; '));}
+    const bareFile=await keepPicture(gid,'-felmeztelen-'+Date.now(),bare.bytes);note.push('félmeztelen: OpenAI '+GUEST_IMAGE_MODEL+(bare.tokens?', '+bare.tokens+' token':''));
+    set("UPDATE play_guests SET bare_status='done',bare_file=?,image_note=? WHERE id=?",bareFile,note.join('; '));
+  }
+  // The owner's click: new dressed and shirtless pictures (e.g. after the framing changed).
+  // Two paid calls; the earlier files stay in the guest folder, the new ones are shown.
+  function renewPictures(gid){
+    if(playSettings().guest_image_provider==='sogni')throw fail('A Sogni-portréhoz nyisd meg a külön képkérést és hagyd jóvá a becslést.',409);
+    const g=guestRow(gid);if(g.left_at)throw fail('Ez a vendégszereplő már elment.',409);
+    if(g.image_status==='pending'||g.bare_status==='pending')return conversationView(g.conversation_id);
+    run("UPDATE play_guests SET image_status='pending',bare_status='pending' WHERE id=?",g.id);
+    guestPortrait(g.id,g.portrait_prompt||g.description).catch(()=>run("UPDATE play_guests SET image_status=CASE WHEN image_status='pending' THEN 'failed' ELSE image_status END,bare_status=CASE WHEN bare_status='pending' THEN 'failed' ELSE bare_status END WHERE id=?",g.id));
+    return conversationView(g.conversation_id);
+  }
+  // The owner's click (2026-11-18): a guest who has a dressed picture but no shirtless one (made
+  // before that feature, or the edit failed) gets one now. One paid call, never automatic.
+  async function addShirtless(gid){
+    if(playSettings().guest_image_provider==='sogni')throw fail('A Sogni-portréhoz nem indul automatikus OpenAI-szerkesztés. Válassz külön szolgáltatót ehhez a képhez.',409);
+    const g=guestRow(gid);if(g.left_at)throw fail('Ez a vendégszereplő már elment.',409);
+    if(g.image_status!=='done'||!g.image_file)throw fail('Előbb felöltözött profilkép kell.',409);
+    if(g.bare_status==='done'||g.bare_status==='pending')return conversationView(g.conversation_id);
+    const bytes=await fs.readFile(path.join(guestDir(),path.basename(g.image_file)));
+    run("UPDATE play_guests SET bare_status='pending' WHERE id=?",g.id);
+    guestShirtless(g.id,bytes,g.image_note?[g.image_note]:[]).catch(()=>run("UPDATE play_guests SET bare_status='failed' WHERE id=? AND bare_status='pending'",g.id));
+    return conversationView(g.conversation_id);
+  }
+  function guestRow(gid){const g=one('SELECT * FROM play_guests WHERE id=?',gid);if(!g)throw fail('Nincs ilyen vendégszereplő.',404);return g;}
+  function leaveGuest(gid){const g=guestRow(gid);run('UPDATE play_guests SET left_at=COALESCE(left_at,?) WHERE id=?',iso(),g.id);return conversationView(g.conversation_id);}
+  // Saved by the owner's click: a real character (male by policy), with the guest's description as
+  // working appearance text (not canon). The portrait is copied into his new character folder and
+  // shows up in the gallery after the next library scan.
+  async function saveGuest(gid){
+    const g=guestRow(gid);if(g.saved_character_id)return conversationView(g.conversation_id);
+    if(one('SELECT 1 FROM characters WHERE lower(trim(name))=lower(trim(?))',g.name))throw fail('Már van ilyen nevű szereplő: '+g.name+'.',409);
+    const cid=randomUUID();
+    transaction(()=>{run('INSERT INTO characters(id,name,biography,appearance,created_at) VALUES(?,?,?,?,?)',cid,g.name,'Nem: férfi.',g.description,iso());run('UPDATE play_guests SET saved_character_id=? WHERE id=?',cid,g.id);});
+    const pictures=[];
+    const files=[[g.image_file,'profilkép'],[g.bare_file,'félmeztelen']].filter(([f])=>f);
+    if(root&&files.length&&!/[\\/:*?"<>|\u0000-\u001f]|^[. ]|[. ]$/.test(g.name)){
+      try{const dir=path.join(root,'10_CHARACTERS',g.name),realRoot=await fs.realpath(root);await fs.mkdir(dir,{recursive:true});const realDir=await fs.realpath(dir);
+        if(realDir.startsWith(realRoot+path.sep)){
+          for(const [f,label] of files){const target=path.join(realDir,g.name+' - '+label+' - '+localDay(now())+path.extname(f));
+            try{await fs.copyFile(path.join(guestDir(),f),target,fs.constants?.COPYFILE_EXCL??1);pictures.push(path.basename(target));}catch{}}
+          run('INSERT INTO sorted_folders VALUES(?,?) ON CONFLICT(folder) DO NOTHING',path.join('10_CHARACTERS',g.name),cid);}}catch{}
+    }
+    return {...conversationView(g.conversation_id),saved:{character_id:cid,name:g.name,picture:pictures[0]||null,pictures}};
   }
   // Only the "reply" field is shown while it arrives, and only when it grew.
   function replyWatcher(onReply){
@@ -832,7 +1045,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     let shown=0;
     return {onText:raw=>{const r=partialJsonString(raw,'reply');if(r&&r.length>shown){shown=r.length;onReply(r.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g,' ').slice(0,1500));}}};
   }
-  async function talkOnce(body,onReply=null){
+  async function talkOnce(body,onReply=null,{advanceTime=true}={}){
     // opener: Palor just walked up, so the character speaks first (no Palor line).
     const opener=body.opener===true&&!body.conversation_id;
     let text=typeof body.text==='string'?body.text.trim():'';
@@ -888,13 +1101,26 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const wantMemo=history.length>=MEMO_FROM&&(!memo?.text||history.length-memo.lines>=6);
     // Anti-repeat (2026-11-15): his own last replies, quoted back as phrases not to reuse; a long
     // monotonous scene otherwise makes the model rotate the same few sentences.
-    const ownLast=history.filter(l=>l.speaker!=='palor').slice(-4).map(l=>'- '+clip(l.text,300));
+    const ownLast=history.filter(l=>l.speaker!=='palor'&&!isGuestLine(l)).slice(-4).map(l=>'- '+clip(l.text,300));
+    // Guests who joined this scene (owner, 2026-11-18): this reply also writes their lines.
+    const guests=conv&&channel==='in_person'?guestsOf(conv.id):[];
+    // Whom Palor's line names (owner 2026-11-19: the one he speaks to must answer). A name counts
+    // with Hungarian endings too ("Feri", "Ferit", "Ferinek").
+    // Any part of a name counts (Hungarian names put the family name first), except a part that
+    // several people here share.
+    const parts=n=>String(n||'').trim().toLocaleLowerCase('hu').split(/[\s-]+/).filter(w=>w.length>=2);
+    const sharedParts=(()=>{const seen=new Map();for(const n of [c.name,...guests.map(g=>g.name)])for(const w of new Set(parts(n)))seen.set(w,(seen.get(w)||0)+1);return new Set([...seen].filter(([,k])=>k>1).map(([w])=>w));})();
+    const named=n=>!!text&&parts(n).filter(w=>!sharedParts.has(w)).some(w=>new RegExp('(^|[^\\p{L}])'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'iu').test(text));
+    const addressed=guests.length&&!opener?guests.filter(g=>named(g.name)):[],mainAddressed=guests.length&&!opener&&named(c.name);
     // Scene state (2026-11-15): one line on where the scene stands, rewritten by every reply so the
     // scene has an arc instead of standing still.
     const sceneNow=typeof memo?.scene==='string'?memo.scene:'';
+    // Owner 2026-11-18: what the narrator ("Rendszer") described since his last reply is part of
+    // the scene; he continues from it.
+    const narrated=conv?all("SELECT answer FROM play_narrations WHERE conversation_id=? AND created_at>COALESCE((SELECT max(created_at) FROM active_play_lines WHERE conversation_id=? AND speaker='character'),'') ORDER BY created_at DESC LIMIT 2",conv.id,conv.id).reverse().map(r=>clip(r.answer,1500)):[];
     // Suggested lines (2026-11-15): last round's suggestions and Palor's own last lines are quoted
     // back so the suggestions do not rotate either.
-    const prevChoices=(()=>{if(!conv)return [];try{return cleanChoices(JSON.parse(one("SELECT m.choices_json FROM play_lines l JOIN play_line_meta m ON m.line_id=l.id WHERE l.conversation_id=? AND l.speaker='character' ORDER BY l.rowid DESC LIMIT 1",conv.id)?.choices_json||'[]'));}catch{return [];}})();
+    const prevChoices=(()=>{if(!conv)return [];try{return cleanChoices(JSON.parse(one("SELECT m.choices_json FROM active_play_lines l JOIN play_line_meta m ON m.line_id=l.id WHERE l.conversation_id=? AND l.speaker='character' ORDER BY l.rowid DESC LIMIT 1",conv.id)?.choices_json||'[]'));}catch{return [];}})();
     const palorLast=history.filter(l=>l.speaker==='palor').slice(-3).map(l=>clip(l.text,200));
     // Palor's own voice for the suggestions: his general style, how he talks to this person, his
     // flirting; his intimacy sections only inside an intimate scene.
@@ -943,15 +1169,12 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const user=['PROFILOD:\n'+w.profileText(c.profile,{explicit:intimate||(stage==='intimate'&&channel!=='phone')}),
       ...(corrections?[corrections]:[]),
       `KAPCSOLATOD PALORRAL [${LEVELS[level??0]}]:\n`+(clip(note,1500)||'nincs megadva'),
+      ...(voice?[PALOR_VOICE_HEAD+voice]:[]),
       'ÍGY BESZÉLSZ VELE: '+LEVEL_STYLE[String(level??0)]+'. '+TIME_MOOD[k.slot_index]+'.',
       channel==='in_person'?'MOST ÉPPEN: '+activityOf(cid,here?.location_id):'MOST ÉPPEN: telefonon írsz Palorral.',
       ...(shared?['KÖZÖS MÚLTATOK PALORRAL (ahogy te emlékszel rá):\n'+clip(shared,1500)]:[]),
       ...(earlier.length?['KORÁBBI BESZÉLGETÉSEITEK:\n'+earlier.join('\n')]:[]),
       'LEGUTÓBB PALORRAL: '+(lastTalk?lastTalk+sinceText:'még nem beszélgettetek'),
-      ...(sceneNow?['A JELENET MOST (innen lépj tovább): '+clip(sceneNow,300)]:[]),
-      ...(ownLast.length>=2?['A TE UTOLSÓ VÁLASZAID – ezek mondatait, fordulatait és képeit most NE ismételd, mondj mást, másképp:\n'+ownLast.join('\n')]:[]),
-      ...(voice?[PALOR_VOICE_HEAD+voice]:[]),
-      ...(prevChoices.length||palorLast.length>=2?['A "choices" NE ismételje ezeket (előző javaslatok és Palor korábbi mondatai):\n'+[...prevChoices,...palorLast].map(x=>'- '+x).join('\n')]:[]),
       'HANGULATOD MA: '+mood.text+(placeRole&&ROLE_CONTEXT[placeRole]?' '+ROLE_CONTEXT[placeRole]:''),
       'EMLÉKEID:\n'+(memories.map(m=>'- '+clip(m,300)).join('\n')||'nincs'),
       'MA VELED TÖRTÉNT:\n'+(today.map(e=>`- ${e.title}: ${clip(e.summary,200)}`).join('\n')||'semmi különös'),
@@ -962,13 +1185,27 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       `HOL ÉS MIKOR: ${where}, ${k.weekday} ${k.slot}.`,
       // Lines older than the window live on in the running summary.
       ...(memo?.text&&history.length>HISTORY_WINDOW?['A BESZÉLGETÉS KORÁBBI RÉSZE (összefoglaló): '+clip(memo.text,800)]:[]),
-      'A BESZÉLGETÉS EDDIG:\n'+(history.slice(-HISTORY_WINDOW).map(l=>(l.speaker==='palor'?'Palor':c.name)+': '+l.text).join('\n')||'(most kezdődik)'),
+      ...(guests.length?(()=>{const gNames=guests.map(g=>g.name).join(', ');return [`TÖBBEN VAGYTOK A JELENETBEN. Szereplők: Palor (a játékos – az ő szavait és tetteit soha nem te írod), te (${c.name}), és aki most csatlakozott (részt vesz mindenben, ami történik, intim jelenetben is):\n`+guests.map(g=>`- ${g.name}: ${clip(g.description,600)}`).join('\n')
+        +`\nAz ő megszólalásait és cselekvéseit is te írod, külön: a JSON-ba tedd bele ezt is: "guests":[{"name":"<a neve>","text":"<amit mond vagy tesz, cselekvés *csillagok között*, 1–3 mondat>"}]. Mindegyikük legfeljebb egy sort kap. A "reply" csak a te (${c.name}) válaszod. Mindenkit a nevén nevezz (${c.name}, ${gNames}, Palor), ne „idegennek” vagy „új férfinak”, és mindig legyen világos, ki mit csinál kivel.`
+        +'\nKI KINEK SZÓL: '+(addressed.length?`Palor most ${addressed.map(g=>g.name).join(' és ')} felé szólt. ${addressed.length>1?'Nekik':'Neki'} KÖTELEZŐ érdemben, közvetlenül arra válaszolnia, amit Palor mondott vagy tett (a "guests"-ben); a te "reply"-od ilyenkor rövid reakció.${mainAddressed?` Palor téged (${c.name}) is megszólított, te is válaszolj rá érdemben.`:''}`
+          :mainAddressed?`Palor most hozzád (${c.name}) szólt: te válaszolj rá érdemben; ${gNames} csak akkor szól közbe, ha természetes.`
+          :`Aki felé Palor mondata egyértelműen szól (a szövegkörnyezetből), az válaszoljon rá érdemben; a többiek csak akkor, ha természetes.`)
+        +`\nA "choices" ebben a jelenetben is KIZÁRÓLAG Palor saját következő mondatai vagy tettei, Palor szemszögéből (E/1: „én” = Palor), soha nem a te (${c.name}) vagy ${gNames} szavai. Mindegyikben legyen egyértelmű, kihez szól vagy kivel tesz valamit: szólítsa a nevén (${c.name} vagy ${gNames}). Ki mit csinál kivel, az legyen összhangban azzal, ami eddig történt.`
+        +`\nTedd bele azt is: "intimate":true, ha a jelenet a te válaszod és az ő soraik után szexuális, meztelen vagy testi-intim; különben "intimate":false.`];})():[]),
+      'A BESZÉLGETÉS EDDIG:\n'+(history.slice(-HISTORY_WINDOW).map(l=>(l.speaker==='palor'?'Palor':isGuestLine(l)?l.speaker_name:c.name)+': '+l.text).join('\n')||'(most kezdődik)'),
+      ...(sceneNow?['A JELENET MOST (innen lépj tovább): '+clip(sceneNow,300)]:[]),
+      ...(narrated.length?['A JELENET LEÍRÁSA (a játék narrátora írta; ez történik most, ebből folytasd, ne ismételd szó szerint):\n'+narrated.join('\n')]:[]),
+      ...(ownLast.length>=2?['A TE UTOLSÓ VÁLASZAID – ezek mondatait, fordulatait és képeit most NE ismételd, mondj mást, másképp:\n'+ownLast.join('\n')]:[]),
+      ...(prevChoices.length||palorLast.length>=2?['A "choices" NE ismételje ezeket (előző javaslatok és Palor korábbi mondatai):\n'+[...prevChoices,...palorLast].map(x=>'- '+x).join('\n')]:[]),
       opener?(channel==='phone'?'Palor most felhívott. Vedd fel, és szólalj meg te elsőként.':'Palor most lép oda hozzád, még nem szólt. Vedd észre, és szólalj meg te elsőként, ahhoz illően, amit éppen csinálsz.'):'Palor: '+text].join('\n\n');
     // 600 tokens: reply plus mood, beat, spark and three suggested lines, in Hungarian. If the
     // answer is still cut short, keep the reply that arrived and default the rest.
     // 700 since 2026-11-15: the scene-state line rides along too.
-    let out=await w.ask(system,user,700,replyWatcher(onReply));
+    let out=await w.ask(system,user,700+guests.length*200,replyWatcher(onReply));
     if(out?.__truncated)out={reply:partialJsonString(out.raw,'reply')||''};
+    // The guests' lines: only names of guests in this scene, one line each, plain text.
+    const guestLines=[];if(guests.length&&Array.isArray(out?.guests))for(const x of out.guests.slice(0,MAX_GUESTS)){
+      const gid=matchPerson(guests,x?.name),said=clip(plainText(x?.text),800);if(gid&&said&&!guestLines.some(y=>y.id===gid))guestLines.push({id:gid,text:said});}
     // Plain text only: no control characters or markup from the model.
     const reply=clip(String(out?.reply??'').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g,' ').replace(/<[^>]{1,200}>/g,''),1500);if(!reply)throw fail('The character did not answer. Try again.',502);
     const id=conv?.id||randomUUID(),t=iso(),replyId=randomUUID();
@@ -984,14 +1221,19 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     transaction(()=>{
       // Closed while he was answering (stale close, another device): never add lines to a closed talk.
       if(conv&&!one("SELECT 1 FROM play_conversations WHERE id=? AND status='open'",conv.id))throw fail('This conversation has ended.',409);
+      const priorRowid=one('SELECT coalesce(max(rowid),0) n FROM active_play_lines WHERE conversation_id=?',id).n,beforeIntimateFlag=!!one('SELECT 1 FROM play_conversation_flags WHERE conversation_id=?',id);
       if(!conv)run("INSERT INTO play_conversations(id,character_id,location_id,channel,world_day,slot,status,created_at,mode) VALUES(?,?,?,?,?,?,'open',?,?)",id,cid,channel==='phone'?null:here?.location_id||null,channel,k.day,k.slot,t,intimate?'intimate':'normal');
       else if(intimate&&conv.mode!=='intimate')run("UPDATE play_conversations SET mode='intimate' WHERE id=?",id);
       if(intimate)run('INSERT OR IGNORE INTO play_conversation_flags VALUES(?,?)',id,t);
       else if(stopping)run("UPDATE play_conversations SET mode='normal' WHERE id=?",id);
       if(!opener)run('INSERT INTO play_lines VALUES(?,?,?,?,?)',randomUUID(),id,'palor',text,t);
+      // The guest Palor spoke to answers first (owner 2026-11-19), then the partner's reply.
+      const guestFirst=addressed.length>0,putGuests=()=>{for(const g of guestLines){const lid=randomUUID();run('INSERT INTO play_lines VALUES(?,?,?,?,?)',lid,id,'character',g.text,t);run('INSERT INTO play_line_speaker VALUES(?,?)',lid,'guest:'+g.id);}};
+      if(guestFirst)putGuests();
       run('INSERT INTO play_lines VALUES(?,?,?,?,?)',replyId,id,'character',reply,t);
       if(sent)run('INSERT INTO play_line_media VALUES(?,?,?,?,?,?)',replyId,sent.media_id,sent.kind,sent.level,JSON.stringify(sent.reasons),t);
-      run('INSERT INTO play_line_meta VALUES(?,?,?,?)',replyId,beat,spark,JSON.stringify(choices));
+      run('INSERT INTO play_line_meta(line_id,beat,spark,choices_json,intimate) VALUES(?,?,?,?,?)',replyId,beat,spark,JSON.stringify(choices),guests.length&&typeof out?.intimate==='boolean'?(out.intimate?1:0):null);
+      if(!guestFirst)putGuests();
       if(date&&!date.met_at)run('UPDATE play_dates SET met_at=?,conversation_id=? WHERE appointment_id=?',t,id,date.appointment_id);
       if(missed)run('UPDATE play_dates SET missed_noted_at=? WHERE appointment_id=?',t,missed.appointment_id);
       if(threads.lapsed.length)w.noteLapsed(threads.lapsed.map(x=>x.id));
@@ -1001,9 +1243,10 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
         const next={...newMemo,...(newScene?{scene:newScene}:{})};
         if(Object.keys(next).length&&JSON.stringify(next)!==(conv?.memo_json||''))run('UPDATE play_conversations SET memo_json=? WHERE id=?',JSON.stringify(next),id);}
       if(scene)run('INSERT INTO play_line_scene VALUES(?,?,?,?,?,?,?,?)',replyId,scene.media_id,scene.kind,scene.level,beat,scene.start_at??null,JSON.stringify(scene.display),t);
+      turnRevisions.record(replyId,id,{palor_text:opener?null:text,memo_json:conv?.memo_json||null,mode:conv?.mode||'normal',had_intimate_flag:beforeIntimateFlag,line_ids:all('SELECT id FROM active_play_lines WHERE conversation_id=? AND rowid>? ORDER BY rowid',id,priorRowid).map(row=>row.id)});
     });
     // Talking takes time (game clock, owner decision D1).
-    gameClock?.advance(TALK_MINUTES,'talk');
+    if(advanceTime)gameClock?.advance(TALK_MINUTES,'talk');
     if(sent)director.markShown(sent.media_id,'phone',[cid]);
     if(scene){director.markShown(scene.media_id,'scene',scene.cast);run('INSERT INTO play_seen VALUES(?,?,?) ON CONFLICT DO UPDATE SET seen_at=excluded.seen_at',scene.media_id,cid,t);}
     return conversationView(id,moods.includes(out?.mood)?out.mood:null);
@@ -1026,6 +1269,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   }
   async function groupTalkOnce(body){
     const opener=body.opener===true&&!body.conversation_id,text=typeof body.text==='string'?body.text.trim():'';
+    const requested=body.character_ids;
+    if(requested!==undefined&&(!opener||!Array.isArray(requested)||requested.length<2||requested.length>4||requested.some(id=>typeof id!=='string'||!id)||new Set(requested).size!==requested.length))throw fail('A csoporthoz 2–4 különböző szereplőt válassz.');
     if(!opener&&(!text||text.length>2000))throw fail('Write what Palor says (at most 2000 characters).');
     const pid=w.palor()?.id;if(!pid)throw fail('No character named Palor exists.',409);
     let conv=body.conversation_id?one('SELECT * FROM play_conversations WHERE id=?',body.conversation_id):null;
@@ -1033,7 +1278,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(conv&&conv.status!=='open')throw fail('This conversation has ended.',409);
     const nodes=await tree(),here=currentNode(nodes);if(!here)throw fail('Palor is not at a place.',409);
     const present=presentAt(here),cast=new Map(w.meetable().map(c=>[c.id,c]));
-    const ids=conv?participantsOf(conv).filter(id=>present.includes(id)):present.filter(id=>cast.has(id)).slice(0,4);
+    if(requested?.some(id=>id===pid||!present.includes(id)||!cast.has(id)))throw fail('A kiválasztott szereplők egyike már nincs itt vagy nem megszólítható. Válassz újra.',409);
+    const ids=conv?participantsOf(conv).filter(id=>present.includes(id)):requested||present.filter(id=>cast.has(id)).slice(0,4);
     // The company broke up (time passed, people left): close the scene with its save point
     // instead of leaving it open and refusing every line.
     if(conv&&ids.length<2)return {...await groupEnd(conv),dispersed:true};
@@ -1053,7 +1299,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     // Same anti-repeat and suggestion inputs as a one-on-one talk (2026-11-15).
     const ownLast=history.filter(l=>l.speaker!=='palor').slice(-4).map(l=>'- '+(l.speaker_name?l.speaker_name+': ':'')+clip(l.text,300));
     const palorLast=history.filter(l=>l.speaker==='palor').slice(-3).map(l=>clip(l.text,200));
-    const prevChoices=(()=>{if(!conv)return [];try{return cleanChoices(JSON.parse(one("SELECT m.choices_json FROM play_lines l JOIN play_line_meta m ON m.line_id=l.id WHERE l.conversation_id=? AND l.speaker='character' ORDER BY l.rowid DESC LIMIT 1",conv.id)?.choices_json||'[]'));}catch{return [];}})();
+    const prevChoices=(()=>{if(!conv)return [];try{return cleanChoices(JSON.parse(one("SELECT m.choices_json FROM active_play_lines l JOIN play_line_meta m ON m.line_id=l.id WHERE l.conversation_id=? AND l.speaker='character' ORDER BY l.rowid DESC LIMIT 1",conv.id)?.choices_json||'[]'));}catch{return [];}})();
     const voice=palorVoice(speechOf(w.profile(pid)),names.join(' '),{intimate:gIntimate});
     const user=[...people.map(block),'A JELENET EDDIG:\n'+(history.slice(-24).map(l=>(l.speaker==='palor'?'Palor':l.speaker_name||'?')+': '+l.text).join('\n')||'(most kezdődik)'),
       ...(ownLast.length>=2?['AZ UTOLSÓ VÁLASZOK – ezek mondatait, fordulatait és képeit most NE ismételjétek:\n'+ownLast.join('\n')]:[]),
@@ -1075,7 +1321,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       if(!conv)run("INSERT INTO play_conversations(id,character_id,location_id,channel,world_day,slot,status,created_at,mode,participants_json) VALUES(?,?,?,'in_person',?,?,'open',?,'group',?)",id,ids[0],here.location_id||null,k.day,k.slot,t,JSON.stringify(ids));
       if(!opener)run('INSERT INTO play_lines VALUES(?,?,?,?,?)',randomUUID(),id,'palor',text,t);
       for(const r of replies){const lid=randomUUID();run('INSERT INTO play_lines VALUES(?,?,?,?,?)',lid,id,'character',r.text,t);run('INSERT INTO play_line_speaker VALUES(?,?)',lid,r.id);lastLine=lid;}
-      run('INSERT INTO play_line_meta VALUES(?,?,?,?)',lastLine,gBeat,0,JSON.stringify(gChoices));
+      run('INSERT INTO play_line_meta(line_id,beat,spark,choices_json) VALUES(?,?,?,?)',lastLine,gBeat,0,JSON.stringify(gChoices));
       // Undressing or beyond makes it an intimate scene: its save point is marked intimate (news
       // never carries it), like a one-on-one intimate talk.
       if(BEAT_WANT[gBeat]>=1)run('INSERT OR IGNORE INTO play_conversation_flags VALUES(?,?)',id,t);
@@ -1085,15 +1331,32 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(gScene)director.markShown(gScene.media_id,'scene',gScene.cast);
     return conversationView(id);
   }
+  // Richer save-point fields (2026-11-15), asked in the same summary call: topics, weight, and
+  // who or what was named. Names resolve only to existing records; an ambiguous or unknown name
+  // abstains (stored as nothing), so no character or place is ever created from a talk.
+  const RICH_FIELDS_HINT='"tags": 1-5 rövid, kisbetűs címke a témákról (pl. munka, család, flört, veszekedés, terv). "importance": 1-5, mennyire fontos ez a beszélgetés a kapcsolatukban (1 hétköznapi csevegés, 5 fordulópont). "mentioned_people" és "mentioned_places": a beszélgetésben név szerint szóba került más emberek és helyek, csak ami tényleg elhangzott.';
+  const RICH_FIELDS_JSON='"tags":["..."],"importance":1,"mentioned_people":[],"mentioned_places":[]';
+  function richFields(data,exclude){
+    const out={};
+    const tags=[...new Set((Array.isArray(data.tags)?data.tags:[]).map(t=>clip(String(t??'').toLocaleLowerCase('hu'),30)).filter(Boolean))].slice(0,5);if(tags.length)out.tags=tags;
+    const imp=Math.round(Number(data.importance));if(imp>=1&&imp<=5)out.importance=imp;
+    const names=v=>(Array.isArray(v)?v:[]).slice(0,8).map(n=>String(n??'').trim()).filter(Boolean);
+    const people=all('SELECT id,name FROM characters').filter(c=>!exclude.includes(c.id));
+    const ids=[...new Set(names(data.mentioned_people).map(n=>matchPerson(people,n)).filter(Boolean))];if(ids.length)out.mentioned_character_ids=ids;
+    const places=all('SELECT id,name FROM locations');
+    const placeIds=[...new Set(names(data.mentioned_places).map(n=>{const k=n.toLocaleLowerCase('hu'),hits=places.filter(l=>String(l.name).toLocaleLowerCase('hu')===k);return hits.length===1?hits[0].id:null;}).filter(Boolean))];
+    if(placeIds.length)out.mentioned_location_ids=placeIds;
+    return out;
+  }
   // Group save point: one summary; a memory for each participant and Palor; no level changes.
   async function groupEnd(conv){
     const ls=lines(conv.id),ids=participantsOf(conv),pid=w.palor()?.id;
     const people=ids.map(id=>one('SELECT id,name FROM characters WHERE id=?',id)).filter(Boolean);
     // Palor walked up and left without a word: close without a paid summary.
     if(!ls.some(l=>l.speaker==='palor')){closeOpen(conv.id,null);return conversationView(conv.id);}
-    const system=`Egy társas jelenetet foglalsz össze Palor és ${people.map(c=>c.name).join(', ')} között. Csak azt írd le, ami ténylegesen elhangzott. Csak JSON, magyarul: {"title":"rövid cím","summary":"1-2 mondat","memories":{"<név>":"egy mondat az ő szemszögéből"},"palor_memory":"egy mondat Palor szemszögéből"}`;
-    const data=await w.ask(system,ls.map(l=>(l.speaker==='palor'?'Palor':l.speaker_name||'?')+': '+l.text).join('\n'),600)||{};
-    const summary={title:clip(data.title,120)||'Beszélgetés társaságban',summary:clip(data.summary,600),palor_memory:clip(data.palor_memory,1000),group:true};
+    const system=`Egy társas jelenetet foglalsz össze Palor és ${people.map(c=>c.name).join(', ')} között. Csak azt írd le, ami ténylegesen elhangzott. ${RICH_FIELDS_HINT} Csak JSON, magyarul: {"title":"rövid cím","summary":"1-2 mondat","memories":{"<név>":"egy mondat az ő szemszögéből"},"palor_memory":"egy mondat Palor szemszögéből",${RICH_FIELDS_JSON}}`;
+    const data=await w.ask(system,ls.map(l=>(l.speaker==='palor'?'Palor':l.speaker_name||'?')+': '+l.text).join('\n'),800)||{};
+    const summary={title:clip(data.title,120)||'Beszélgetés társaságban',summary:clip(data.summary,600),palor_memory:clip(data.palor_memory,1000),group:true,...richFields(data,[...people.map(c=>c.id),pid].filter(Boolean))};
     if(one('SELECT 1 FROM play_conversation_flags WHERE conversation_id=? AND intimate_at IS NOT NULL',conv.id))summary.intimate=true;
     const mem=data.memories&&typeof data.memories==='object'?data.memories:{};
     transaction(()=>{
@@ -1102,6 +1365,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       run('INSERT INTO world_events(id,world_day,kind,status,title,summary,payload_json,model,seen_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',eventId,conv.world_day,'meeting','applied',summary.title,summary.summary||summary.title,JSON.stringify({slot:SLOTS.find(s=>s.label===conv.slot)?.id||null,character_ids:people.map(c=>c.id),location_id:conv.location_id,memories:[],level_changes:[],play_conversation_id:conv.id,with_palor:true,intimate:!!summary.intimate}),'play',iso(),iso());
       for(const c of people){const m=clip(mem[c.name]??Object.entries(mem).find(([n])=>matchPerson(people,n)===c.id)?.[1],1000);if(m)w.remember(c.id,m,eventId);}
       if(summary.palor_memory&&pid)w.remember(pid,summary.palor_memory,eventId);
+      meetingSaved(eventId);
     });
     return conversationView(conv.id);
   }
@@ -1128,14 +1392,14 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     // Promises and plans (2026-11-12): the same summary call lists new ones and says which of the
     // open ones this talk kept or dropped (by number). No extra call.
     const listed=w.openThreadsFor(c.id,conv.world_day).open;
-    const system=`Egy beszélgetést foglalsz össze Palor és ${c.name} között. Csak azt írd le, ami a beszélgetésben ténylegesen elhangzott vagy történt. "promises": csak kifejezett ígéret vagy megbeszélt terv (pl. "pénteken felhívlak", "holnap este átjövök"), legfeljebb 3; "by": ki ígérte; "due": a dátum ÉÉÉÉ-HH-NN alakban, ha kiderül, különben null. "kept"/"dropped": a felsorolt nyitott tervek közül melyik teljesült, illetve melyiket mondták le ebben a beszélgetésben (sorszámok). "shared_history": ${c.name} és Palor közös múltja ${c.name} szemszögéből, legfeljebb 6 mondatban: a KORÁBBI KÖZÖS MÚLT kiegészítve ezzel a beszélgetéssel; a fontosat (fordulópontok, ígéretek, érzelmes pillanatok, amit megtudtak egymásról) tartsd meg, a régi apróságokat tömörítsd; csak azt írd bele, ami ott vagy ebben a beszélgetésben szerepel, ne találj ki semmit. Csak JSON, magyarul: {"title":"rövid cím","summary":"1-2 mondat","character_memory":"egy-két mondat ${c.name} szemszögéből","palor_memory":"egy-két mondat Palor szemszögéből","level_delta":-1|0|1,"reason":"miért változott (vagy nem) ${c.name} viszonya Palorhoz","promises":[{"by":"palor|character","text":"...","due":null}],"kept":[],"dropped":[],"shared_history":"..."}`;
+    const system=`Egy beszélgetést foglalsz össze Palor és ${c.name} között. Csak azt írd le, ami a beszélgetésben ténylegesen elhangzott vagy történt. "promises": csak kifejezett ígéret vagy megbeszélt terv (pl. "pénteken felhívlak", "holnap este átjövök"), legfeljebb 3; "by": ki ígérte; "due": a dátum ÉÉÉÉ-HH-NN alakban, ha kiderül, különben null. "kept"/"dropped": a felsorolt nyitott tervek közül melyik teljesült, illetve melyiket mondták le ebben a beszélgetésben (sorszámok). "shared_history": ${c.name} és Palor közös múltja ${c.name} szemszögéből, legfeljebb 6 mondatban: a KORÁBBI KÖZÖS MÚLT kiegészítve ezzel a beszélgetéssel; a fontosat (fordulópontok, ígéretek, érzelmes pillanatok, amit megtudtak egymásról) tartsd meg, a régi apróságokat tömörítsd; csak azt írd bele, ami ott vagy ebben a beszélgetésben szerepel, ne találj ki semmit. ${RICH_FIELDS_HINT} "learned": mit tudott meg ebben a beszélgetésben ${c.name} Palorról ("character"), illetve Palor ${c.name}-ról ("palor"), egy-egy mondat, üres, ha semmi újat. "mood": egy-három szó, milyen hangulatban volt a beszélgetés végén ${c.name} ("character") és Palor ("palor"). Csak JSON, magyarul: {"title":"rövid cím","summary":"1-2 mondat","character_memory":"egy-két mondat ${c.name} szemszögéből","palor_memory":"egy-két mondat Palor szemszögéből","level_delta":-1|0|1,"reason":"miért változott (vagy nem) ${c.name} viszonya Palorhoz","promises":[{"by":"palor|character","text":"...","due":null}],"kept":[],"dropped":[],"shared_history":"...",${RICH_FIELDS_JSON},"learned":{"character":"","palor":""},"mood":{"character":"","palor":""}}`;
     // What the shared history grows from: the previous version, or (first time) the earlier talks.
     const prevShared=sharedHistoryOf(c.id);
     const base=prevShared||pastTalks(c.id,9).filter(r=>r.id!==id&&r.status==='closed'&&(r.summary.summary||r.summary.title)).slice(0,8).reverse().map(r=>`${r.world_day}: ${clip(r.summary.summary||r.summary.title,300)}`).join('\n');
-    const chemistry=one('SELECT coalesce(sum(m.spark),0) n FROM play_line_meta m JOIN play_lines l ON l.id=m.line_id WHERE l.conversation_id=?',id).n;
+    const chemistry=one('SELECT coalesce(sum(m.spark),0) n FROM play_line_meta m JOIN active_play_lines l ON l.id=m.line_id WHERE l.conversation_id=?',id).n;
     const wasDate=!!one('SELECT 1 FROM play_dates WHERE conversation_id=?',id);
     const wd=weekdayOf(conv.world_day);
-    const data=await w.ask(system,`(A beszélgetés napja: ${conv.world_day}, ${WEEKDAYS[wd]}.)\n`+'KORÁBBI KÖZÖS MÚLT:\n'+(base||'még nincs, ez az első beszélgetésük')+'\n\n'+(listed.length?'NYITOTT TERVEK:\n'+listed.map((t,i)=>`${i+1}. ${t.promised_by==='palor'?'Palor':c.name}: ${t.text}${t.due_day?' ('+t.due_day+')':''}`).join('\n')+'\n\n':'')+ls.map(l=>(l.speaker==='palor'?'Palor':c.name)+': '+l.text).join('\n')+(chemistry?`\n\n(${c.name} reakciói a beszélgetés során összesen: ${chemistry>0?'+':''}${chemistry}; ezt is vedd figyelembe a level_delta-nál.)`:'')+(wasDate?'\n\n(Ez egy megbeszélt randevú volt.)':''),950)||{};
+    const data=await w.ask(system,`(A beszélgetés napja: ${conv.world_day}, ${WEEKDAYS[wd]}.)\n`+'KORÁBBI KÖZÖS MÚLT:\n'+(base||'még nincs, ez az első beszélgetésük')+'\n\n'+(listed.length?'NYITOTT TERVEK:\n'+listed.map((t,i)=>`${i+1}. ${t.promised_by==='palor'?'Palor':c.name}: ${t.text}${t.due_day?' ('+t.due_day+')':''}`).join('\n')+'\n\n':'')+ls.map(l=>(l.speaker==='palor'?'Palor':isGuestLine(l)?l.speaker_name:c.name)+': '+l.text).join('\n')+(chemistry?`\n\n(${c.name} reakciói a beszélgetés során összesen: ${chemistry>0?'+':''}${chemistry}; ezt is vedd figyelembe a level_delta-nál.)`:'')+(wasDate?'\n\n(Ez egy megbeszélt randevú volt.)':''),1200)||{};
     let delta=Math.max(-1,Math.min(1,Math.round(Number(data.level_delta)||0)));
     // Owner decision 2026-11-11: at most three steps closer per character per world day.
     const risesToday=all("SELECT summary_json FROM play_conversations WHERE character_id=? AND world_day=? AND status='closed' AND rewound_at IS NULL AND id<>?",c.id,conv.world_day,id).filter(r=>{try{return JSON.parse(r.summary_json||'{}').level_delta>0;}catch{return false;}}).length;
@@ -1143,6 +1407,11 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const summary={title:clip(data.title,120)||'Beszélgetés Palorral',summary:clip(data.summary,600),character_memory:clip(data.character_memory,1000),palor_memory:clip(data.palor_memory,1000),level_delta:delta,reason:clip(data.reason,300),...(heldBack?{held_back:true}:{})};
     // An empty answer must not wipe what he already remembered of their shared past.
     const sharedNow=clip(data.shared_history,1500)||prevShared;if(sharedNow)summary.shared_history=sharedNow;
+    Object.assign(summary,richFields(data,[c.id,pid].filter(Boolean)));
+    const pair=v=>v&&typeof v==='object'?{character:clip(v.character,400),palor:clip(v.palor,400)}:null;
+    const learned=pair(data.learned),mood=pair(data.mood);
+    if(learned&&(learned.character||learned.palor))summary.learned=learned;
+    if(mood&&(mood.character||mood.palor))summary.mood={character:clip(mood.character,60),palor:clip(mood.palor,60)};
     // Milestones: crossing into friend / confidant / lover is announced to the player.
     const before=pid?w.levelOf(c.id,pid)??0:0,after=Math.max(-2,Math.min(5,before+delta));
     const MILESTONES={3:'barátok lettetek',4:'bizalmas viszonyba kerültetek',5:'szerelmi kapcsolat alakult ki köztetek'};
@@ -1158,6 +1427,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       if(summary.character_memory)w.remember(c.id,summary.character_memory,eventId);
       if(summary.palor_memory&&pid)w.remember(pid,summary.palor_memory,eventId);
       if(delta&&pid)w.setLevel(c.id,pid,after,{reason:summary.reason||'Beszélgetés',actor:'play',eventId});
+      meetingSaved(eventId);
       w.resolveThreads(listed,{kept:data.kept,dropped:data.dropped});
       w.addThreads(c.id,id,data.promises,conv.world_day);
     });
@@ -1172,7 +1442,10 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const cast=[];
     for(const c of w.meetable()){const pl=w.placesOf(c.id),f=figures(c.id).length;
       // Without a drawn figure he stands in scenes as a photo figure (when one fits).
-      cast.push({id:c.id,name:c.name,figures:f,stand_in:!f&&!!(await director.standIn(c.id).catch(()=>null)),places:pl.length,has_home:pl.some(p=>p.role==='home'),photos:one("SELECT count(*) n FROM depictions d JOIN active_media m ON m.id=d.media_id AND m.kind='image' WHERE d.character_id=?",c.id).n});}
+      // Approved reference pictures in his latest canon (owner 2026-11-19: show who has none yet).
+      let refs=[];try{refs=JSON.parse(one('SELECT references_json FROM canon WHERE character_id=? ORDER BY rowid DESC LIMIT 1',c.id)?.references_json||'[]');}catch{}
+      cast.push({id:c.id,name:c.name,figures:f,stand_in:!f&&!!(await director.standIn(c.id).catch(()=>null)),places:pl.length,has_home:pl.some(p=>p.role==='home'),photos:one("SELECT count(*) n FROM depictions d JOIN active_media m ON m.id=d.media_id AND m.kind='image' WHERE d.character_id=?",c.id).n,
+        references:refs.length,reference_faces:refs.filter(r=>r.role==='face').length,reference_bodies:refs.filter(r=>r.role==='body').length});}
     cast.sort((a,b)=>(a.figures>0)-(b.figures>0)||a.name.localeCompare(b.name,'hu'));
     // Who to give a Szellemprofil next: people Palor knows, with the most pictures, no profile yet.
     const pid=w.palor()?.id,castIds=new Set(cast.map(c=>c.id));
@@ -1253,8 +1526,18 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(p==='/api/play/items'&&m==='GET'){const nodes=await tree();return json({items:itemsView(nodes,currentNode(nodes)?.id)}),true;}
     if(p==='/api/play/items'&&m==='POST')return json({items:await itemAction(null,body)}),true;
     if((x=p.match(/^\/api\/play\/items\/([0-9a-f-]{36})$/))&&m==='POST')return json({items:await itemAction(x[1],body)}),true;
+    if((x=p.match(/^\/api\/play\/conversations\/([a-f0-9-]{36})\/turn$/i))&&m==='POST')return json(await turnRevisions.revise(x[1],body)),true;
     if(p==='/api/play/talk'&&m==='POST')return json(await talk(body)),true;
     if(p==='/api/play/group-talk'&&m==='POST')return json(await groupTalk(body)),true;
+    // Scene guests (2026-11-18): join, profile picture, leave, save as a real character.
+    if(p==='/api/play/guests'&&m==='POST')return json(await addGuest(body||{})),true;
+    if((x=p.match(/^\/api\/play\/guests\/([0-9a-f-]{36})\/image$/))&&m==='GET'){
+      const g=guestRow(x[1]),file=new URL(req.url,'http://x').searchParams.get('bare')==='1'?g.bare_file:g.image_file;if(!file||!res)throw fail('Nincs profilkép.',404);
+      const bytes=await fs.readFile(path.join(guestDir(),path.basename(file)));res.writeHead(200,{'Content-Type':file.endsWith('.png')?'image/png':'image/jpeg','Cache-Control':'private, max-age=86400','X-Content-Type-Options':'nosniff'});res.end(bytes);return true;}
+    if((x=p.match(/^\/api\/play\/guests\/([0-9a-f-]{36})\/leave$/))&&m==='POST')return json(leaveGuest(x[1])),true;
+    if((x=p.match(/^\/api\/play\/guests\/([0-9a-f-]{36})\/shirtless$/))&&m==='POST')return json(await addShirtless(x[1])),true;
+    if((x=p.match(/^\/api\/play\/guests\/([0-9a-f-]{36})\/pictures$/))&&m==='POST')return json(renewPictures(x[1])),true;
+    if((x=p.match(/^\/api\/play\/guests\/([0-9a-f-]{36})\/save$/))&&m==='POST')return json(await saveGuest(x[1])),true;
     if(p==='/api/play/messages'&&m==='GET')return json({messages:messages()}),true;
     // The play screen's once-a-minute check: just the number, not the whole overview.
     // Waiting (next day part) and sleeping (next morning) move the game clock on; the world
@@ -1292,8 +1575,9 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       return json({filename:'elo-vilag-tortenet.md',markdown:md}),true;
     }
     if((x=p.match(/^\/api\/play\/relationship\/([0-9a-f-]{36})$/))&&m==='GET')return json(relationshipDetail(x[1])),true;
-    if((x=p.match(/^\/api\/play\/talk-log\/([0-9a-f-]{36})$/))&&m==='GET')return json(talkLog(x[1])),true;
-    if((x=p.match(/^\/api\/play\/talk-log\/lines\/([0-9a-f-]{36})$/))&&m==='GET')return json({lines:talkLines(x[1])}),true;
+    if((x=p.match(/^\/api\/play\/known-character\/([0-9a-f-]{36})$/))&&m==='GET')return json(knownCharacter(x[1])),true;
+    if((x=p.match(/^\/api\/play\/talk-log\/([0-9a-f-]{36})$/))&&m==='GET')return json(wrapStatus(()=>talkHistory.timeline(x[1]))),true;
+    if((x=p.match(/^\/api\/play\/talk-log\/talk\/([0-9a-f-]{36})$/))&&m==='GET')return json(wrapStatus(()=>talkHistory.talk(x[1]))),true;
     if(p==='/api/play/invite'&&m==='POST')return json(await invite(body)),true;
     if((x=p.match(/^\/api\/play\/invitations\/([0-9a-f-]{36})$/))&&m==='POST')return json(answerInvitation(x[1],body.accept)),true;
     if(p==='/api/play/scenes/scan'&&m==='POST')return json(await needScenes().scan(w.meetable().map(c=>c.id))),true;
@@ -1315,5 +1599,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if((x=p.match(/^\/api\/play\/conversations\/([0-9a-f-]{36})\/end$/))&&m==='POST')return json(await end(x[1])),true;
     return false;
   }
-  return {handle,overview,place,travel,talk,end,positions,prompts:a=>needScenes().prompts(a),scenes,storyOps:stories.ops,townOps};
+  function guestGenerationContext(gid){const guest=guestRow(gid);if(guest.left_at)throw fail('Ez a vendégszereplő már elment.',409);return {id:guest.id,name:guest.name,prompt:'Photorealistic photograph of one adult man, fully clothed in his everyday clothes. '+GUEST_FRAMING+' '+(guest.portrait_prompt||guest.description)};}
+  async function saveGeneratedGuest(gid,bytes,provenance){const guest=guestRow(gid);if(guest.left_at)throw fail('Ez a vendégszereplő már elment.',409);await fs.mkdir(guestDir(),{recursive:true});const folderStat=await fs.lstat(guestDir()),relative=path.relative(await fs.realpath(dataDir),await fs.realpath(guestDir()));if(folderStat.isSymbolicLink()||!folderStat.isDirectory()||relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative)||!/^[a-f0-9-]{36}$/i.test(gid)||!/^[a-f0-9-]{36}$/i.test(provenance.run_id))throw fail('A vendégkép tárolója nem biztonságos.',409);const name=gid+'-sogni-'+provenance.run_id+(bytes[0]===0xff?'.jpg':'.png'),file=path.join(guestDir(),name);try{await fs.writeFile(file,bytes,{flag:'wx'});}catch(error){if(error.code!=='EEXIST')throw error;const stat=await fs.lstat(file);if(stat.isSymbolicLink()||!stat.isFile()||!bytes.equals(await fs.readFile(file)))throw error;}run("UPDATE play_guests SET image_status='done',bare_status='off',image_file=?,image_note=? WHERE id=?",name,'Sogni '+provenance.model+' · '+provenance.run_id,gid);return {guest_id:gid,image_file:name,canon_changed:false};}
+  return {handle,overview,place,travel,talk,end,positions,prompts:a=>needScenes().prompts(a),scenes,storyOps:stories.ops,townOps,guestGenerationContext,saveGeneratedGuest};
 }

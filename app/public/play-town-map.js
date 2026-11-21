@@ -8,6 +8,8 @@
 // Inline SVG from code: no tiles, no outside requests; the same town always looks the same. The
 // drawing reaches beyond the 1200×720 frame so a wider screen shows more town, not empty bands.
 
+import {t} from './i18n.js';
+import {townLabelLayout} from './play-map-layout.js';
 export const TM_W=1200,TM_H=720;
 const X0=-700,Y0=-360,XW=TM_W+1400,YH=TM_H+720;// drawn area around the frame
 const fold=s=>String(s||'').normalize('NFD').replace(/\p{M}/gu,'').toLocaleLowerCase('hu').trim();
@@ -154,14 +156,17 @@ export function townMapSvg({town,pins,saved,image,slot,esc,ariaLabel,editing=fal
   // Pins without a saved place on a picture start where the drawn plan would put them, scaled.
   const free=Object.fromEntries(Object.entries(saved||{}));const {net,pos:auto}=layoutPins(town,pins,free);
   const pos=new Map([...auto].map(([id,[x,y]])=>[id,saved?.[id]?[x,y]:[x,Math.round(y*H/TM_H)]]));
+  const labels=townLabelLayout(pins,pos,{width:TM_W,height:H});
   const bg=image?`<rect x="${X0}" y="${Y0}" width="${XW}" height="${H+720}" fill="#2a2430"/><image href="${esc(image)}" x="0" y="0" width="${TM_W}" height="${H}" preserveAspectRatio="none"/>${slot===3?`<rect width="${TM_W}" height="${H}" fill="#0b1030" opacity=".3"/>`:''}`:ground(net,{slot,town,pins:[...pos.values()]});
-  const pin=p=>{const [x,y]=pos.get(p.id),tone=KIND_TONE[p.kind]||KIND_TONE.place,name=p.name.length>24?p.name.slice(0,23)+'…':p.name,w=Math.max(64,name.length*7.4+22);
-    return `<g class="tm-pin${p.here?' tm-here':''}${editing?' tm-drag':''}" data-town-pin="${esc(p.id)}" transform="translate(${x},${y})" role="button" tabindex="0" aria-label="${esc(p.name)}${p.count?` — ${p.count}`:''}">
-      <title>${esc(p.name)}${p.people?.length?` — ${esc(p.people.slice(0,6).join(', '))}${p.people.length>6?` +${p.people.length-6}`:''}`:''}</title>
+  const pin=p=>{const [x,y]=pos.get(p.id),tone=KIND_TONE[p.kind]||KIND_TONE.place,label=labels.get(p.id),name=label.name,w=label.width,dx=label.x+w/2-x,dy=label.y-y;
+    const presence=t('play.peopleHereCount',{count:p.count||0}),rooms=t('play.roomsCount',{count:p.rooms||0});
+    return `<g class="tm-pin${p.here?' tm-here':''}${editing?' tm-drag':''}" data-town-pin="${esc(p.id)}" transform="translate(${x},${y})" role="button" tabindex="0" aria-label="${esc(p.name+' — '+presence+(p.rooms?' · '+rooms:''))}">
+      <title>${esc(p.name)}</title>
       ${p.here?'<circle r="34" class="tm-ring"/>':''}<g filter="url(#tm-shadow)"><circle r="22" fill="#fff"/><circle r="18.5" fill="${tone}" class="tm-dot"/></g><text y="7" text-anchor="middle" font-size="19" class="tm-icon">${KIND_ICON[p.kind]||KIND_ICON.place}</text>
-      <rect x="${(-w/2).toFixed(1)}" y="27" width="${w.toFixed(1)}" height="21" rx="10.5" class="tm-label-bg"/><text y="42" text-anchor="middle" class="tm-label">${esc(name)}</text>
-      ${p.rooms?`<g transform="translate(-20,-18)"><circle r="9" class="tm-rooms-bg"/><text y="4" text-anchor="middle" class="tm-rooms">${p.rooms}</text></g>`:''}
-      ${p.count?`<g transform="translate(21,-19)">${p.avatars[0]?`<clipPath id="tmc-${esc(p.id)}"><circle r="13"/></clipPath><image href="${esc(p.avatars[0])}" x="-13" y="-13" width="26" height="26" clip-path="url(#tmc-${esc(p.id)})" preserveAspectRatio="xMidYMid slice"/><circle r="13" fill="none" stroke="#ffd166" stroke-width="2.5"/>`:''}<circle cx="11" cy="-10" r="9" class="tm-count-bg"/><text x="11" y="-6" text-anchor="middle" class="tm-count">${p.count}</text></g>`:''}
+      ${Math.abs(dx)>1||dy!==27?`<path d="M0 0L${dx.toFixed(1)} ${(dy+10).toFixed(1)}" fill="none" stroke="${tone}" stroke-width="2" opacity=".7"/>`:''}
+      <g class="tm-pin-label" transform="translate(${dx.toFixed(1)},${dy.toFixed(1)})"><rect x="${(-w/2).toFixed(1)}" width="${w.toFixed(1)}" height="21" rx="10.5" class="tm-label-bg"/><text y="15" text-anchor="middle" class="tm-label">${esc(name)}</text></g>
+      ${p.rooms?`<g class="tm-rooms-badge" transform="translate(-20,-18)" role="img" aria-label="${esc(rooms)}"><title>${esc(rooms)}</title><circle r="9" class="tm-rooms-bg"/><text y="4" text-anchor="middle" class="tm-rooms">${p.rooms}</text></g>`:''}
+      ${p.count?`<g class="tm-people-badge" transform="translate(21,-19)" role="img" aria-label="${esc(presence)}"><title>${esc(presence)}</title>${p.avatars?.[0]?`<clipPath id="tmc-${esc(p.id)}"><circle r="13"/></clipPath><image href="${esc(p.avatars[0])}" x="-13" y="-13" width="26" height="26" clip-path="url(#tmc-${esc(p.id)})" preserveAspectRatio="xMidYMid slice"/><circle r="13" fill="none" stroke="#ffd166" stroke-width="2.5"/>`:''}<circle cx="11" cy="-10" r="9" class="tm-count-bg"/><text x="11" y="-6" text-anchor="middle" class="tm-count">${p.count}</text></g>`:''}
     </g>`;};
   const c=net.cross[Math.floor(net.cross.length/2)],px=c.x-70,palor=[px,net.yAt(px)];
   // Filters are always defined: a pin pointing to a missing filter would not be drawn at all.

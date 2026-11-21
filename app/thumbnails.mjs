@@ -5,7 +5,7 @@
 // Videos, small originals and pictures the converter cannot read are answered with a redirect
 // to the original (/media/<id>), so a preview never hides a picture.
 import {promises as fs} from 'node:fs';
-import {spawn} from 'node:child_process';
+import {imageDecoderPool} from './windows-image-decoder.mjs';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 
@@ -15,35 +15,9 @@ const SMALL=96*1024,JOB_TIMEOUT=30_000,IDLE=60_000;
 // Converts with long-lived PowerShell/System.Drawing workers (no install; one process start
 // per worker instead of one per picture).
 export function powershellConverter({workers=2}={}){
-  const queue=[],pool=[];let seq=0,scriptPromise=null,starting=0;
-  const script=()=>scriptPromise??=fs.readFile(new URL('./thumb-worker.ps1',import.meta.url),'utf8');
-  const ascii=s=>JSON.stringify(s).replace(/[\u007f-￿]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
-  async function startWorker(){
-    const w={busy:null,buffer:'',idle:null};
-    w.child=spawn('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(await script(),'utf16le').toString('base64')],{windowsHide:true,stdio:['pipe','pipe','ignore']});
-    w.child.stdin.on('error',()=>{});
-    const fail=()=>{const i=pool.indexOf(w);if(i>=0)pool.splice(i,1);clearTimeout(w.idle);if(w.busy){clearTimeout(w.busy.timer);w.busy.reject(Error('Thumbnail worker stopped.'));w.busy=null;}pump();};
-    w.child.on('error',fail);w.child.on('exit',fail);
-    w.child.stdout.setEncoding('ascii');
-    w.child.stdout.on('data',d=>{w.buffer+=d;let n;while((n=w.buffer.indexOf('\n'))>=0){const line=w.buffer.slice(0,n).trim();w.buffer=w.buffer.slice(n+1);const job=w.busy;if(!job||!line.startsWith(job.id+' '))continue;clearTimeout(job.timer);w.busy=null;line.endsWith(' ok')?job.resolve():job.reject(Error('The picture could not be converted.'));pump();}});
-    pool.push(w);return w;
-  }
-  function assign(w,job){
-    clearTimeout(w.idle);w.busy=job;
-    job.timer=setTimeout(()=>{w.child.kill();},JOB_TIMEOUT);
-    w.child.stdin.write('{"id":'+job.id+',"src":'+ascii(job.src)+',"dst":'+ascii(job.dst)+',"edge":'+job.edge+'}\n');
-  }
-  function pump(){
-    for(const w of pool){if(!queue.length)break;if(!w.busy)assign(w,queue.shift());}
-    for(const w of pool)if(!w.busy){clearTimeout(w.idle);w.idle=setTimeout(()=>w.child.kill(),IDLE);w.idle.unref?.();}
-    if(queue.length&&pool.length+starting<workers){starting++;startWorker().then(()=>{starting--;pump();},e=>{starting--;for(const job of queue.splice(0))job.reject(e);});}
-  }
-  const convert=(src,dst,edge)=>{
-    if(process.platform!=='win32')return Promise.reject(Error('Thumbnails need the Windows image decoder.'));
-    return new Promise((resolve,reject)=>{queue.push({id:++seq,src,dst,edge,resolve,reject});pump();});
-  };
-  convert.close=()=>{for(const job of queue.splice(0))job.reject(Error('Closed.'));for(const w of pool.splice(0)){clearTimeout(w.idle);w.child.kill();}};
-  return convert;
+  const decoder=imageDecoderPool({workers,idle:60000});
+  const convert=(src,dst,edge)=>decoder({src,dst,edge}).then(()=>{});
+  convert.close=decoder.close;return convert;
 }
 
 export function installThumbnails({dataDir,asset,safeFile,convert=powershellConverter()}){

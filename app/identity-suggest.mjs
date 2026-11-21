@@ -170,5 +170,14 @@ export function installIdentitySuggest({db,one,all,run,transaction,safeFile,fail
     if(p==='/api/identity/feedback'&&req.method==='POST')return json(feedback(body)),true;
     return false;
   }
-  return {handle,startScan,status,report,feedback,faceReferences,close:()=>{job.stopped=true;analyse.close?.();},wait:async()=>{while(job.running)await new Promise(r=>setTimeout(r,10));}};
+  async function checkGenerated(characterId,mediaId){
+    const result={method,body_verdict:'unknown',face_verdict:'uncertain',canon_changed:false};
+    if(job.running||analyse.available&&!analyse.available())return {...result,reason:'IDENTITY_UNAVAILABLE'};
+    const refs=faceReferences().filter(ref=>ref.character_id===characterId),media=one("SELECT * FROM active_media WHERE id=? AND kind='image'",mediaId);if(!refs.length||!media)return {...result,reason:'FACE_REFERENCE_MISSING'};
+    // Refresh only these approved references; never infer from an unrelated face
+    // in a group reference. Cropped references must contain exactly one face.
+    const vectors=[];for(const ref of refs){const m=one('SELECT * FROM active_media WHERE id=?',ref.media_id);if(!m)return {...result,reason:'REFERENCE_UNAVAILABLE'};const {key}=await fileKey(m);if(cachedKey(m.id)!==key)await runScan([m]);const vector=referenceVector(ref);if(!vector)return {...result,reason:'AMBIGUOUS_REFERENCE'};vectors.push(vector);}
+    try{const analysed=await analyse(await safeFile(media)),faces=(analysed.faces||[]).filter(face=>face.px>=MIN_FACE_PX&&face.score>=MIN_DET);if(faces.length!==1)return {...result,reason:faces.length?'MULTIPLE_FACES':'NO_FACE'};const vector=toVector(Buffer.from(faces[0].embedding,'base64')),score=Math.max(...vectors.map(ref=>cosine(vector,ref)));return {...result,face_verdict:score>=SUGGEST?'matches':'mismatch',score:round(score),threshold:SUGGEST};}catch{return {...result,reason:'IDENTITY_UNAVAILABLE'};}
+  }
+  return {handle,startScan,status,report,feedback,faceReferences,checkGenerated,close:()=>{job.stopped=true;analyse.close?.();},wait:async()=>{while(job.running)await new Promise(r=>setTimeout(r,10));}};
 }

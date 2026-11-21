@@ -1,6 +1,7 @@
 // Developer tools (2026-11-12): one place to see what the running program is doing, so
 // debugging no longer depends on guessing. Everything here is local (loopback desktop only,
-// never the mobile listener) and read-only, except the explicit "restart everything" action.
+// never the mobile listener) and read-only, except diagnostic writes and explicit restart.
+// The phone may POST only numeric task measurements through its authenticated CSRF proxy.
 //
 //   GET  /api/dev/doctor[?deep=1]       checks: process, code freshness, database, disks,
 //                                       media root, mobile listener, Tailscale, startup tasks
@@ -15,6 +16,7 @@ import {appendFileSync,existsSync,mkdirSync,readFileSync,readdirSync,renameSync,
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {Worker} from 'node:worker_threads';
+import {saveMeasurement} from './ux-measurements.mjs';
 
 // quick_check, foreign keys and the largest tables, on a worker thread with a read-only
 // connection (WAL readers never block the program's writer).
@@ -282,6 +284,7 @@ export function installDevTools({projectRoot,dataDir,mediaRoot,db,errorLog,reque
 
   async function handle({p,req,url,body,json}){
     if(!p.startsWith('/api/dev/'))return false;
+    if(p==='/api/dev/ux-measurements'&&req.method==='POST'){json(saveMeasurement(dataDir,body),201);return true;}
     if(p==='/api/dev/doctor'&&req.method==='GET'){json(await doctor({deep:url.searchParams.get('deep')==='1'}));return true;}
     if(p==='/api/dev/log'&&req.method==='GET'){
       const kind=url.searchParams.get('kind')||'errors',limit=Math.min(500,Math.max(1,Number(url.searchParams.get('limit'))||100));

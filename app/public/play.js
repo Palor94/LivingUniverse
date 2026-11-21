@@ -1,3 +1,8 @@
+import {openCommandPalette,readFavouritePlaces,quickPlaces} from './command-palette.js';
+import {openPictureOrder} from './picture-order.js';
+import {openAssetGeneration} from './asset-generation.js';
+import {uploadImage,uploadProgress} from './upload-image.js';
+import {cancelUndoWindows,confirmBox,askText,ask,undoWindow} from './interactions.js';
 // "Játék" screen, full screen. Three levels like location-based browser games:
 // world map (towns) → town view (its places as picture cards, with who is where) →
 // place scene (background photo, only the people actually there, talk). Ending a
@@ -9,18 +14,33 @@ import {roadTransition,playStory,roadsideChoice} from './play-story.js';
 import {townMapSvg,toMap,KIND_ICON} from './play-town-map.js';
 import {icon} from './play-icons.js';
 import {installPlayDebug} from './play-debug.js';
+import {decodedImage,updateScene,memoizedRead} from './play-scene.js';
+import {bindGrowingInput,openPersonCard,previousConversationHtml} from './play-dialog.js';
+import {preferredTravel,rememberedTravel,travelPayload,travelOptionsDialog,tripChoiceNotice} from './play-travel.js';
 
 // Schematic town positions: real north/south/east/west order, close towns spread apart.
 const SLOT_ICON=['🌅','☀️','🌇','🌙'];
 
-export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),phone=false}){
+export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),phone=false,studio=false,studioView=()=>({mode:'map'}),openStudio=()=>{},openScreen=async()=>{}}){
+  const turnIntents=new Map();
   let settings={adult:false,text_speed:'normal'};
+  const topHelp=(key,vars)=>{const text=esc(t(key,vars));return `title="${text}" aria-label="${text}"`;};
+  const unreadBadge=count=>count?` <b class="play-menu-badge" ${topHelp('play.top.unread',{count})}>${count}</b>`:'';
+  function paintUnread(count){
+    const unread=count?t('play.top.unread',{count}):t('play.top.noUnread');
+    for(const [selector,key] of [['.play-menu:not(.play-wait-menu)>summary','play.top.menu'],['.play-top [data-play-mode="messages"]','play.top.messages']]){
+      const parent=$(selector);if(!parent)continue;
+      parent.querySelector('.play-menu-badge')?.remove();parent.insertAdjacentHTML('beforeend',unreadBadge(count));
+      parent.title=t(key,{unread});parent.setAttribute('aria-label',t(key,{unread}));
+    }
+  }
   let synced=false,mode='map',data=null,current=null,townId=null,mapView='visual',talk=null,talkCharacter=null,talkChannel='in_person',busy=false,root=null,drive=true;
+  let spatialView={mode:'map',townId:null};
   // Debug panel (F9) and trail context: what the panel and a bug report show about this screen.
-  const debugPanel=installPlayDebug({esc,api,toast,phone});
+  const debugPanel=installPlayDebug({esc,api,toast,phone:phone||studio});
   // "pozíció" is where the server keeps Palor (a town id means its street); "megnyitott hely" is
   // the place screen last shown, which can differ after stepping out.
-  window.__luTrail?.setContext('play',()=>({nézet:mode,pozíció:(data?.nodes||[]).find(n=>n.id===data?.node_id)?.name||data?.node_id||null,pozíció_id:data?.node_id||null,megnyitott_hely:mode==='place'?(current?.node?.path||current?.node?.name||null):null,hely_id:mode==='place'?current?.node?.id||null:null,település:townId,beszélgetés:talk?.id||null,beszélgetőtárs:talkCharacter?.name||null,csatorna:talkCharacter?talkChannel:null,foglalt:busy||null,idő:data?.clock?.time||null,nap:data?.clock?.day??null}));
+  if(!studio)window.__luTrail?.setContext('play',()=>({nézet:mode,pozíció:(data?.nodes||[]).find(n=>n.id===data?.node_id)?.name||data?.node_id||null,pozíció_id:data?.node_id||null,megnyitott_hely:mode==='place'?(current?.node?.path||current?.node?.name||null):null,hely_id:mode==='place'?current?.node?.id||null:null,település:townId,beszélgetés:talk?.id||null,beszélgetőtárs:talkCharacter?.name||null,csatorna:talkCharacter?talkChannel:null,foglalt:busy||null,idő:data?.clock?.time||null,nap:data?.clock?.day??null}));
   const img=id=>id?`/media/${encodeURIComponent(id)}`:'';
   // Pictures only: a cached preview of the given width (videos and unreadable pictures are redirected to the original).
   const pic=(id,w=320)=>id?`/thumb/${encodeURIComponent(id)}?w=${w}`:'';
@@ -46,6 +66,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   function placeNotices(){
     const box=document.getElementById('play-notices'),bar=document.querySelector('.play-top');
     if(box&&bar)box.style.top=Math.max(8,Math.round(bar.getBoundingClientRect().bottom)+8)+'px';
+    const pill=document.querySelector('.play-talk-pill');if(pill)document.querySelector('.play')?.style.setProperty('--talk-pill-space',Math.ceil(pill.getBoundingClientRect().height)+28+'px');
   }
   const showNotice=(key,text,action=null)=>{notices.set(key,{text,action});paintNotices();};
   const clearNotice=key=>{if(notices.delete(key))paintNotices();};
@@ -74,6 +95,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     setTimeout(()=>{const p=talkCharacter&&current?.people?.find(x=>x.id===talkCharacter.id);const bare=(p&&closeUp(p)?'close':p&&undressed(p)?'bare':'');if(bare!==lastBare){lastBare=bare;refreshStage();}},0);
     return result;
   }
+  async function commands(){if(studio)return;if(!data||!document.body.classList.contains('play-mode')){data=await api('/api/play');buildIndex();}const places=data.nodes.filter(node=>node.placed!==false&&node.location_id&&!node.passage&&node.place_kind!=='vehicle');return openCommandPalette({places,people:data.people,onError:error=>toast(error.message,true),screens:phone?[]:['play','characters','location-catalogue','image-workshop'].map(id=>({id,label:t('view.'+id)})),onScreen:openScreen,onPlace:async id=>{if(!document.body.classList.contains('play-mode'))await openScreen('play');await openPlace(id,true);}});}
   // Tree helpers over the overview data, indexed once per load (the tree has ~150 places).
   let index={byId:new Map(),children:new Map(),under:new Map()};
   function buildIndex(){
@@ -87,6 +109,11 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   const under=id=>{if(!index.under.has(id)){const out=[id];for(let i=0;i<out.length;i++)for(const c of kids(out[i]))out.push(c.id);index.under.set(id,out);}return index.under.get(id);};
   const peopleIn=id=>{const locs=new Set(under(id).map(x=>node(x)?.location_id).filter(Boolean));return data.people.filter(p=>p.location_id&&locs.has(p.location_id));};
   const peopleAt=n=>n.location_id?data.people.filter(p=>p.location_id===n.location_id):[];
+  const travelHints=installTravelHints({active:()=>!!root&&document.body.classList.contains('play-mode')&&!doorsEditing,describe:target=>{
+    // Only where it leads and how long it takes; no list of who is there (owner, 2026-11-20,
+    // "Felesleges részletezés": the long list covered half the scene).
+    return target.getAttribute('title')||target.querySelector('title')?.textContent||target.getAttribute('aria-label')||'';
+  }});
   // Streets and stairwells are walked through, not visited (2026-11-14): never a pin or an exit.
   // Cars are vehicles, not rooms (owner, 2026-11-14): no pin, door or search hit; a friend's car
   // is offered in the travel window instead.
@@ -103,15 +130,19 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   // anything that moves time or Palor loads it again. Settings are read once, then kept current.
   let settingsLoaded=false,aiWarned=false;
   async function render(host,{reuse=false}={}){
+    cancelUndoWindows();
     root=host;
     if(!reuse||!data){const [d,s]=await Promise.all([api('/api/play'),settingsLoaded?Promise.resolve(settings):api('/api/play/settings').catch(()=>settings)]);data=d;settings=s;settingsLoaded=true;buildIndex();}
     // On opening, the screen shows where Palor really is: inside a place → that place; on a
     // town's street → that town (or the map, if it was the map). A remembered view of another
     // town is not where he is.
-    if(!synced){synced=true;const n=node(data.node_id),tw=n?townOf(n.id):null;
+    if(studio){synced=true;const target=studioView();mode=target.mode||'map';townId=target.townId||null;if(target.placeId){current=await api('/api/play/place/'+encodeURIComponent(target.placeId));mode='place';}townEditing=mode==='town';placeTools=doorsEditing=mode==='place';}
+    if(!synced){synced=true;mode=spatialView.mode;townId=spatialView.townId;current=null;const n=node(data.node_id),tw=n?townOf(n.id):null;
+      if(!n){mode='map';townId=null;}
       if(n&&['map','town'].includes(mode)){
-        if(n.location_id&&!(tw&&n.id===tw.id)){try{current=await api('/api/play/place/'+encodeURIComponent(n.id));mode='place';}catch{}}
-        else if(tw&&n.id===tw.id&&(mode==='town'||!townId)){if(mode==='town')townId=tw.id;}
+        if(n.location_id&&!(tw&&n.id===tw.id)){try{current=await api('/api/play/place/'+encodeURIComponent(n.id));mode='place';}catch{mode=tw&&spatialView.mode==='town'?'town':'map';townId=tw?.id||null;}}
+        else if(tw){if(mode==='town')townId=tw.id;}
+        else{mode='map';townId=null;}
       }
       // Tailscale down (2026-11-13): Grok, ChatGPT and the phone cannot reach the program; say so
       // while playing too, not only on the status page.
@@ -119,51 +150,62 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       // A face-to-face talk that was open before the page was reloaded continues.
       const open=data.open_conversation;
       if(open&&mode==='place'&&current&&!talkCharacter){const person=(current.people||[]).find(p=>p.id===open.character_id);
-        if(person){try{const v=await api('/api/play/conversations/'+open.id);if(v&&v.status==='open'&&v.mode!=='group'&&(!v.channel||v.channel==='in_person')){talk=v;talkCharacter=person;talkChannel='in_person';}}catch{}}}
+        if(person){try{const v=await api('/api/play/conversations/'+open.id);if(v&&v.status==='open'&&v.mode!=='group'&&(!v.channel||v.channel==='in_person')){talk=v;talkCharacter=person;talkChannel='in_person';conversationContext=await participantDetails(person.id).catch(()=>null);}}catch{}}}
     }
-    document.body.classList.add('play-mode');
-    const here=node(data.node_id),slot=data.clock.slot_index;
+    if(!studio)document.body.classList.add('play-mode');
+    const here=node(data.node_id),slot=data.clock.slot_index;let favourites=[];try{favourites=readFavouritePlaces(localStorage);}catch{}const fast=quickPlaces(data.nodes,{recent:data.recent||[],favourites,current:data.node_id});
     // Palor's car stays where he parked it; driving moves it, walking leaves it there.
     const car=(data.items||[]).find(i=>i.kind==='vehicle');
-    const crumbs=[`<button class="play-crumb" data-play-mode="map">${t('play.map')}</button>`];
+    const crumbs=[`<button class="play-crumb" data-play-mode="map" ${topHelp('play.top.map')}>${t('play.map')}</button>`];
     const town=mode==='town'?node(townId):mode==='place'&&current?townOf(current.node.id):null;
-    if(town)crumbs.push(`<button class="play-crumb" data-play-town="${esc(town.id)}">${esc(label(town))}</button>`);
+    if(town)crumbs.push(`<button class="play-crumb" data-play-town="${esc(town.id)}" ${topHelp('play.top.town',{place:label(town)})}>${esc(label(town))}</button>`);
     if(mode==='place'&&current&&current.node.id!==town?.id)crumbs.push(`<span class="play-crumb-now">${esc(label(current.node))}</span>`);
-    host.innerHTML=`<div class="play play-slot-${slot}">
+    const markup=`<div class="play play-slot-${slot}">
       <div class="play-top">
         <div class="play-clock" title="${esc(data.clock.day)}"><span class="play-slot-icon" aria-hidden="true">${SLOT_ICON[slot]}</span> <b>${esc(data.clock.weekday)} ${esc(data.clock.slot)}${data.clock.time?` · ${esc(data.clock.time)}`:''}</b></div>
         <nav class="play-crumbs">${crumbs.join('<span class="play-sep">›</span>')}</nav>
         <div class="play-top-actions">
           ${aiMeter()}
-          ${here?`<button data-play-place="${esc(here.id)}" class="play-here-chip" title="${esc(t('play.youAreHere',{place:label(here)})+' – '+t('play.here'))}">${icon('pin')} <span class="play-here-name"><span class="play-sr">${esc(t('play.youAreHere',{place:''}).trim())} </span>${esc(label(here))}</span></button>`:''}
-          ${car?(car.here?`<span class="play-seg" role="group" aria-label="${esc(t('play.howTravel'))}"><button id="play-car-on" class="${drive?'primary':'subtle'}" aria-pressed="${drive}" title="${esc(t('play.byCar'))}">${icon('car')} <span class="play-lbl">${t('play.byCar')}</span></button><button id="play-car-off" class="${drive?'subtle':'primary'}" aria-pressed="${!drive}" title="${esc(t('play.onFoot'))}">${icon('walk')} <span class="play-lbl">${t('play.onFoot')}</span></button></span>`
-            :`<button id="play-car" class="subtle" title="${esc(t('play.carGoTo')+' – '+t('play.carAt',{vehicle:car.name,place:car.place||'?'}))}">${icon('car')} <span class="play-lbl">${esc(t('play.carAt',{vehicle:car.name,place:car.place||'?'}))}</span></button>`):''}
-          <details class="play-menu play-wait-menu"><summary class="subtle" title="${esc(t('play.waitTitle'))}">${icon('clock')} <span class="play-lbl">${t('play.wait')}</span></summary><div class="play-menu-list">
-            ${[15,60].map(m=>`<button class="subtle" data-play-wait="minutes" data-minutes="${m}">${t('play.waitMinutes',{minutes:m})}</button>`).join('')}
-            <button class="subtle" data-play-wait="next_slot">${t('play.waitNextSlot')}</button></div></details>
-          <button data-play-wait="morning" class="subtle" title="${esc(t('play.sleepTitle'))}">${icon('bed')} <span class="play-lbl">${t('play.sleep')}</span></button>
-          <details class="play-menu"><summary class="subtle" title="${esc(t('play.menu'))}">${icon('menu')} <span class="play-lbl">${t('play.menu')}</span>${data.unread_messages?` <b class="play-menu-badge">${data.unread_messages}</b>`:''}</summary><div class="play-menu-list">
-            <button data-play-mode="journal" class="${mode==='journal'?'primary':'subtle'}" title="(N)">${icon('book')} ${t('play.journal')}</button>
-            <button data-play-mode="relationships" class="${mode==='relationships'?'primary':'subtle'}" title="(K)">${icon('heart')} ${t('play.relationships')}</button>
-            <button data-play-mode="messages" class="${mode==='messages'?'primary':'subtle'}" title="(T)">${icon('mail')} ${t('play.messagesTitle')}${data.unread_messages?` <b class="play-menu-badge">${data.unread_messages}</b>`:''}</button>
-            <button data-play-mode="settings" class="${mode==='settings'?'primary':'subtle'}">${icon('gear')} ${t('play.settings')}</button>
-            <button id="play-tour-open" class="subtle">${icon('help')} ${t('play.tourOpen')}</button>
-            <button id="play-debug-open" class="subtle" title="(F9)">${icon('gear')} ${t('pdbg.open')}</button>
-            <button id="play-full" class="subtle">${icon('expand')} ${t('play.fullscreen')}</button>
-            <button id="play-exit" class="subtle">${icon('close')} ${t('play.exit')}</button></div></details>
+          ${here?`<button data-play-place="${esc(here.id)}" class="play-here-chip" ${topHelp('play.top.here',{place:label(here)})}>${icon('pin')} <span class="play-here-name"><span class="play-sr">${esc(t('play.youAreHere',{place:''}).trim())} </span>${esc(label(here))}</span></button>`:''}
+          ${car?(car.here?`<span class="play-seg" role="group" aria-label="${esc(t('play.howTravel'))}"><button id="play-car-on" class="${drive?'primary':'subtle'}" aria-pressed="${drive}" ${topHelp('play.top.carOn')}>${icon('car')} <span class="play-lbl">${t('play.byCar')}</span></button><button id="play-car-off" class="${drive?'subtle':'primary'}" aria-pressed="${!drive}" ${topHelp('play.top.carOff')}>${icon('walk')} <span class="play-lbl">${t('play.onFoot')}</span></button></span>`
+            :`<button id="play-car" class="subtle" ${topHelp('play.top.carAt',{vehicle:car.name,place:car.place||'?'})}>${icon('car')}<span class="play-sr"> ${esc(t('play.carAt',{vehicle:car.name,place:car.place||'?'}))}</span></button>`):''}
+          <details class="play-menu play-wait-menu"><summary class="subtle" ${topHelp('play.top.waitMenu')}>${icon('clock')} <span class="play-lbl">${t('play.wait')}</span></summary><div class="play-menu-list">
+            ${[15,60].map(m=>`<button class="subtle" data-play-wait="minutes" data-minutes="${m}" ${topHelp('play.top.waitMinutes',{minutes:m})}>${t('play.waitMinutes',{minutes:m})}</button>`).join('')}
+            <button class="subtle" data-play-wait="next_slot" ${topHelp('play.top.waitSlot')}>${t('play.waitNextSlot')}</button>
+            <button data-play-wait="morning" class="subtle" ${topHelp('play.sleepTitle')}>${icon('bed')} ${t('play.sleepUntilMorning')}</button></div></details>
+          <details class="play-menu"><summary class="subtle" ${topHelp('play.top.menu',{unread:data.unread_messages?t('play.top.unread',{count:data.unread_messages}):t('play.top.noUnread')})}>${icon('menu')} <span class="play-lbl">${t('play.menu')}</span>${unreadBadge(data.unread_messages)}</summary><div class="play-menu-list">
+            <button data-play-mode="journal" class="${mode==='journal'?'primary':'subtle'}" ${topHelp('play.top.journal')}>${icon('book')} ${t('play.journal')}</button>
+            <button data-play-mode="relationships" class="${mode==='relationships'?'primary':'subtle'}" ${topHelp('play.top.relationships')}>${icon('heart')} ${t('play.relationships')}</button>
+            <button data-play-mode="messages" class="${mode==='messages'?'primary':'subtle'}" ${topHelp('play.top.messages',{unread:data.unread_messages?t('play.top.unread',{count:data.unread_messages}):t('play.top.noUnread')})}>${icon('mail')} ${t('play.messagesTitle')}${unreadBadge(data.unread_messages)}</button>
+            <button data-play-mode="settings" class="${mode==='settings'?'primary':'subtle'}" ${topHelp('play.top.settings')}>${icon('gear')} ${t('play.settings')}</button>
+            <button id="play-tour-open" class="subtle" ${topHelp('play.top.tour')}>${icon('help')} ${t('play.tourOpen')}</button>
+            <button id="play-debug-open" class="subtle" ${topHelp('play.top.debug')}>${icon('gear')} ${t('pdbg.open')}</button>
+            <button id="play-full" class="subtle" ${topHelp('play.top.fullscreen')}>${icon('expand')} ${t('play.fullscreen')}</button>
+            <button id="play-exit" class="subtle" ${topHelp('play.top.exit')}>${icon('close')} ${t('play.exit')}</button></div></details>
         </div>
       </div>
       <div id="play-body"></div><div id="play-talk"></div></div>`;
+    // The quick-place strip (search, favourite, recent places) is gone from every screen (owner,
+    // 2026-11-20, task "Felső sáv"): it only took room from the picture. The command palette
+    // still opens from the keyboard.
+    const existing=host.querySelector?.('.play');
+    if(existing&&mode==='place'&&current&&existing.querySelector('.vn')){
+      const shell=document.createElement('div');shell.innerHTML=markup;
+      existing.className='play play-slot-'+slot;
+      existing.querySelector('.play-top').replaceWith(shell.querySelector('.play-top'));existing.querySelector('.play-fast-places')?.remove();
+    }else host.innerHTML=markup;
     for(const b of $$('.play-top [data-play-mode]'))b.onclick=wrap(async()=>{if(b.dataset.playMode==='map')return goMap();mode=b.dataset.playMode;await render(root,{reuse:true});});
     $('#play-tour-open').onclick=()=>openTour(0);
     $('#play-debug-open').onclick=()=>debugPanel.toggle(true);
     window.__luTrail?.note('view','Játék: '+mode);
     placeNotices();
     // Game clock: waiting and sleeping move time on; the world catches up while Palor waits.
+    let waitPending=false;
     for(const b of $$('.play-top [data-play-wait]'))b.onclick=wrap(async()=>{
-      const until=b.dataset.playWait;
+      const until=b.dataset.playWait;if(waitPending)return;waitPending=true;b.disabled=true;try{
       // Sleeping away from a home or lodging asks first (2026-11-13).
-      if(until==='morning'&&!sleepable(data.node_id)&&!confirm(t('play.sleepAway',{place:label(node(data.node_id))})))return;
+      if(until==='morning'&&!sleepable(data.node_id)&&!await confirmBox(t('play.sleepAway',{place:label(node(data.node_id))})))return;
+      if(until==='morning'&&!await undoWindow(t('modal.sleep'),{key:'sleep'}))return;
       // The server first saves any open talk (an AI summary may take a few seconds).
       document.body.classList.add('play-loading');
       let r;try{r=await api('/api/play/wait',{until,...(b.dataset.minutes?{minutes:Number(b.dataset.minutes)}:{})});}finally{document.body.classList.remove('play-loading');}
@@ -173,7 +215,8 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       // Time moved on: people moved too, so the place is read again (it was redrawn stale before).
       // Same place, same arrival: the arrival box keeps its folded/open state (2026-11-14).
       if(mode==='place'&&current?.node?.id){const was=current;current=await api('/api/play/place/'+encodeURIComponent(current.node.id));if(arrival.of===was)arrival.of=current;}
-      await render(root);});
+      await render(root);
+      }finally{waitPending=false;b.disabled=false;}});
     for(const b of $$('.play-top [data-play-town]'))b.onclick=wrap(()=>openTown(b.dataset.playTown));
     for(const b of $$('.play-top [data-play-place]'))b.onclick=wrap(()=>openPlace(b.dataset.playPlace,false));
     if($('#play-car'))$('#play-car').onclick=wrap(async()=>{if(car.node_id)await openPlace(car.node_id,true);});
@@ -181,7 +224,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     if($('#play-car-on'))$('#play-car-on').onclick=()=>{drive=true;setClass('#play-car-on','primary');setClass('#play-car-off','subtle');carPressed();};
     if($('#play-car-off'))$('#play-car-off').onclick=()=>{drive=false;setClass('#play-car-on','subtle');setClass('#play-car-off','primary');carPressed();};
     // Remember the screen across reloads (per browser; harmless if storage is blocked).
-    try{localStorage.setItem('lu-play-view',JSON.stringify({mode:mode==='place'?'map':mode,townId}));}catch{}
+    rememberSpatialView();
     $('#play-full').onclick=()=>{if(document.fullscreenElement)document.exitFullscreen();else document.documentElement.requestFullscreen?.().catch(()=>{});};
     $('#play-exit').onclick=wrap(async()=>{if(document.fullscreenElement)await document.exitFullscreen().catch(()=>{});document.body.classList.remove('play-mode');await exit();});
     // Leaving the town view ends pin arranging (2026-11-14).
@@ -197,13 +240,14 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     bindKeys();
     // First visit: a short guided tour (once per browser; reopen it from the menu).
     let seen=true;try{seen=localStorage.getItem('lu-play-tour-v1')==='done';}catch{}
-    if(!seen&&!document.querySelector('.play-tour'))openTour(0);
+    if(!studio&&!seen&&!document.querySelector('.play-tour'))openTour(0);
   }
   // Today's AI spending against the daily cap; a warning notice once it passes 90 %.
   function aiMeter(){
     const a=data?.ai;if(!a||!(a.cap>0))return '';const pct=Math.min(100,Math.round(a.spent/a.cap*100));
     if(pct>=90&&!aiWarned){aiWarned=true;setTimeout(()=>showNotice('ai',t('play.aiAlmostOut',{pct})),0);}
-    return `<span class="play-ai${pct>=80?' play-ai-warn':''}" title="${esc(t('play.aiTitle',{spent:a.spent.toFixed(2),cap:a.cap.toFixed(2)}))}"><small>AI</small><meter min="0" max="100" low="80" high="90" optimum="0" value="${pct}">${pct}%</meter></span>`;
+    const help=topHelp('play.top.aiCache',{spent:a.spent.toFixed(2),cap:a.cap.toFixed(2),pct,cached:a.cached_percent===null||a.cached_percent===undefined?t('play.cacheUnknown'):a.cached_percent+'%'});
+    return `<span class="play-ai${pct>=80?' play-ai-warn':''}" ${help}><small>${t('play.top.aiLabel')}</small><meter min="0" max="100" low="80" high="90" optimum="0" value="${pct}" ${help} aria-valuetext="${esc(t('play.top.ai',{spent:a.spent.toFixed(2),cap:a.cap.toFixed(2),pct}))}">${pct}%</meter></span>`;
   }
   // Guided tour: five short steps about the screens and controls.
   function openTour(step){
@@ -232,28 +276,37 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       box.innerHTML=hits.map(n=>`<button data-search-hit="${esc(n.id)}" title="${esc(n.path||n.name)}">${esc(label(n))}<small> · ${esc((n.path||'').split(' › ').slice(0,-1).join(' › '))}</small></button>`).join('')||`<small class="muted">${t('play.noHits')}</small>`;
       for(const b of $$('[data-search-hit]'))b.onclick=wrap(()=>openPlace(b.dataset.searchHit,true));};
   }
-  // Resume where the player left off (same browser).
-  try{const saved=JSON.parse(localStorage.getItem('lu-play-view')||'null');if(saved&&['map','town','journal','relationships','messages','settings'].includes(saved.mode)){mode=saved.mode;townId=saved.townId||null;}}catch{}
+  // Remember spatial display preferences only. Menu screens are transient, including
+  // when reopening this same UI instance (not just when reloading the browser).
+  function rememberSpatialView(){
+    if(studio)return;
+    if(!['map','town','place'].includes(mode))return;
+    spatialView={mode:mode==='place'?'map':mode,townId};
+    try{localStorage.setItem('lu-play-view',JSON.stringify(spatialView));}catch{}
+  }
+  try{const saved=JSON.parse(localStorage.getItem('lu-play-view')||'null');if(saved&&['map','town'].includes(saved.mode)){spatialView={mode:saved.mode,townId:typeof saved.townId==='string'?saved.townId:null};mode=spatialView.mode;townId=spatialView.townId;}}catch{}
 
   // Keyboard: M map, N journal, K relationships, T phone, ? help, Esc closes history/talk.
   let keysBound=false;
   function bindKeys(){
-    if(keysBound)return;keysBound=true;
+    if(studio)return;if(keysBound)return;keysBound=true;
     // New messages while playing: a quiet toast, checked once a minute.
     setInterval(async()=>{if(!document.body.classList.contains('play-mode')||!data)return;try{const r=await api('/api/play/unread');
       // A new message: a toast once, and the menu button's badge shows the count and pulses.
       if(r.unread_messages>data.unread_messages){toast(t('play.newMessage',{count:r.unread_messages}));const s=document.querySelector('.play-menu:not(.play-wait-menu)>summary');
-        if(s){let b=s.querySelector('.play-menu-badge');if(!b){b=document.createElement('b');b.className='play-menu-badge';s.append(' ',b);}b.textContent=r.unread_messages;s.classList.remove('play-pulse');void s.offsetWidth;s.classList.add('play-pulse');}}
+        if(s){s.classList.remove('play-pulse');void s.offsetWidth;s.classList.add('play-pulse');}}
+      paintUnread(r.unread_messages);
       data.unread_messages=r.unread_messages;}catch{}},60_000);
     window.addEventListener('resize',()=>{if(photoMode)placeBubbles();fitStage();if(mode==='place')paintDoors();placeNotices();fitMaps();});
     document.addEventListener('fullscreenchange',()=>setTimeout(fitMaps,60));
     // The top-bar menu closes when anything outside it is clicked.
     document.addEventListener('click',e=>{for(const menu of document.querySelectorAll('.play-menu[open]:not([data-keep-open])'))if(!menu.contains(e.target))menu.open=false;},{capture:true});
     document.addEventListener('keydown',e=>{
+      if(document.body.classList.contains('play-mode')&&(e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(!document.querySelector('dialog[open]'))void commands();return;}
       if(!document.body.classList.contains('play-mode')||e.ctrlKey||e.metaKey||e.altKey)return;
       // A story or road pop-up owns the keyboard while it is open.
-      if(document.querySelector('.ps-overlay,.play-album,.play-tour'))return;
-      if(e.key==='Escape'){if(showHistory){showHistory=false;renderTalk();}else if(talkCharacter){talkCharacter=null;talk=null;renderTalk();refreshStage();}return;}
+      if(document.querySelector('.ps-overlay,.play-album,.play-tour,.play-group-picker,.play-person-card,.vn-zoom,.travel-options-dialog,.play-trip-choice'))return;
+      if(e.key==='Escape'){if(showHistory){showHistory=false;renderTalk();}else if(talkCharacter&&!talkMinimized){talkMinimized=true;photoMode=false;photoSmall=false;$('.vn')?.classList.remove('vn-photo-mode','vn-photo-small');$('.vn-photo')?.remove();renderTalk();refreshStage();}return;}
       if(/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName||''))return;
       if(e.key==='?'){const old=$('.play-help');if(old)return old.remove();const h=document.createElement('div');h.className='play-help';h.innerHTML=`<h3>${t('play.helpTitle')}</h3><p>${t('play.helpKeys')}</p>`;h.onclick=()=>h.remove();document.body.appendChild(h);return;}
       // Number keys (2026-11-13): in a place 1–9 take the exits and G starts the group talk;
@@ -315,12 +368,12 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
           ${list.map(ev).join('')}${(runsByDay.get(day)||[]).map(r=>`<p class="jr-story">🛣 ${esc(t('play.storyRunLine',{title:r.title,end:t(r.ending_kind==='skipped'?'play.storySkipped':'play.storyEnd.'+r.ending_kind)}))}</p>`).join('')}</details>`).join('')
           +(days.length>visible.length?`<button class="subtle" id="jr-more">${t('play.olderDays',{count:days.length-visible.length})}</button>`:''):`<p class="muted">${t('we.nothing')}</p>`}
       </section>
-      <aside class="jr-side"><h2>${t('play.savePoints')}</h2><p class="muted">${t('play.savePointsLead')}</p>
+      <aside class="jr-side"><h2>${t('play.savePoints')}</h2>
         ${points.length?points.map((p,i)=>`<div class="jr-point"><div><b>${esc(p.label)}</b><small>${esc(new Date(p.time).toLocaleString('hu-HU'))}</small></div>${i?`<button class="subtle" data-rewind="${esc(p.time)}" data-label="${esc(p.label)}">${t('play.rewindHere')}</button>`:`<small class="muted">${t('play.now')}</small>`}</div>`).join(''):`<p class="muted">${t('play.noSavePoints')}</p>`}
       </aside></div>`;
     $('#jr-filter').onchange=wrap(async e=>{journalFilter=e.target.value;journalDays=10;await renderJournal();});
     if($('#jr-more'))$('#jr-more').onclick=wrap(async()=>{journalDays+=10;await renderJournal();});
-    for(const b of $$('[data-rewind]'))b.onclick=wrap(async()=>{if(!confirm(t('play.rewindConfirm',{label:b.dataset.label})))return;const r=await api('/api/play/rewind',{time:b.dataset.rewind,label:b.dataset.label});toast(t('play.rewound',{events:r.events,memories:r.memories,levels:r.levels}));talkCharacter=null;talk=null;await render(root);});
+    for(const b of $$('[data-rewind]'))b.onclick=wrap(async()=>{if(!await confirmBox(t('play.rewindConfirm',{label:b.dataset.label})))return;const r=await api('/api/play/rewind',{time:b.dataset.rewind,label:b.dataset.label});toast(t('play.rewound',{events:r.events,memories:r.memories,levels:r.levels}));talkCharacter=null;talk=null;await render(root);});
     if($('#jr-undo'))$('#jr-undo').onclick=wrap(async()=>{await api('/api/play/rewind/undo',{});toast(t('play.rewindUndone'));await render(root);});
     bindJournalMedia();
   }
@@ -354,32 +407,42 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     settings=await api('/api/play/settings');
     $('#play-body').innerHTML=`<div class="rel play-settings"><h2>${t('play.settings')}</h2>
       <label class="we-toggle"><input type="checkbox" id="ps-adult"${settings.adult?' checked':''}> ${t('play.adultToggle')}</label>
-      <p class="muted">${t('play.adultLead')}</p>
       <label class="play-check"><input type="checkbox" id="ps-auto-scene"${settings.auto_scene!==false?' checked':''}> ${t('play.autoScene')}</label>
+      <label class="play-check"><input type="checkbox" id="ps-quick-send"${settings.quick_send?' checked':''}> ${t('play.quickSendSetting')}</label>
+      <label class="play-check"><input type="checkbox" id="ps-travel-ask"${settings.travel_always_ask?' checked':''}> ${t('play.travelAlwaysAsk')}</label>
+      <label>${t('play.guestProvider')}<select id="ps-guest-provider">${['openai','sogni'].map(value=>`<option value="${value}"${(settings.guest_image_provider||'openai')===value?' selected':''}>${t('play.guestProvider.'+value)}</option>`).join('')}</select></label>
       <label>${t('play.textSpeed')} <select id="ps-speed">${['slow','normal','fast','instant'].map(s=>`<option value="${s}"${settings.text_speed===s?' selected':''}>${t('play.speed.'+s)}</option>`).join('')}</select></label>
       <section class="ps-stories" id="ps-stories"></section></div>`;
     $('#ps-adult').onchange=wrap(async e=>{settings=await api('/api/play/settings',{adult:e.target.checked});photoFor=null;toast(t('play.saved'));});
     $('#ps-auto-scene').onchange=wrap(async e=>{settings=await api('/api/play/settings',{auto_scene:e.target.checked});toast(t('play.saved'));});
+    $('#ps-quick-send').onchange=wrap(async e=>{settings=await api('/api/play/settings',{quick_send:e.target.checked});toast(t('play.saved'));});
+    $('#ps-travel-ask').onchange=wrap(async e=>{settings=await api('/api/play/settings',{travel_always_ask:e.target.checked});toast(t('play.saved'));});
+    $('#ps-guest-provider').onchange=wrap(async e=>{settings=await api('/api/play/settings',{guest_image_provider:e.target.value});toast(t('play.saved'));});
     $('#ps-speed').onchange=wrap(async e=>{settings=await api('/api/play/settings',{text_speed:e.target.value});toast(t('play.saved'));});
     await renderStories();
   }
   // Pop-up stories: how often they come, loading a pasted or saved batch (checked first), the list.
   const SETTING_ICON={road:'🛣',kaloz:'🌾',szekesfehervar:'🏰',budapest:'🌉'};
+  let storiesOpen=false;
   async function renderStories(preview=null,text=''){
     const box=$('#ps-stories');if(!box)return;
     const lib=await api('/api/play/stories');
     const bySetting=s=>lib.stories.filter(x=>x.setting===s);
-    box.innerHTML=`<h3>${t('play.storiesTitle')}</h3><p class="muted">${t('play.storiesLead')}</p>
+    // Settings show only what a player chooses (owner, 2026-11-21): how often stories come. Loading
+    // stories and the story list are authoring tools, folded away; no per-story statistics.
+    box.innerHTML=`<h3>${t('play.storiesTitle')}</h3>
       <label>${t('play.storyRate')} <select id="ps-story-rate">${['off','rare','normal','often'].map(r=>`<option value="${r}"${lib.rate===r?' selected':''}>${t('play.storyRate.'+r)}</option>`).join('')}</select></label>
+      <details class="ps-manage"${preview||text||storiesOpen?' open':''}><summary>${t('play.storyManage',{count:lib.stories.length})}</summary>
       <details class="ps-import"${preview||text?' open':''}><summary>${t('play.storyImport')}</summary>
-        <p class="muted">${t('play.storyImportLead')}</p>
         <textarea id="ps-story-text" rows="8" spellcheck="false" placeholder='[{"id":"…","title":"…","setting":"road",…}]'>${esc(text)}</textarea>
         <div class="play-top-actions"><label class="play-upload">${t('play.storyFile')}<input type="file" accept=".json,application/json,text/plain" id="ps-story-file" hidden></label>
           <button class="subtle" id="ps-story-check">${t('play.storyCheck')}</button>
           ${preview?.results.some(r=>['new','replace','exists'].includes(r.status))?`<label class="play-check"><input type="checkbox" id="ps-story-replace"> ${t('play.storyReplace')}</label><button class="primary" id="ps-story-save">${t('play.storySave',{count:preview.results.filter(r=>['new','replace'].includes(r.status)).length})}</button>`:''}</div>
         ${preview?`<ul class="ps-check">${preview.results.map(r=>`<li class="ps-check-${r.status}"><b>${esc(r.title||r.id)}</b> <small>${esc(SETTING_ICON[r.setting]||'')} ${esc(r.id)} · ${r.blocks} ${t('play.storyBlocks')}</small> — ${esc(t('play.storyStatus.'+r.status))}${r.errors.length?`<ul>${r.errors.slice(0,6).map(e=>`<li>${esc(e)}</li>`).join('')}${r.errors.length>6?`<li>… +${r.errors.length-6}</li>`:''}</ul>`:''}</li>`).join('')}</ul>`:''}
       </details>
-      ${['road','kaloz','szekesfehervar','budapest'].map(s=>`<h4>${SETTING_ICON[s]} ${t('play.storySetting.'+s)} <small class="muted">${bySetting(s).length}</small></h4>${bySetting(s).length?`<div class="ps-list">${bySetting(s).map(x=>`<div class="ps-row${x.enabled?'':' ps-off'}"><span><b>${esc(x.title)}</b> <small class="muted">${esc(t('play.storyContent.'+x.content))} · ${x.blocks} ${t('play.storyBlocks')} · ${x.endings} ${t('play.storyEndings')}${x.runs?` · ${t('play.storyRuns',{count:x.runs})}`:''}</small>${x.summary?`<small>${esc(x.summary)}</small>`:''}</span><span class="play-top-actions"><button class="subtle" data-story-play="${esc(x.id)}">▶ ${t('play.storyTry')}</button><button class="subtle" data-story-toggle="${esc(x.id)}" data-on="${x.enabled?'0':'1'}">${t(x.enabled?'play.storyOff':'play.storyOn')}</button></span></div>`).join('')}</div>`:`<p class="muted">${t('play.storyNone')}</p>`}`).join('')}`;
+      ${['road','kaloz','szekesfehervar','budapest'].map(s=>`<h4>${SETTING_ICON[s]} ${t('play.storySetting.'+s)} <small class="muted">${bySetting(s).length}</small></h4>${bySetting(s).length?`<div class="ps-list">${bySetting(s).map(x=>`<div class="ps-row${x.enabled?'':' ps-off'}"><span><b>${esc(x.title)}</b>${x.summary?`<small>${esc(x.summary)}</small>`:''}</span><span class="play-top-actions"><button class="subtle" data-story-play="${esc(x.id)}">▶ ${t('play.storyTry')}</button><button class="subtle" data-story-toggle="${esc(x.id)}" data-on="${x.enabled?'0':'1'}">${t(x.enabled?'play.storyOff':'play.storyOn')}</button></span></div>`).join('')}</div>`:`<p class="muted">${t('play.storyNone')}</p>`}`).join('')}</details>`;
+    // Re-rendering after a toggle or a try keeps the section open.
+    box.querySelector('.ps-manage').ontoggle=e=>{storiesOpen=e.target.open;};
     $('#ps-story-rate').onchange=wrap(async e=>{settings=await api('/api/play/settings',{story_rate:e.target.value});toast(t('play.saved'));});
     const current=()=>$('#ps-story-text').value;
     $('#ps-story-file').onchange=wrap(async e=>{const f=e.target.files[0];if(!f)return;if(f.size>3*1024*1024)throw Error(t('play.tooLarge'));const txt=await f.text();await renderStories(await api('/api/play/stories/import',{text:txt,dry_run:true}),txt);});
@@ -412,15 +475,15 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     const known=p=>(p.their_level??-9)>=1||(p.palor_level??-9)>=1;
     const people=all_.filter(p=>relFilter==='all'||relFilter==='known'&&known(p)||relFilter==='strangers'&&!known(p)||relFilter==='talk'&&p.can_talk);
     const bar=level=>level===null?`<span class="rel-bar rel-none">${t('we.noLevel')}</span>`:`<span class="rel-bar"><span class="rel-fill rel-l${level}"></span><em>${esc(labels[level])}</em></span>`;
-    $('#play-body').innerHTML=`<div class="rel"><h2>${t('play.relationships')}</h2><p class="muted">${t('play.relationshipsLead')}</p>
-      <label class="jr-filter">${t('play.filterBy')} <select id="rel-filter">${['all','known','strangers','talk'].map(f=>`<option value="${f}"${relFilter===f?' selected':''}>${t('play.relFilter.'+f)}</option>`).join('')}</select> <small class="muted">${people.length}/${all_.length}</small></label>
+    $('#play-body').innerHTML=`<div class="rel"><h2>${t('play.relationships')}</h2>
+      <label class="jr-filter">${t('play.filterBy')} <select id="rel-filter">${['all','known','strangers','talk'].map(f=>`<option value="${f}"${relFilter===f?' selected':''}>${t('play.relFilter.'+f)}</option>`).join('')}</select></label>
       <div class="rel-grid">${people.map(p=>`<article class="rel-card">${portrait(p,'rel-photo')}
       <div class="rel-body"><b>${esc(p.name)}</b>
         <div class="rel-row"><small>${t('play.theirSide')}</small>${bar(p.their_level)}</div>
         <div class="rel-row"><small>${t('play.palorSide')}</small>${bar(p.palor_level)}</div>
         ${p.last_talk?`<p class="rel-last"><small>${t('play.lastTalk')}</small> ${esc(p.last_talk.summary||p.last_talk.title||'')}</p>`:''}
         ${p.can_talk?`<div class="rel-shared" data-shared-for="${esc(p.id)}"></div>`:''}
-        <button class="subtle" data-rel-detail="${esc(p.id)}">☰ ${t('play.details')}</button>${p.can_talk?`<button class="subtle" data-rel-album="${esc(p.id)}">🖼 ${t('play.album')}</button>`:''}<div class="rel-detail" id="rel-detail-${esc(p.id)}"></div>${p.can_talk?`<button class="subtle" data-rel-phone="${esc(p.id)}">✆ ${t('play.message')}</button>`:`<small class="muted">${t('play.noProfileYet')}</small>`}</div></article>`).join('')||`<p class="muted">—</p>`}</div></div>`;
+        <div class="rel-actions"><button class="subtle" data-rel-detail="${esc(p.id)}">☰ ${t('play.details')}</button>${p.can_talk?`<button class="subtle" data-rel-album="${esc(p.id)}">🖼 ${t('play.album')}</button><button class="subtle" data-rel-phone="${esc(p.id)}">✆ ${t('play.message')}</button>`:''}</div><div class="rel-detail" id="rel-detail-${esc(p.id)}"></div></div></article>`).join('')||`<p class="muted">—</p>`}</div></div>`;
     $('#rel-filter').onchange=wrap(async e=>{relFilter=e.target.value;await renderRelationships();});
     const fill=async el=>{const photos=(await api('/api/play/shared-photos/'+el.dataset.sharedFor).catch(()=>({photos:[]}))).photos;if(!photos.length||!el.isConnected)return;
       el.innerHTML=`<small>${t('play.sharedPhotos',{count:photos.length})}</small><div class="rel-thumbs">${photos.slice(0,5).map(s=>`<img src="${pic(s.media_id)}" alt="" loading="lazy" class="${s.intimate?'rel-blur':''}" title="${esc(s.description||'')}">`).join('')}</div>`;};
@@ -443,11 +506,11 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       const holder=box.parentElement,cs=getComputedStyle(holder);
       const availW=holder.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
       const bar=document.querySelector('.play-top'),head=holder.querySelector(':scope > .map-bar');
-      const top=Math.max(0,bar?bar.getBoundingClientRect().bottom:0),headH=head?head.getBoundingClientRect().height+10:0;
-      const availH=Math.max(260,innerHeight-top-headH-14);
+      const top=Math.max(0,box.getBoundingClientRect().top+window.scrollY);
+      const availH=Math.max(180,innerHeight-top-16-parseFloat(cs.paddingBottom||0));
       // Use the screen (owner, 2026-11-14): a desktop shows the whole map as large as it fits;
       // a tablet fills the width and scrolls the rest.
-      const w=Math.max(200,innerWidth<=1100?availW:Math.min(availW,availH*aspect));
+      const w=Math.max(160,Math.min(availW,availH*aspect));
       box.style.width=Math.round(w)+'px';box.style.height=Math.round(w/aspect)+'px';
     }
   }
@@ -487,22 +550,16 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   const carHere=()=>(data?.items||[]).find(i=>i.kind==='vehicle'&&i.here);
   // Between two towns a small window asks how Palor travels (owner, 2026-11-14): bicycle, car or,
   // where a direct line runs, train, each with its travel time. Resolves the choice or null.
-  async function chooseTravel(nodeId){
+  let travelPreference=null;
+  try{const saved=JSON.parse(localStorage.getItem('lu-travel-preference-v1'));if(typeof saved?.choice==='string'&&saved.choice.length<1000&&Array.isArray(saved.options)&&saved.options.length<=16&&saved.options.every(key=>typeof key==='string'&&key.length<1000))travelPreference=saved;}catch{}
+  async function chooseTravel(nodeId,{force=false}={}){
     const here=data?.node_id?townOf(data.node_id):null,there=townOf(nodeId);
     if(!here||!there||here.id===there.id)return {};
     const {options}=await api('/api/play/travel-options?'+new URLSearchParams({to:nodeId}));if(!options?.length)return {};
-    const ICON={bike:'🚲',car:'🚗',train:'🚆'},dur=m=>m>=60?t('play.hoursMinutes',{h:Math.floor(m/60),m:m%60}):t('play.minutesShort',{minutes:m});
-    return new Promise(resolve=>{
-      const box=document.createElement('div');box.className='play-album tr-pick';box.setAttribute('role','dialog');box.setAttribute('aria-modal','true');box.setAttribute('aria-label',t('play.howTravel'));
-      box.innerHTML=`<div class="play-album-inner tr-inner"><header><b>${esc(t('play.travelTo',{from:label(here),to:label(there)}))}</b><button type="button" class="subtle" data-tr-close aria-label="${esc(t('common.closeDialog'))}">✕</button></header>
-        <p class="muted">${esc(t('play.howTravel'))}</p><div class="tr-options">${options.map((o,i)=>`<button type="button" class="tr-option" data-tr="${i}"${o.unavailable?' disabled':''}><span class="tr-icon" aria-hidden="true">${ICON[o.mode]}</span><b>${esc(o.ride_with?t('play.rideWith',{name:o.ride_with.name}):t('play.mode.'+o.mode))}</b><small>${o.unavailable==='night'?esc(t('play.trainNight')):`${esc(dur(o.minutes))}${o.line?' · '+esc(o.line):''}${o.vehicle?' · '+esc(o.vehicle.name):''}`}</small></button>`).join('')}</div></div>`;
-      document.body.appendChild(box);
-      const done=v=>{box.remove();document.removeEventListener('keydown',onKey);resolve(v);};
-      const onKey=e=>{if(e.key==='Escape')done(null);const k=Number(e.key);if(k>=1&&k<=options.length)box.querySelector(`[data-tr="${k-1}"]`)?.click();};document.addEventListener('keydown',onKey);
-      box.onclick=e=>{if(e.target===box||e.target.closest('[data-tr-close]'))done(null);};
-      for(const b of box.querySelectorAll('[data-tr]'))b.onclick=()=>{const o=options[Number(b.dataset.tr)];done({mode:o.mode,...(o.vehicle?{vehicle_id:o.vehicle.id}:{}),...(o.ride_with?{ride_with:o.ride_with.id}:{})});};
-      box.querySelector('[data-tr]:not([disabled])')?.focus();
-    });
+    const automatic=preferredTravel(options,travelPreference,{alwaysAsk:settings.travel_always_ask,force});
+    const selected=automatic||await travelOptionsDialog({options,from:label(here),to:label(there),esc});if(!selected)return null;
+    travelPreference=rememberedTravel(selected,options);try{localStorage.setItem('lu-travel-preference-v1',JSON.stringify(travelPreference));}catch{}
+    return {...travelPayload(selected),automatic:!!automatic};
   }
   // The trip's small state delta (C1, 2026-11-14) is merged into the loaded overview, so the next
   // render reuses it instead of fetching /api/play again. False (= full reload) when the delta is
@@ -517,9 +574,14 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     Object.assign(data,{node_id:s.node_id,clock:s.clock,ai:s.ai||null,items:s.items,unread_messages:s.unread_messages||0,open_conversation:s.open_conversation||null,previous_id:s.previous_id||null,recent:s.recent||[]});
     return true;
   }
+  let travelling=false;
   async function travelTo(nodeId){
+    if(travelling)return null;travelling=true;
+    try{
     townNote=null;
-    const choice=await chooseTravel(nodeId);if(choice===null)return null;
+    let selected=await chooseTravel(nodeId);if(selected===null)return null;
+    if(selected.automatic){const decision=await tripChoiceNotice({place:label(node(nodeId)),mode:selected.mode,esc});if(decision===null)return null;if(decision==='change'){selected=await chooseTravel(nodeId,{force:true});if(selected===null)return null;}}
+    const {automatic,...choice}=selected;
     document.body.classList.add('play-loading');
     // "Úton ide: …" appears if the trip takes more than a moment, so a click never seems ignored.
     const going=document.createElement('div');going.className='play-going';going.setAttribute('role','status');going.textContent=t('play.going',{place:label(node(nodeId))});
@@ -532,6 +594,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     // A story on the way can take minutes of game time: the merged snapshot is stale then (2026-11-14).
     if(await afterTrip(result?.trip)&&result)result.merged=false;
     return result;
+    }finally{travelling=false;}
   }
   // The road moment between towns (or the street and stairwell walked through), then a story if
   // one came up, before the destination shows.
@@ -563,8 +626,10 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       const v=shown.at(-1)||via.at(-1);
       el.innerHTML=`${v.image_id?`<img src="${pic(v.image_id,1600)}" alt="">`:''}<div class="ps-passage-card"><b>${esc(via.map(x=>x.name).join(' → '))}</b>${text?`<p>${esc(text)}</p>`:''}</div>`;
       // The skipping key must not also press the next overlay's focused button (2026-11-14).
-      document.body.appendChild(el);let gone=false;const close=e=>{if(gone)return;gone=true;if(e?.type==='keydown')e.preventDefault();document.removeEventListener('keydown',close);setTimeout(()=>{resolve();setTimeout(()=>el.remove(),0);},0);};
-      el.onclick=close;document.addEventListener('keydown',close,{once:true});setTimeout(close,text?2600:ms);
+      document.body.appendChild(el);let gone=false,timer;const close=e=>{if(gone)return;gone=true;clearTimeout(timer);if(e?.type==='keydown')e.preventDefault();document.removeEventListener('keydown',close);setTimeout(()=>{resolve();setTimeout(()=>el.remove(),0);},0);};
+      el.onclick=close;document.addEventListener('keydown',close,{once:true});
+      const ready=async()=>{const image=el.querySelector('img');if(image){el.classList.add('ps-passage-loading');const loaded=await decodedImage(image);if(gone)return;if(!loaded)image.remove();el.classList.remove('ps-passage-loading');}if(!gone){el.classList.add('ps-passage-ready');timer=setTimeout(close,text?2600:ms);}};
+      void ready();
     });
   }
   // Travel times from Palor's place (server: same rule as the trip itself), by car when he drives.
@@ -573,7 +638,12 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     const car=carHere();return (await api('/api/play/eta?'+new URLSearchParams({to:ids.map(encodeURIComponent).join(','),vehicle:drive&&car?'1':'0'}))).minutes||{};
   }
   // The next places' backdrops are fetched in advance, so stepping through a door feels instant.
-  function preloadExits(ids){for(const id of ids.slice(0,6)){const n=node(id);if(n?.image_id){const im=new Image();im.src=pic(n.image_id,1600);}}}
+  const warmExits=memoizedRead(async id=>{
+    const n=node(id);if(n?.image_id){const image=new Image();image.src=pic(n.image_id,1600);void decodedImage(image);}
+    const place=await api('/api/play/place/'+encodeURIComponent(id));
+    await Promise.all((place.people||[]).map(async person=>{const sprite=spriteFor(person);if(sprite)await cutout('/api/sprites/'+sprite.id+(sprite.updated_at?'?v='+encodeURIComponent(sprite.updated_at):''));else if(person.stand_in?.media_id){const image=new Image();image.src=pic(person.stand_in.media_id,1600);await decodedImage(image);}}));
+  },{ttl:30000,max:12});
+  function preloadExits(ids){for(const id of [...new Set(ids)].slice(0,6))void warmExits(id).catch(()=>{});}
   // Only a real town has a street; a grouping layer ("Egyéb helyek") is not a place to stand in.
   const isStreet=n=>!!n&&(!n.kind||n.kind==='place');
   // Where sleeping fits: a home (or a room of one), lodging, a dormitory, a tent.
@@ -586,6 +656,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   // ---- level 2: town view ---------------------------------------------------------------
   let townNote=null;
   async function openTown(id,{move=true}={}){
+    if(studio)move=false;
     // Someone met on the way stays mentioned on the town view until the next step.
     let merged=false;
     if(move&&data?.node_id!==id&&isStreet(node(id))){const r=await travelTo(id);if(!r)return;merged=!!r.merged;const met=r?.trip?.encounter;townNote=met?.kind==='person'?met.text:null;}
@@ -597,9 +668,11 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   // behind a small ⋯ menu (owner, 2026-11-14). While arranging, Mentés/Alaphelyzet/Mégse sit
   // inline in the bar so no open list covers the map.
   let townEditing=false;
+  const townLayout=memoizedRead(id=>api('/api/play/town-layout/'+encodeURIComponent(id)));
   async function renderTown(){
+    if(studio)townEditing=true;
     const tw=node(townId);if(!tw){mode='map';return renderMap();}
-    const extra=await api('/api/play/town-layout/'+encodeURIComponent(tw.id)).catch(()=>({positions:{},image:null}));
+    const extra=await townLayout(tw.id).catch(()=>({positions:{},image:null}));
     // A region map (Káloz határa) shows its places at every depth: lake, car park, forest,
     // mountain (not the lake shore, which is the lake's way in).
     const deep=id=>kids(id).filter(onMap).flatMap(c=>[...(c.origin?[]:[c]),...deep(c.id)]);
@@ -611,26 +684,25 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       for(const p of pins){const s=SPOT.find(([re])=>re.test(p.name));if(s&&!saved[p.id])saved[p.id]=[Math.round(s[1][0]*1200),Math.round(s[1][1]*720)];}}
     const draw=()=>townMapSvg({town:tw,pins,saved,image:extra.image,height:extra.height||720,slot:data.clock.slot_index,esc,ariaLabel:label(tw),editing:townEditing});
     const here=peopleIn(tw.id);
-    // One compact bar (back to the map, name, search, who is where, tools); the map fills the
-    // rest of the window, whole and as large as it fits (fitMaps, 2026-11-13).
-    $('#play-body').innerHTML=`<div class="play-town-view tm-view play-sky-${data.clock.slot_index}"><div class="map-bar">
-        <button class="map-back" id="tm-back" title="${esc(t('play.backToMapTitle'))}">${icon('map')} ${tw.region?esc(label(townOf(tw.id))||t('play.backToMap')):t('play.backToMap')}</button>
-        <h2 class="map-title" title="${esc(t('play.townMapLead'))}">${esc(label(tw))}</h2>
-        ${townNote?`<span class="tm-encounter">🤝 ${esc(townNote)}</span>`:''}
-        ${searchFloat()}
-        ${here.length?`<details class="tm-people map-drop"><summary class="subtle">${t('play.peopleInTown',{count:here.length})}</summary><div class="map-drop-list play-intown">${here.map(pp=>{const at=data.nodes.find(n=>n.location_id===pp.location_id);return at?`<button data-play-place="${esc(at.id)}">${portrait(pp,'play-chip')}<span>${esc(pp.name)} · ${esc(label(at))}</span></button>`:'';}).join('')}</div></details>`:''}
+    // Play: only the top bar stays above the map (owner, 2026-11-20, "Pici térkép"). The way out of
+    // the town sits on the map's top-left corner and the map takes all the remaining room; search,
+    // the "who is where" list, studio editing and the badge explanation are gone. The studio keeps
+    // its arranging bar.
+    const leave=`<button class="map-back tm-corner" id="tm-back" title="${esc(t('play.backToMapTitle'))}">${icon('map')} ${tw.region?esc(label(townOf(tw.id))||t('play.backToMap')):t('play.backToMap')}</button>`;
+    const studioBar=studio?`<div class="map-bar"><h2 class="map-title">${esc(label(tw))}</h2>
         ${townEditing?`<span class="map-lead muted">${t('play.townEditLead')}</span>`:''}
-      ${phone?'':townEditing?`<span class="play-top-actions tm-edit-actions"><button class="primary" id="tm-save">${t('play.townSave')}</button><button class="subtle" id="tm-reset">${t('play.townReset')}</button><button class="subtle" id="tm-cancel">${t('common.cancel')}</button></span>`:`<span class="play-top-actions"><details class="play-menu tm-tools"><summary class="subtle" title="${esc(t('play.townTools'))}" aria-label="${esc(t('play.townTools'))}">⋯</summary><div class="play-menu-list"><button class="subtle" id="tm-edit" title="${esc(t('play.townEditTitle'))}">✥ ${t('play.townEdit')}</button></div></details></span>`}</div>
-      <div class="tm-wrap map-fit">${draw()}<div class="tm-pop" id="tm-pop" hidden></div></div>
+      ${townEditing?`<span class="play-top-actions tm-edit-actions"><button class="primary" id="tm-save">${t('play.townSave')}</button><button class="subtle" id="tm-reset">${t('play.townReset')}</button><button class="subtle" id="tm-cancel">${t('common.cancel')}</button></span>`:`<span class="play-top-actions"><details class="play-menu tm-tools"><summary class="subtle" title="${esc(t('play.townTools'))}" aria-label="${esc(t('play.townTools'))}">⋯</summary><div class="play-menu-list"><button class="subtle" id="tm-edit" title="${esc(t('play.townEditTitle'))}">✥ ${t('play.townEdit')}</button></div></details></span>`}</div>`:'';
+    $('#play-body').innerHTML=`<div class="play-town-view tm-view${studio?'':' tm-full'} play-sky-${data.clock.slot_index}">${studioBar}
+      <div class="tm-wrap map-fit">${draw()}${studio?'':leave}${townNote&&!studio?`<span class="tm-encounter tm-corner-note">🤝 ${esc(townNote)}</span>`:''}<div class="tm-pop" id="tm-pop" hidden></div></div>
       ${places.length?'':`<p class="muted">${t('play.empty')}</p>`}</div>`;
     fitMaps();
     // From the countryside the way back leads to the village, not straight to the world map.
-    $('#tm-back').onclick=wrap(tw.region?()=>openTown(townOf(tw.id)?.id||tw.parent_id):goMap);
+    if($('#tm-back'))$('#tm-back').onclick=wrap(tw.region?()=>openTown(townOf(tw.id)?.id||tw.parent_id):goMap);
     for(const b of $$('#play-body .play-intown [data-play-place]'))b.onclick=wrap(()=>openPlace(b.dataset.playPlace,true));
     bindSearchFloat();
     $('#tm-edit')?.addEventListener('click',()=>{townEditing=true;renderTown();});
     $('#tm-cancel')?.addEventListener('click',()=>{townEditing=false;renderTown();});
-    $('#tm-reset')?.addEventListener('click',wrap(async()=>{await api('/api/play/town-layout/'+encodeURIComponent(tw.id),{positions:{}});townEditing=false;await renderTown();}));
+    $('#tm-reset')?.addEventListener('click',wrap(async()=>{await api('/api/play/town-layout/'+encodeURIComponent(tw.id),{positions:{}});townLayout.invalidate(tw.id);townEditing=false;await renderTown();}));
     const svg=$('.tm-map'),pop=$('#tm-pop');
     // Hover shows who is inside (in the pin's title) and how long the walk or drive takes.
     etaFor(pins.map(p=>p.id)).then(eta=>{for(const g of $$('[data-town-pin]')){const m=eta[g.dataset.townPin],ti=g.querySelector('title');if(ti&&Number.isFinite(m))ti.textContent+=' · '+t('play.minutesShort',{minutes:m});}}).catch(()=>{});
@@ -641,7 +713,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       svg.addEventListener('pointermove',e=>{if(!drag)return;const [x,y]=toMap(svg,e);drag.setAttribute('transform',`translate(${x},${y})`);saved[drag.dataset.townPin]=[x,y];});
       svg.addEventListener('pointerup',()=>{drag=null;});
       if($('#tm-save'))$('#tm-save').onclick=wrap(async()=>{for(const g of $$('[data-town-pin]')){const m=/translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute('transform'));if(m)saved[g.dataset.townPin]=[Math.round(+m[1]),Math.round(+m[2])];}
-        await api('/api/play/town-layout/'+encodeURIComponent(tw.id),{positions:saved});townEditing=false;toast(t('play.townSaved'));await renderTown();});
+        await api('/api/play/town-layout/'+encodeURIComponent(tw.id),{positions:saved});townLayout.invalidate(tw.id);townEditing=false;toast(t('play.townSaved'));await renderTown();});
       return;
     }
     // A building with rooms opens a small list next to its pin; a single place opens at once.
@@ -664,6 +736,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   }
   // ---- level 3: place scene ---------------------------------------------------------------
   async function openPlace(nodeId,move=true){
+    if(studio)move=false;
     const n=node(nodeId);
     // A town (no real location) is not a room: show its places instead.
     // A home with a living room is entered there (the server sets him down in it).
@@ -671,9 +744,9 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     // Palor left: a face-to-face talk with someone who is not at the new place ends (and is
     // saved, in travelTo). A phone call goes with him.
     // While the place loads, its outline is shown instead of the old screen (2026-11-13).
-    const body=$('#play-body');if(move&&body&&n)body.innerHTML=`<div class="vn vn-skeleton" aria-busy="true"><div class="vn-info"><div class="vn-title-row"><h2 class="vn-title">${esc(label(n))}</h2></div></div><div class="vn-skel-stage"><span></span><span></span><span></span></div></div>`;
+    const body=$('#play-body');if(move&&body)body.setAttribute('aria-busy','true');
     let merged=false;
-    if(move){const r=await travelTo(nodeId);if(!r){mode==='place'&&current?showPlace(current):await render(root,{reuse:true});return;}current=r;merged=!!r.merged;}
+    if(move){let r;try{r=await travelTo(nodeId);}finally{body?.removeAttribute('aria-busy');}if(!r){mode==='place'&&current?showPlace(current):await render(root,{reuse:true});return;}current=r;merged=!!r.merged;}
     else{document.body.classList.add('play-loading');try{current=await api('/api/play/place/'+encodeURIComponent(nodeId));}finally{document.body.classList.remove('play-loading');}}
     mode='place';return render(root,{reuse:merged});
   }
@@ -697,7 +770,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     // In a group talk the one who spoke last steps forward; people outside the talk are dimmed.
     const speaking=groupTalk?[...(talk?.lines||[])].reverse().find(l=>l.speaker==='character')?.speaker_id||null:talkCharacter?.id;
     const inTalk=groupTalk?(talk?.participants||[]).some(x=>x.id===person.id)||speaking===person.id:talkCharacter?.id===person.id;
-    return `<button class="vn-figure${talkCharacter&&talkChannel==='in_person'?(speaking===person.id?' vn-speaking':inTalk?'':' vn-dim'):''}" data-play-talk="${esc(person.id)}" title="${esc(t('play.talkTo',{name:person.name}))}" aria-label="${esc(t('play.talkTo',{name:person.name})+' — '+(person.activity||''))}">`
+    return `<button class="vn-figure${talkCharacter&&!talkMinimized&&talkChannel==='in_person'?(speaking===person.id?' vn-speaking':inTalk?'':' vn-dim'):''}" data-play-talk="${esc(person.id)}" data-inspect-person="${esc(person.id)}" title="${esc(person.name+(person.activity?' — '+person.activity:''))}" aria-label="${esc(t('play.inspectPerson',{name:person.name})+' — '+(person.activity||''))}">`
       +(s?`<img class="vn-sprite${s.outfit==='intimate'?' vn-fade':''}" data-sprite="${esc(s.id)}" data-v="${esc(s.updated_at||'')}" data-height="${esc(person.height_cm||'')}" alt="${esc(person.name)}">`:person.stand_in?standIn(person):`<span class="vn-card">${portrait(person,'vn-card-photo')}</span>`)
       +`<span class="vn-name">${esc(person.name)}</span></button>`;
   }
@@ -721,9 +794,11 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   // height: 200 cm fills 96 % of the stage; unknown counts as 178 cm. The waist-up intimate
   // figure keeps its own size.
   const FIGURE_CM=178;
-  async function paintFigures(){paintStandIns(current?.people||[]);fitStage();for(const el of $$('[data-sprite]')){
+  async function paintFigures(){if(studio)return;paintStandIns(current?.people||[]);fitStage();const prepared=await Promise.all($$('[data-sprite]').map(async el=>{
     if(!el.classList.contains('vn-fade')){const cm=Math.min(210,Math.max(155,Number(el.dataset.height)||FIGURE_CM));el.style.height=(cm/200*96).toFixed(1)+'%';}
-    el.onload=fitStage;const src=await cutout('/api/sprites/'+el.dataset.sprite+(el.dataset.v?'?v='+encodeURIComponent(el.dataset.v):''));if(el.isConnected)el.src=src;}}
+    const src=await cutout('/api/sprites/'+el.dataset.sprite+(el.dataset.v?'?v='+encodeURIComponent(el.dataset.v):''));
+    if(el.getAttribute('src')!==src){const image=new Image();image.src=src;await decodedImage(image);}return {el,src};
+  }));for(const {el,src} of prepared)if(el.isConnected){el.onload=fitStage;if(el.getAttribute('src')!==src)el.src=src;}fitStage();}
   // Shrinks all figures together when they do not fit beside each other (CSS var --fit).
   function fitStage(){
     const stage=$('.vn-stage');if(!stage)return;const figs=[...stage.querySelectorAll('.vn-figure')];if(!figs.length)return;
@@ -735,46 +810,48 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     stage.style.setProperty('--fit',span>avail&&widths>0?Math.max(0.4,(avail-gaps)/widths*0.98).toFixed(3):'1');
   }
   async function showPlace(p){
+    if(studio){placeTools=true;doorsEditing=true;}
     // No usable backdrop: a calm placeholder in the colours of the place's kind, with its icon.
     const kind=p.node.place_kind||'place';
-    $('#play-body').innerHTML=`<div class="vn vn-sky-${data.clock.slot_index}">${p.image_id?`<img class="vn-bg play-bg${p.image_busy?' vn-bg-busy':''}" src="${pic(p.image_id,1600)}" alt="">`:`<div class="vn-bg vn-bg-empty vn-tone-${esc(kind)}" aria-hidden="true"><span>${KIND_ICON[kind]||'⌖'}</span></div>`}<div class="vn-shade play-shade"></div>
+    const html=`<div class="vn vn-sky-${data.clock.slot_index}"><div class="vn-bg vn-bg-empty vn-tone-${esc(kind)}" aria-hidden="true"><span>${KIND_ICON[kind]||'⌖'}</span></div><div class="vn-shade play-shade"></div>
       <div class="vn-info"><div class="vn-title-row"><h2 class="vn-title" tabindex="0">${esc(label(p.node))}</h2>
-        <button type="button" class="vn-place-tools-btn" id="vn-place-tools" aria-expanded="${placeTools}" title="${esc(t('play.toolsTitle'))}">${placeTools?'✕':'⋯'} ${t('play.tools')}</button></div>
-        ${p.node.kind_label?`<p class="vn-kind">${esc(p.node.kind_label)}${p.town&&p.town!==label(p.node)?` · ${esc(p.town)}`:''}${p.staff?.length?` · ${t('play.staff')} ${p.staff.map(s=>esc(s.name)).join(', ')}`:''}</p>`:''}
+        ${studio?`<button type="button" class="vn-place-tools-btn" id="vn-place-tools" aria-expanded="${placeTools}" title="${esc(t('play.toolsTitle'))}">${placeTools?'✕':'⋯'} ${t('play.tools')}</button>`:''}</div>
+        ${p.node.kind_label?`<p class="vn-kind">${esc(p.node.kind_label)}${p.town&&p.town!==label(p.node)?` · ${esc(p.town)}`:''}</p>`:''}
         ${p.branches?.length?`<div class="play-children"><small>${t('play.branches')}</small>${p.branches.map(b=>`<button data-play-place="${esc(b.id)}">${esc(b.short_name)} · ${esc(b.town)}</button>`).join('')}</div>`:''}
         ${itemsRow()}
-        <div class="vn-place-tools"${placeTools?'':' hidden'}>
+        <div class="vn-place-tools"${studio&&placeTools?'':' hidden'}>
           <div class="play-items"><button data-item-add="item" class="subtle">${t('play.addItem')}</button>${(data?.items||[]).some(i=>i.kind==='vehicle')?'':`<button data-item-add="vehicle" class="subtle">${t('play.addVehicle')}</button>`}</div>
-          ${p.node.location_id?`<div class="play-upload-row"><button type="button" class="play-upload" id="play-bg-prompt">📋 ${t('play.bgPrompt')}</button>${phone?'':`<label class="play-upload">${t('play.uploadBackground')}<input type="file" accept="image/png,image/jpeg" id="play-upload" hidden></label>`}${!p.image_id||p.image_busy?`<small>${t('play.noBackground')}</small>`:''}</div>`:''}
+          ${p.node.location_id?`<div class="play-upload-row">${phone?'':`<button type="button" class="play-upload" id="play-generate-background">${t('play.makeBackground')}</button>`}<button type="button" class="play-upload" id="play-bg-prompt">📋 ${t('play.bgPrompt')}</button>${phone?'':`<label class="play-upload">${t('play.uploadBackground')}<input type="file" accept="image/png,image/jpeg" id="play-upload" hidden></label>`}${!p.image_id||p.image_busy?`<small>${t('play.noBackground')}</small>`:''}</div>`:''}
           <span class="play-top-actions"><button type="button" class="subtle" id="vn-notes">${t('play.notes')}</button>${doorsEditing?`<button type="button" class="primary" id="vn-doors-save">${t('play.doorsSave')}</button><button type="button" class="subtle" id="vn-doors-reset">${t('play.doorsReset')}</button><button type="button" class="subtle" id="vn-doors-cancel">${t('common.cancel')}</button>`:`<button type="button" class="subtle" id="vn-doors-edit">🚪 ${t('play.doorsEdit')}</button>`}</span></div></div>
       <div class="vn-doors" id="vn-doors"></div>
       <div class="vn-stage">${p.people.map(figure).join('')}</div>
       <div class="vn-dialog vn-establish" id="vn-dialog"></div></div>`;
+    if(!await updateScene($('#play-body'),html,{placeId:p.node.id,imageUrl:pic(p.image_id,1600),busy:p.image_busy}))return;
     // A missing or unreadable picture never leaves a broken icon in the scene.
-    for(const im of $$('.vn img'))im.onerror=()=>im.remove();
+    for(const im of $$('.vn img:not(.vn-bg)'))im.onerror=()=>im.remove();
     paintFigures();
     for(const b of $$('#play-body [data-play-place]'))b.onclick=wrap(()=>openPlace(b.dataset.playPlace,true));
     // Free fallback: an image saved from the Grok app (or any own picture) for this place.
+    if($('#play-generate-background'))$('#play-generate-background').onclick=wrap(()=>openAssetGeneration({kind:'background',targetId:p.node.location_id,time:data.clock.slot_index===3?'ejjel':data.clock.slot_index===2?'este':'nappal',api,requestHeaders,onSaved:()=>openPlace(p.node.id,false)}));
     if($('#play-bg-prompt'))$('#play-bg-prompt').onclick=wrap(async()=>{const r=await api('/api/play/prompts?'+new URLSearchParams({location_id:p.node.location_id}));await navigator.clipboard.writeText(r.background.base+'\n\n'+r.background.evening+'\n\n'+r.background.night+'\n\nMentés: '+r.background.save_as);toast(t('play.promptCopied'));});
     if($('#play-upload'))$('#play-upload').onchange=wrap(async e=>{
       const file=e.target.files[0];if(!file)return;if(file.size>20*1024*1024)throw Error(t('play.tooLarge'));
-      const data_url=await new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=()=>bad(r.error);r.readAsDataURL(file);});
-      await api('/api/backgrounds/upload',{location_id:p.node.location_id,data_url,filename:file.name});toast(t('play.uploaded'));await openPlace(p.node.id,false);
+      const progress=uploadProgress(e.target);e.target.disabled=true;try{await uploadImage({url:'/api/backgrounds/upload',file,fields:{location_id:p.node.location_id},headers:requestHeaders(),onProgress:progress.update});toast(t('play.uploaded'));await openPlace(p.node.id,false);}finally{progress.close();e.target.disabled=false;e.target.value='';}
     });
-    for(const b of $$('[data-play-talk]'))b.onclick=()=>{const person=p.people.find(x=>x.id===b.dataset.playTalk);startTalk(person,'in_person');};
+    for(const b of $$('[data-play-talk]'))b.onclick=()=>inspectPerson(p.people.find(x=>x.id===b.dataset.playTalk));
     // Door markers: drawn once the backdrop's size is known (and again on resize).
     // Doors appear once the background picture has its size, at their final spot (no jump).
-    const bgImg=$('.vn > img.vn-bg');if(bgImg&&!bgImg.complete){bgImg.addEventListener('load',paintDoors,{once:true});bgImg.addEventListener('error',()=>paintDoors(true),{once:true});}else paintDoors();
+    const bgImg=$('.vn > img.vn-bg-current');if(bgImg&&!bgImg.hidden&&!bgImg.complete){bgImg.addEventListener('load',paintDoors,{once:true});bgImg.addEventListener('error',()=>paintDoors(true),{once:true});}else paintDoors();
     if($('#vn-notes'))$('#vn-notes').onclick=wrap(()=>openNotes(p));
     if($('#vn-doors-edit'))$('#vn-doors-edit').onclick=()=>{doorsEditing=true;placeTools=true;showPlace(current);};
     if($('#vn-doors-cancel'))$('#vn-doors-cancel').onclick=()=>{doorsEditing=false;showPlace(current);};
     if($('#vn-doors-save'))$('#vn-doors-save').onclick=wrap(async()=>{await saveDoors();doorsEditing=false;showPlace(current);});
     if($('#vn-doors-reset'))$('#vn-doors-reset').onclick=wrap(async()=>{const r=await api('/api/play/room-exits/'+encodeURIComponent(current.node.id),{exits:{},replace:true});current.room_exits=r.saved;doorsEditing=false;showPlace(current);});
-    $('#vn-place-tools').onclick=()=>{placeTools=!placeTools;$('.vn-place-tools').hidden=!placeTools;$('#vn-place-tools').setAttribute('aria-expanded',String(placeTools));$('#vn-place-tools').textContent=(placeTools?'✕ ':'⋯ ')+t('play.tools');};
+    if($('#vn-place-tools'))$('#vn-place-tools').onclick=()=>{placeTools=!placeTools;$('.vn-place-tools').hidden=!placeTools;$('#vn-place-tools').setAttribute('aria-expanded',String(placeTools));$('#vn-place-tools').textContent=(placeTools?'✕ ':'⋯ ')+t('play.tools');};
     // Touch screens: a tap on the title shows the small place details (hover elsewhere).
     $('.vn-title').onclick=()=>$('.vn-info').classList.toggle('vn-show-kind');
-    for(const b of $$('[data-item-add]'))b.onclick=wrap(async()=>{const name=prompt(t(b.dataset.itemAdd==='vehicle'?'play.vehicleName':'play.itemName'));if(!name?.trim())return;await api('/api/play/items',{name,kind:b.dataset.itemAdd});await render(root);});
-    for(const b of $$('[data-item-take],[data-item-drop]'))b.onclick=wrap(async()=>{await api('/api/play/items/'+(b.dataset.itemTake||b.dataset.itemDrop),{action:b.dataset.itemTake?'take':'drop'});await render(root);});
+    for(const b of $$('[data-item-add]'))b.onclick=wrap(async()=>{const name=await askText(t(b.dataset.itemAdd==='vehicle'?'play.vehicleName':'play.itemName'));if(!name?.trim())return;await api('/api/play/items',{name,kind:b.dataset.itemAdd});await render(root);});
+    for(const b of $$('[data-item-take],[data-item-drop]'))b.onclick=wrap(async()=>{if(b.disabled)return;b.disabled=true;try{if(b.dataset.itemDrop&&!await undoWindow(t('modal.putDown'),{key:'drop:'+b.dataset.itemDrop}))return;await api('/api/play/items/'+(b.dataset.itemTake||b.dataset.itemDrop),{action:b.dataset.itemTake?'take':'drop'});await render(root);}finally{b.disabled=false;}});
     renderTalk();
   }
   // The owner's corrections for a character (2026-11-15): written during play, they apply at once
@@ -814,7 +891,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     return `<div class="play-items">${carried.length?`<small>🎒 ${t('play.bag')}</small>${carried.map(i=>`<button data-item-drop="${esc(i.id)}" title="${esc(t('play.drop'))}">${esc(i.name)} ⤓</button>`).join('')}`:''}
       ${left.length?`<small>${t('play.itemsHere')}</small>${left.map(i=>`<button data-item-take="${esc(i.id)}" title="${esc(t('play.take'))}">${esc(i.name)} ⤒</button>`).join('')}`:''}</div>`;
   }
-  function refreshStage(){if(mode!=='place'||!current)return;const stage=$('.vn-stage');if(!stage)return;stage.classList.add('vn-settled');stage.innerHTML=current.people.map(figure).join('');for(const b of $$('.vn-stage [data-play-talk]'))b.onclick=()=>startTalk(current.people.find(x=>x.id===b.dataset.playTalk),'in_person');paintFigures();}
+  function refreshStage(){if(mode!=='place'||!current)return;const stage=$('.vn-stage');if(!stage)return;stage.classList.add('vn-settled');stage.innerHTML=current.people.map(figure).join('');for(const b of $$('.vn-stage [data-play-talk]'))b.onclick=()=>inspectPerson(current.people.find(x=>x.id===b.dataset.playTalk));paintFigures();}
   // The dialogue box at the bottom of the scene (in-person talks).
   // Authoring tools (scene prompt, own picture, content marks) sit behind one "⋯" button (2026-11-12):
   // the talk screen shows only what playing needs.
@@ -855,19 +932,21 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   const AUTO_DIRS=['right','left','forward'];
   const EDGE={left:[3,46],right:[97,46],forward:[50,24],up:[50,24],back:[93,74],down:[93,74]};
   function pictureBox(){
-    const vn=$('.vn');if(!vn)return null;const W=vn.clientWidth,H=vn.clientHeight,img=$('.vn > img.vn-bg');
+    const vn=$('.vn');if(!vn)return null;const W=vn.clientWidth,H=vn.clientHeight,img=$('.vn > img.vn-bg-current:not([hidden])');
     if(!img||!img.naturalWidth)return {W,H,s:1,dx:0,dy:0,iw:W,ih:H};
     const iw=img.naturalWidth,ih=img.naturalHeight,s=Math.max(W/iw,H/ih);return {W,H,s,dx:(W-iw*s)/2,dy:(H-ih*s)/2,iw,ih};
   }
   function paintDoors(force=false){
     const layer=$('#vn-doors');if(!layer||!current?.node)return;
     // A picture still loading would place the doors on the whole stage first, then move them.
-    const bg=$('.vn > img.vn-bg');if(force!==true&&bg&&!bg.complete)return;
-    if(talkCharacter&&!doorsEditing){layer.innerHTML='';return;}
+    const bg=$('.vn > img.vn-bg-current:not([hidden])');if(force!==true&&bg&&!bg.complete)return;
+    if(talkCharacter&&!talkMinimized&&!doorsEditing){layer.innerHTML='';return;}
     const box=pictureBox();if(!box)return;const saved=current.room_exits||{},targets=exitTargets(current.node.id);let auto=0;const stack={};
     const html=targets.map(e=>{const sv=saved[e.id]||{},dir=sv.dir||(['back','street'].includes(e.relation)?'back':AUTO_DIRS[auto++%AUTO_DIRS.length]);
       const placed=Number.isFinite(sv.x)&&Number.isFinite(sv.y);let left,top;
-      if(placed){left=box.dx+sv.x*box.iw*box.s;top=box.dy+sv.y*box.ih*box.s;}
+      // A door low or at the very edge of the picture can fall into the cropped part or under the
+      // arrival bar: keep every marker inside the visible scene (2026-11-14, forest → car park).
+      if(placed){left=Math.min(box.W-70,Math.max(70,box.dx+sv.x*box.iw*box.s));top=Math.min(box.H-90,Math.max(40,box.dy+sv.y*box.ih*box.s));}
       else{const [px,py]=EDGE[dir]||EDGE.right,k=stack[dir]=(stack[dir]||0)+1;left=px/100*box.W;top=py/100*box.H+(k-1)*46;}
       const arrow={left:'←',right:'→',forward:'↑',up:'↑',back:'↓',down:'↓'}[dir];
       return `<button type="button" class="${placed?'vn-door':'vn-arrow vn-arrow-'+dir}${doorsEditing?' vn-door-edit':''}" data-door="${esc(e.id)}" data-town="${e.town?'1':''}" data-left="${left.toFixed(1)}" data-top="${top.toFixed(1)}" title="${esc(e.text)}">${placed?`<span class="vn-door-dot" aria-hidden="true"></span>`:`<span aria-hidden="true">${dir==='left'?arrow+' ':''}</span>`}${esc(e.short)}${!placed&&dir!=='left'?` ${arrow}`:''}</button>`;});
@@ -941,10 +1020,13 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   });
   function renderSceneDialog(box){
     const lines=talk?.lines||[],ended=talk?.status==='closed',last=lines.at(-1);
-    if(!talkCharacter){
+    if(!talkCharacter||talkMinimized){
       // Arrival: who is here and what they are doing, plus what happened here today.
       const p=current||{people:[],today:[]};
-      if(arrival.of!==p){clearTimeout(arrival.timer);arrival={of:p,collapsed:false,auto:true,timer:0};}
+      // Starts as the small pill and never folds by itself (owner, 2026-11-20): a box that shrank
+      // after a few seconds made the scene change under the player. What someone is doing is on
+      // the figure's hover; the pill still opens the full text.
+      if(arrival.of!==p){clearTimeout(arrival.timer);arrival={of:p,collapsed:true,auto:false,timer:0};}
       box.innerHTML=`<div class="vn-box vn-arrival${arrival.collapsed?' vn-arrival-min':''}">
         <button type="button" class="vn-arrival-pill" aria-expanded="false" title="${esc(t('play.arrivalShow'))}"><b>${esc(t('play.youArrive',{place:label(p.node)||''}))}</b>${p.people.length?`<span class="vn-arrival-count">${esc(t('play.peopleCount',{count:p.people.length}))}</span>`:''}<span class="vn-arrival-more">${t('play.arrivalShow')}</span></button>
         <div class="vn-text">
@@ -954,42 +1036,53 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
         ${p.trip?.encounter?`<p class="vn-encounter"><b>${t('play.encounter')}:</b> ${esc(p.trip.encounter.text)}</p>`:''}
         ${p.people.length?p.people.map(x=>`<p class="vn-activity"><button class="vn-link" data-arrival-talk="${esc(x.id)}">${esc(x.name)}</button>${x.mood==="good"?" 🙂":x.mood==="bad"?" 😠":""}${x.level!==null&&p.level_labels?` <span class="vn-rel">${esc(p.level_labels[x.level])}</span>`:''} — ${esc(x.activity||'')}</p>`).join(''):`<p>${t('play.nobody')}</p>`}
         ${p.today?.length?`<details class="vn-today"><summary>${t('play.todayHere',{count:p.today.length})}</summary>${p.today.map(e=>`<p><b>${esc(e.slot)}:</b> ${esc(e.title)} – ${esc(e.summary)}</p>`).join('')}</details>`:''}
-        ${p.people.length?`<p class="vn-hint-inline">${t('play.clickFigure')}</p>`:''}
-        ${p.people.length>=2?`<button type="button" class="vn-group-start" id="vn-group-start">👥 ${t('play.groupTalk',{count:Math.min(4,p.people.length)})}</button>`:''}
+        ${p.people.length>=2&&!talkCharacter?`<button type="button" class="vn-group-start" id="vn-group-start">👥 ${t('play.groupChoose')}</button>`:''}
         </div></div>`;
       // The ways out are only on the picture now (owner, 2026-11-14): door markers where the door
       // is drawn, arrows at the edges; the list under the arrival text is gone.
-      for(const b of $$('[data-arrival-talk]'))b.onclick=()=>startTalk(p.people.find(x=>x.id===b.dataset.arrivalTalk),'in_person');
+      for(const b of $$('[data-arrival-talk]'))b.onclick=()=>inspectPerson(p.people.find(x=>x.id===b.dataset.arrivalTalk));
       const exits=$$('#vn-doors [data-door]');etaFor(exits.map(b=>b.dataset.door)).then(eta=>{for(const b of exits){const m=eta[b.dataset.door];if(Number.isFinite(m)&&m>1&&b.isConnected&&!b.title.includes('·'))b.title+=' · '+t('play.minutesShort',{minutes:m});}}).catch(()=>{});
       preloadExits(exits.filter(b=>!b.dataset.town).map(b=>b.dataset.door));
-      if($('#vn-group-start'))$('#vn-group-start').onclick=wrap(()=>startGroup(p.people.slice(0,4)));
+      if($('#vn-group-start'))$('#vn-group-start').onclick=wrap(async()=>{const selected=await chooseGroupParticipants(p.people,esc);if(selected)await startGroup(selected);});
       bindArrivalFold(box);
       return;
     }
     if(groupTalk)return renderGroupDialog(box,lines,ended);
     const speakerIsPalor=last?.speaker==='palor';
-    box.innerHTML=`<div class="vn-box">${portrait(talkCharacter,'vn-speaker')}
-      <div class="vn-text"><b class="vn-who">${busy?esc(talkCharacter.name):last?(speakerIsPalor?'Palor':esc(talkCharacter.name)):esc(talkCharacter.name)}</b>${beatOf(lines)&&beatOf(lines)!=='talk'?`<span class="vn-beat">${esc(t('play.beat.'+beatOf(lines)))}</span>`:''}${talk&&Number.isFinite(talk.chemistry)?`<span class="vn-chem ${talk.chemistry>0?'vn-chem-up':talk.chemistry<0?'vn-chem-down':''}" title="${esc(t('play.chemistry'))}" aria-label="${esc(t('play.chemistry'))}: ${talk.chemistry}">${talk.chemistry>=0?'♥':'💔'} ${talk.chemistry>0?'+':''}${talk.chemistry}</span>`:''}
-        <p class="vn-say" aria-live="polite">${busy?`<span class="vn-typing">${esc(t('play.typingName',{name:talkCharacter.name}))}</span>`:last?esc(last.text):esc(t('play.startHint'))}</p>
+    // Scene guests (2026-11-18): when a guest spoke this turn, the whole turn is shown with names.
+    const guests=talk?.guests||[],isGuest=l=>typeof l?.speaker_id==='string'&&l.speaker_id.startsWith('guest:');
+    const turn=lines.slice(lines.map(l=>l.speaker).lastIndexOf('palor')+1),mixed=!busy&&turn.some(isGuest);
+    // When the generated text is intimate right now (the server decides from the content, owner
+    // 2026-11-18), a guest's shirtless picture is shown, if it was made.
+    const intimateNow=talk?.intimate_now===true;
+    box.innerHTML=`<div class="vn-box${guests.length?' vn-has-guests':''}">${portrait(talkCharacter,'vn-speaker')}
+      <div class="vn-text"><b class="vn-who">${busy||mixed?esc(talkCharacter.name):last?(speakerIsPalor?'Palor':esc(talkCharacter.name)):esc(talkCharacter.name)}</b>${beatOf(lines)&&beatOf(lines)!=='talk'?`<span class="vn-beat">${esc(t('play.beat.'+beatOf(lines)))}</span>`:''}${talk&&Number.isFinite(talk.chemistry)?`<span class="vn-chem ${talk.chemistry>0?'vn-chem-up':talk.chemistry<0?'vn-chem-down':''}" title="${esc(t('play.chemistry'))}" aria-label="${esc(t('play.chemistry'))}: ${talk.chemistry}">${talk.chemistry>=0?'♥':'💔'} ${talk.chemistry>0?'+':''}${talk.chemistry}</span>`:''}
+        <p class="vn-say" aria-live="polite">${busy?`<span class="vn-typing">${esc(t('play.typingName',{name:talkCharacter.name}))}</span>`:mixed?turn.map(l=>`<b>${esc(isGuest(l)?l.speaker_name||'?':talkCharacter.name)}:</b> ${esc(l.text)}`).join('<br>'):last?esc(last.text):''}</p>
+        ${guests.length?`<div class="vn-guests">${guests.map(g=>{const bare=intimateNow&&g.bare==='done';return `<span class="vn-guest" title="${esc(g.description)}">${g.image==='done'?`<img class="vn-guest-pic" src="/api/play/guests/${esc(g.id)}/image${bare?'?bare=1':''}" alt="${esc(g.name)}">`:g.image==='pending'?`<span class="vn-guest-pic vn-guest-wait" title="${esc(t('play.guestImagePending'))}">⏳</span>`:g.image==='failed'?`<span class="vn-guest-pic vn-guest-wait" title="${esc(t('play.guestImageFailed')+(g.image_note?' '+g.image_note:''))}">⚠</span>`:''}${g.bare==='pending'&&g.image==='done'?`<span class="muted" title="${esc(t('play.guestBarePending'))}">⏳</span>`:g.bare==='failed'?`<span class="muted" title="${esc(t('play.guestBareFailed')+(g.image_note?' '+g.image_note:''))}">⚠</span>`:''}<b>${esc(g.name)}</b><span class="vn-guest-row">${g.saved?`<span class="muted">${t('play.guestSaved')}</span>`:ended?'':`<button type="button" class="subtle" data-guest-save="${esc(g.id)}">${t('play.guestSave')}</button>`}${!ended&&g.image==='done'&&(g.bare==='off'||g.bare==='failed')?`<button type="button" class="subtle" data-guest-bare="${esc(g.id)}">${t('play.guestBareMake')}</button>`:''}${!ended&&g.image!=='pending'&&g.bare!=='pending'?`<button type="button" class="subtle" data-guest-renew="${esc(g.id)}">${t('play.guestRenew')}</button>`:''}${ended?'':`<button type="button" class="subtle" data-guest-leave="${esc(g.id)}">${t('play.guestLeave')}</button>`}</span></span>`;}).join('')}</div>`:''}
         ${ended&&talk.summary?summaryCard(talk.summary):''}
-        ${ended?'':`${talk?.choices?.length&&!busy?`<div class="vn-quick vn-choices">${talk.choices.map((x,i)=>`<button type="button" data-quick="${esc(x)}" class="vn-choice vn-choice-${i}">${esc(x)}</button>`).join('')}</div>`:lines.length?`<div class="vn-quick">${['play.gesture1','play.gesture2','play.gesture3'].map(k=>`<button type="button" data-quick="${esc(t(k))}">${esc(t(k))}</button>`).join('')}</div>`:`<div class="vn-quick">${['play.quick1','play.quick2','play.quick3'].map(k=>`<button type="button" data-quick="${esc(t(k))}">${esc(t(k))}</button>`).join('')}</div>`}<form id="play-form" class="vn-form"><input id="play-input" aria-label="${esc(t('play.inputLabel'))}" maxlength="2000" autocomplete="off" placeholder="${esc(t('play.placeholder'))}"><button class="primary" ${busy?'disabled':''}>${t('play.send')}</button></form>`}
+        ${ended?'':`${talk?.choices?.length&&!busy?`<div class="vn-quick vn-choices">${talk.choices.map((x,i)=>`<button type="button" data-quick="${esc(x)}" class="vn-choice vn-choice-${i}">${esc(x)}</button>`).join('')}</div>`:lines.length?`<div class="vn-quick">${['play.gesture1','play.gesture2','play.gesture3'].map(k=>`<button type="button" data-quick="${esc(t(k))}">${esc(t(k))}</button>`).join('')}</div>`:`<div class="vn-quick">${['play.quick1','play.quick2','play.quick3'].map(k=>`<button type="button" data-quick="${esc(t(k))}">${esc(t(k))}</button>`).join('')}</div>`}<form id="play-form" class="vn-form"><textarea id="play-input" rows="1" aria-label="${esc(t('play.inputLabel'))}" maxlength="2000" autocomplete="off" placeholder="${esc(t('play.placeholder'))}" aria-describedby="play-input-help"></textarea><button class="primary" ${busy?'disabled':''}>${t('play.send')}</button></form>`}
         ${showShared&&sharedFor.length?`<div class="vn-shared">${sharedFor.map(s=>`<button type="button" data-show-photo="${esc(s.media_id)}" title="${esc(s.description||'')}"><img src="${pic(s.media_id)}" alt="" loading="lazy" class="${s.intimate?'rel-blur':''}"></button>`).join('')}</div>`:''}
         ${!ended&&!busy&&talk?.mode==='intimate'?`<div class="vn-pace" role="group" aria-label="${esc(t('play.paceLabel'))}">${['slower','continue','stop'].map(p=>`<button type="button" data-pace="${p}" class="vn-pace-${p}">${t('play.pace.'+p)}</button>`).join('')}</div>`:''}
-        <div class="vn-buttons">${!ended&&talkChannel==='in_person'&&talk?.mode!=='intimate'?(talkCharacter.stage==='intimate'?`<button type="button" id="vn-closer">💋 ${t('play.closer')}</button>`:`<button type="button" disabled title="${esc(t('play.closerLocked'))}" aria-disabled="true">💋 ${t('play.closer')}</button>`):''}${photoMode?`<button type="button" id="vn-photo-size">${photoSmall?'⛶ '+t('play.photoBig'):'▣ '+t('play.photoSmall')}</button>`:''}${!ended&&sharedFor.length?`<button type="button" id="vn-shared">📷 ${t('play.showShared')}</button>`:''}${talkChannel==='in_person'?`<button type="button" id="vn-photo">${photoMode?t('play.photoOff'):t('play.photoOn')}</button>${photoMode&&photoList.length?`<button type="button" id="vn-photo-prev" aria-label="${esc(t('play.prevPhoto'))}">◀</button>${showTools?`<span class="vn-mark">${['non_intimate','nudity','sexual_activity'].map(l=>`<button type="button" data-mark="${l}" title="${esc(t('play.mark.'+l))}">${{non_intimate:'☀',nudity:'🔥',sexual_activity:'🔞'}[l]}</button>`).join('')}</span>`:''}<span class="vn-photo-count">${photoIdx+1}/${photoList.length}${photoList[photoIdx]?.intimate?' 🔞':''}${photoList[photoIdx]?.with_palor?' · Palorral':''}</span><button type="button" id="vn-photo-next" aria-label="${esc(t('play.nextPhoto'))}">▶</button>`:''}`:''}${!ended&&talkChannel==='in_person'&&!photoMode&&talk&&talkCharacter.stage&&talkCharacter.stage!=='none'&&(talk.mood||talk.mode==='intimate')?`<button type="button" id="vn-moment" class="vn-moment">✨ ${t('play.moment')}</button>`:''}${talkChannel==='in_person'&&showTools?`<button type="button" id="vn-scene-prompt">📋 ${t('play.scenePrompt')}</button>${phone?'':`<label class="vn-add">➕ ${t('play.addScene')}<input type="file" id="vn-add-scene" accept="image/png,image/jpeg" hidden></label>`}`:''}${showTools||talkChannel!=='in_person'?`<button type="button" id="vn-talk-notes" title="${esc(t('play.notesLead'))}">${t('play.notes')}</button>`:''}${talkChannel==='in_person'?`<button type="button" id="vn-tools" class="vn-tools" aria-expanded="${showTools}" title="${esc(t('play.toolsTitle'))}">${showTools?'✕':'⋯'} ${t('play.tools')}</button>`:''}<button type="button" id="vn-history">${t('play.history')}</button>${goodbyeButtons(lines,ended)}</div></div></div>
-      ${showHistory?`<div class="vn-history">${lines.map(l=>`<p><b>${l.speaker==='palor'?'Palor':esc(talkCharacter.name)}:</b> ${esc(l.text)}</p>`).join('')||`<p class="muted">—</p>`}</div>`:''}`;
+        <div class="vn-buttons">${showTools?`<button type="button" id="vn-talk-view">${t(settings.talk_view==='chat'?'play.viewVn':'play.viewChat')}</button>`:''}${!ended&&talk?.last_turn?`<button type="button" id="vn-undo-turn" ${busy?'disabled':''}>${t('play.undoTurn')}</button>${talk.last_turn.can_regenerate?`<button type="button" id="vn-regenerate" ${busy?'disabled':''}>${t('play.regenerate')}</button>`:''}`:''}${!ended&&talkChannel==='in_person'&&talk?.mode!=='intimate'?(talkCharacter.stage==='intimate'?`<button type="button" id="vn-closer">💋 ${t('play.closer')}</button>`:''):''}${photoMode?`<button type="button" id="vn-photo-size">${photoSmall?'⛶ '+t('play.photoBig'):'▣ '+t('play.photoSmall')}</button>`:''}${!ended&&showTools&&sharedFor.length?`<button type="button" id="vn-shared">📷 ${t('play.showShared')}</button>`:''}${talkChannel==='in_person'&&(showTools||photoMode)?`<button type="button" id="vn-photo">${photoMode?t('play.photoOff'):t('play.photoOn')}</button>${photoMode&&photoList.length?`<button type="button" id="vn-photo-prev" aria-label="${esc(t('play.prevPhoto'))}">◀</button>${showTools?`<span class="vn-mark">${['non_intimate','nudity','sexual_activity'].map(l=>`<button type="button" data-mark="${l}" title="${esc(t('play.mark.'+l))}">${{non_intimate:'☀',nudity:'🔥',sexual_activity:'🔞'}[l]}</button>`).join('')}</span>`:''}<span class="vn-photo-count">${photoIdx+1}/${photoList.length}${photoList[photoIdx]?.intimate?' 🔞':''}${photoList[photoIdx]?.with_palor?' · Palorral':''}</span><button type="button" id="vn-photo-next" aria-label="${esc(t('play.nextPhoto'))}">▶</button>`:''}`:''}${!ended&&talkChannel==='in_person'&&!photoMode&&talk&&talkCharacter.stage&&talkCharacter.stage!=='none'&&(talk.mood||talk.mode==='intimate')?`<button type="button" id="vn-moment" class="vn-moment">✨ ${t('play.moment')}</button>`:''}${talkChannel==='in_person'&&showTools?`<button type="button" id="vn-snapshot">📸 ${t('picture.snapshot')}</button><button type="button" id="vn-scene-prompt">📋 ${t('play.scenePrompt')}</button>${phone?'':`<label class="vn-add">➕ ${t('play.addScene')}<input type="file" id="vn-add-scene" accept="image/png,image/jpeg" hidden></label>`}`:''}${showTools||talkChannel!=='in_person'?`<button type="button" id="vn-talk-notes" title="${esc(t('play.notesLead'))}">${t('play.notes')}</button>`:''}${talkChannel==='in_person'?`<button type="button" id="vn-tools" class="vn-tools" aria-expanded="${showTools}" title="${esc(t('play.toolsTitle'))}">${showTools?'✕':'⋯'} ${t('play.tools')}</button>`:''}${!ended&&showTools&&talk&&talkChannel==='in_person'&&guests.length<2?`<button type="button" id="vn-guest-add" title="${esc(t('play.guestAddTitle'))}">${t('play.guestAdd')}</button>`:''}<button type="button" id="vn-history">${t('play.history')}</button>${goodbyeButtons(lines,ended)}</div></div></div>
+      ${settings.talk_view==='chat'?`<div class="vn-chat-feed" role="log">${lines.slice(-12).map(l=>`<p class="${l.speaker==='palor'?'vn-chat-mine':'vn-chat-theirs'}"><b>${l.speaker==='palor'?'Palor':esc(isGuest(l)?l.speaker_name||'?':talkCharacter.name)}:</b> ${esc(l.text)}</p>`).join('')}</div>`:''}${showHistory?`<div class="vn-history">${lines.map(l=>`<p><b>${l.speaker==='palor'?'Palor':esc(isGuest(l)?l.speaker_name||'?':talkCharacter.name)}:</b> ${esc(l.text)}</p>`).join('')||`<p class="muted">—</p>`}${talk?.revised_turns?.length?`<details class="vn-revisions"><summary>${t('play.earlierVersions')}</summary>${talk.revised_turns.map(revision=>`<article><small>${esc(new Date(revision.created_at).toLocaleString('hu-HU'))} · ${esc(t('play.revision.'+revision.action))}</small>${revision.lines.map(l=>`<p><b>${l.speaker==='palor'?'Palor':esc(talkCharacter.name)}:</b> ${esc(l.text)}</p>`).join('')}</article>`).join('')}</details>`:''}</div>`:''}`;
     bindTalkControls();
+    if($('#vn-talk-view'))$('#vn-talk-view').onclick=wrap(async()=>{settings=await api('/api/play/settings',{talk_view:settings.talk_view==='chat'?'vn':'chat'});renderTalk();});
+    const revise=action=>wrap(async()=>{if(busy||!talk?.last_turn)return;const text=[...talk.lines].reverse().find(line=>line.speaker==='palor')?.text||'';if(action==='regenerate'&&!await confirmBox(t('play.regenerateConfirm')))return;const signature=talk.id+':'+talk.last_turn.reply_id+':'+action;if(!turnIntents.has(signature))turnIntents.set(signature,'turn_'+crypto.randomUUID());const cid=talk.id,expected=talk.last_turn.reply_id;talkDraft=text;if($('#play-input'))$('#play-input').value=text;busy=true;renderTalk();try{talk=await api('/api/play/conversations/'+cid+'/turn',{request_key:turnIntents.get(signature),expected_reply_id:expected,action,...(action==='regenerate'?{acknowledge_cost:true}:{})});talkDraft=action==='undo'?talk.draft||text:'';turnIntents.delete(signature);}finally{busy=false;if($('#play-input'))$('#play-input').value=talkDraft;renderTalk();}});
+    if($('#vn-undo-turn'))$('#vn-undo-turn').onclick=revise('undo');if($('#vn-regenerate'))$('#vn-regenerate').onclick=revise('regenerate');
+    const feed=$('.vn-chat-feed');if(feed)feed.scrollTop=feed.scrollHeight;
+    bindGuests(guests);
     if($('#vn-photo-size'))$('#vn-photo-size').onclick=()=>{photoSmall=!photoSmall;$('.vn')?.classList.toggle('vn-photo-small',photoSmall);renderTalk();};
-    typeOut(last,busy);
-    syncScene();sparkPop(last);
+    typeOut(mixed?null:last,busy);
+    syncScene();sparkPop(mixed?turn.find(l=>l.speaker==='character'&&!isGuest(l)):last);
     $('#vn-history').onclick=()=>{showHistory=!showHistory;renderTalk();};
     if($('#vn-tools'))$('#vn-tools').onclick=()=>{showTools=!showTools;renderTalk();};if($('#vn-talk-notes'))$('#vn-talk-notes').onclick=wrap(()=>openNotes(current||{people:[]}));
-    for(const b of $$('[data-quick]'))b.onclick=()=>submitWith('#play-input','#play-form',b.dataset.quick);
+    bindQuickChoices();
     if($('#vn-photo'))$('#vn-photo').onclick=wrap(togglePhoto);
     for(const b of $$('[data-mark]'))b.onclick=wrap(async()=>{const item=photoList[photoIdx];if(!item)return;await api('/api/play/content',{media_id:item.media_id,level:b.dataset.mark});item.intimate=b.dataset.mark!=='non_intimate';photoFor=null;toast(t('play.marked'));renderTalk();});
+    if($('#vn-snapshot'))$('#vn-snapshot').onclick=wrap(()=>openPictureOrder({target:{target:'snapshot',character_id:talkCharacter.id,location_id:current?.node?.location_id||'',conversation_id:talk.id},api,requestHeaders,onSaved:async()=>{talk=await api('/api/play/conversations/'+talk.id);renderTalk();}}));
     if($('#vn-scene-prompt'))$('#vn-scene-prompt').onclick=wrap(async()=>{const r=await api('/api/play/prompts?'+new URLSearchParams({character_id:talkCharacter.id,location_id:current?.node?.location_id||'',...(talk?.id&&talkChannel!=='phone'?{conversation_id:talk.id}:{})}));await navigator.clipboard.writeText(r.scene.prompt+'\n\n'+r.scene.howto);toast(t('play.promptCopied'));});
     if($('#vn-add-scene'))$('#vn-add-scene').onchange=wrap(async e=>{const file=e.target.files[0];if(!file)return;if(file.size>20*1024*1024)throw Error(t('play.tooLarge'));
-      const data_url=await new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=()=>bad(r.error);r.readAsDataURL(file);});
-      const r=await api('/api/play/scenes/upload',{character_id:talkCharacter.id,location_id:current?.node?.location_id||null,data_url});toast(r.duplicate?t('play.sceneDuplicate'):t('play.sceneAdded'));
+      const progress=uploadProgress(e.target);e.target.disabled=true;let r;try{r=await uploadImage({url:'/api/play/scenes/upload',file,fields:{character_id:talkCharacter.id,location_id:current?.node?.location_id||null},headers:requestHeaders(),onProgress:progress.update});}finally{progress.close();e.target.disabled=false;e.target.value='';}toast(r.duplicate?t('play.sceneDuplicate'):t('play.sceneAdded'));
       // The uploaded picture becomes the scene picture above the conversation at once (2026-11-13).
       photoList=[{media_id:r.media_id,kind:'image',at_place:true,with_palor:true,intimate:false,description:null}];photoIdx=0;photoFor=null;photoMode=true;
       renderTalk();showPhoto();$('.vn-photo')?.classList.remove('vn-scene-in');void $('.vn-photo')?.offsetWidth;$('.vn-photo')?.classList.add('vn-scene-in');placeBubbles();});
@@ -1017,10 +1110,11 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   // ---- group scene: Palor with 2–4 people here; each turn may get several short replies ----
   let groupTalk=false;
   async function startGroup(people){
+    talkMinimized=false;talkDraft='';conversationContext=null;const oldInput=$('#play-input');if(oldInput)oldInput.value='';
     talk=null;groupTalk=true;showHistory=false;showShared=false;sharedFor=[];
     talkCharacter={id:people[0].id,name:people.map(x=>x.name.split(/\s/)[0]).join(', '),cover_id:people[0].cover_id,stage:'none'};talkChannel='in_person';
     busy=true;renderTalk();refreshStage();
-    try{talk=await api('/api/play/group-talk',{opener:true});}catch(e){toast(e.message,true);}finally{busy=false;renderTalk();$('#play-input')?.focus();}
+    try{talk=await api('/api/play/group-talk',{opener:true,character_ids:people.map(p=>p.id)});}catch(e){talk=null;groupTalk=false;talkCharacter=null;refreshStage();toast(e.message,true);}finally{busy=false;renderTalk();$('#play-input')?.focus();}
   }
   function renderGroupDialog(box,lines,ended){
     // The newest turn: every reply since Palor last spoke, each with its speaker.
@@ -1030,13 +1124,13 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
         <div class="vn-say" aria-live="polite">${busy?`<span class="vn-typing">${t('play.waiting')}</span>`:turn.map(l=>`<p><b>${esc(l.speaker_name||'?')}:</b> ${esc(l.text)}</p>`).join('')}</div>
         ${ended&&talk.summary?summaryCard(talk.summary):''}
         ${ended||busy||!talk?.choices?.length?'':`<div class="vn-quick vn-choices">${talk.choices.map((x,i)=>`<button type="button" data-quick="${esc(x)}" class="vn-choice vn-choice-${i}">${esc(x)}</button>`).join('')}</div>`}
-        ${ended?'':`<form id="play-form" class="vn-form"><input id="play-input" aria-label="${esc(t('play.inputLabel'))}" maxlength="2000" autocomplete="off" placeholder="${esc(t('play.placeholderGroup'))}"><button class="primary" ${busy?'disabled':''}>${t('play.send')}</button></form>`}
+        ${ended?'':`<form id="play-form" class="vn-form"><textarea id="play-input" rows="1" aria-label="${esc(t('play.inputLabel'))}" maxlength="2000" autocomplete="off" placeholder="${esc(t('play.placeholderGroup'))}" aria-describedby="play-input-help"></textarea><button class="primary" ${busy?'disabled':''}>${t('play.send')}</button></form>`}
         <div class="vn-buttons"><button type="button" id="vn-history">${t('play.history')}</button>${goodbyeButtons(lines,ended)}</div></div></div>
       ${showHistory?`<div class="vn-history">${lines.map(l=>`<p><b>${l.speaker==='palor'?'Palor':esc(l.speaker_name||'?')}:</b> ${esc(l.text)}</p>`).join('')||`<p class="muted">—</p>`}</div>`:''}`;
     bindTalkControls();
     $('#vn-history').onclick=()=>{showHistory=!showHistory;renderTalk();};
     if($('#vn-tools'))$('#vn-tools').onclick=()=>{showTools=!showTools;renderTalk();};if($('#vn-talk-notes'))$('#vn-talk-notes').onclick=wrap(()=>openNotes(current||{people:[]}));
-    for(const b of $$('[data-quick]'))b.onclick=()=>submitWith('#play-input','#play-form',b.dataset.quick);
+    bindQuickChoices();
     syncScene();
   }
 
@@ -1129,6 +1223,38 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     talkCharacter=null;talk=null;showHistory=false;autoSceneId=null;
     if(photoMode){photoMode=false;$('.vn')?.classList.remove('vn-photo-mode');$('.vn-photo')?.remove();}
   }
+  // Scene guests (2026-11-18): a new man joins the scene; his profile picture is made by OpenAI
+  // (paid, only when the owner says yes). While it is being made, the talk is re-read every 8 s.
+  let guestPoll=0;
+  // Click a character picture in the talk (speaker portrait, guest picture) to see it large;
+  // a click anywhere, the ✕ or Esc closes it (owner, 2026-11-18).
+  function openZoom(src,alt){
+    $('.vn-zoom')?.remove();
+    const box=document.createElement('div');box.className='vn-zoom';box.setAttribute('role','dialog');box.setAttribute('aria-modal','true');
+    box.innerHTML=`<img src="${esc(src)}" alt="${esc(alt||'')}"><button type="button" class="vn-zoom-close" aria-label="${esc(t('common.closeDialog'))}">✕</button>`;
+    const close=()=>{box.remove();document.removeEventListener('keydown',onKey);};
+    const onKey=e=>{if(e.key==='Escape')close();};
+    box.onclick=close;document.addEventListener('keydown',onKey);document.body.appendChild(box);box.querySelector('button').focus();
+  }
+  function bindZoom(){
+    const sp=$('.vn-box img.vn-speaker');if(sp)sp.onclick=()=>openZoom(sp.src.replace(/([?&]w=)\d+/,'$11600'),sp.alt);
+    for(const im of $$('img.vn-guest-pic'))im.onclick=()=>openZoom(im.src,im.alt);
+  }
+  function bindGuests(guests){
+    bindZoom();
+    if($('#vn-guest-add'))$('#vn-guest-add').onclick=wrap(async()=>{
+      const guest=await ask({title:t('modal.guestTitle'),fields:[{name:'hint',label:t('play.guestHintPrompt'),multiline:true,maxLength:2000},{name:'portrait',label:t(settings.guest_image_provider==='sogni'?'modal.guestSogniPortrait':'modal.guestPortrait'),type:'checkbox',value:false}],accept:t('modal.continue')});if(!guest)return;const {hint,portrait}=guest;
+      busy=true;renderTalk();
+      try{talk=await api('/api/play/guests',{conversation_id:talk.id,hint:hint.trim(),portrait});const g=talk.guests?.at(-1);if(g)toast(t('play.guestJoined',{name:g.name}));if(g&&portrait&&settings.guest_image_provider==='sogni')await openAssetGeneration({kind:'guest',targetId:g.id,api,requestHeaders,onSaved:async()=>{talk=await api('/api/play/conversations/'+talk.id);renderTalk();}});}
+      finally{busy=false;renderTalk();}
+    });
+    for(const b of $$('[data-guest-bare]'))b.onclick=wrap(async()=>{if(!await confirmBox(t('play.guestBareConfirm')))return;talk=await api(`/api/play/guests/${b.dataset.guestBare}/shirtless`,{});renderTalk();});
+    for(const b of $$('[data-guest-renew]'))b.onclick=wrap(async()=>{if(settings.guest_image_provider==='sogni'){await openAssetGeneration({kind:'guest',targetId:b.dataset.guestRenew,api,requestHeaders,onSaved:async()=>{talk=await api('/api/play/conversations/'+talk.id);renderTalk();}});return;}if(!await confirmBox(t('play.guestRenewConfirm')))return;talk=await api(`/api/play/guests/${b.dataset.guestRenew}/pictures`,{});renderTalk();});
+    for(const b of $$('[data-guest-leave]'))b.onclick=wrap(async()=>{talk=await api(`/api/play/guests/${b.dataset.guestLeave}/leave`,{});renderTalk();});
+    for(const b of $$('[data-guest-save]'))b.onclick=wrap(async()=>{const r=await api(`/api/play/guests/${b.dataset.guestSave}/save`,{});talk=r;toast(t(r.saved?.picture?'play.guestSavedToastPic':'play.guestSavedToast',{name:r.saved?.name||''}));renderTalk();});
+    clearTimeout(guestPoll);
+    if(talk?.id&&guests.some(g=>g.image==='pending'||g.bare==='pending')){const id=talk.id;guestPoll=setTimeout(()=>{if(talk?.id!==id||busy)return;api('/api/play/conversations/'+id).then(v=>{if(talk?.id===id&&!busy){talk={...talk,guests:v.guests,intimate_now:v.intimate_now};renderTalk();}}).catch(()=>{});},8000);}
+  }
   function bindTalkControls(){
     // After two lines the talk shows "Elköszönök" (#play-end) instead of "Mégse" (#play-close):
     // the missing button threw here and left the send form without its handler (2026-11-13).
@@ -1139,7 +1265,6 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
         if(talk.dispersed)toast(t('play.groupDispersed'));
         if(talk.mood){moodBy.set(talkCharacter.id,talk.mood);refreshStage();}else if(groupTalk)refreshStage();
         $('#play-input')?.focus();});
-      const input=$('#play-input');if(input?.tagName==='TEXTAREA')input.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#play-form')?.requestSubmit();}};
     }
     if($('#play-end'))$('#play-end').onclick=wrap(async()=>{busy=true;renderTalk();try{talk=await api(`/api/play/conversations/${talk.id}/end`,{});toast(talk.summary?.milestone?'★ '+talk.summary.milestone:t('play.savedToast'));}finally{busy=false;renderTalk();}});
   }
@@ -1183,24 +1308,48 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
 
   // Walking up to someone: he notices Palor and speaks first (one short AI reply).
   let showShared=false,sharedFor=[];
+  const participantDetails=memoizedRead(id=>api('/api/play/known-character/'+encodeURIComponent(id)),{ttl:30000});
+  function resumeTalk(){talkMinimized=false;if(talkChannel==='in_person'&&current?.node){mode='place';return render(root,{reuse:true});}renderTalk();$('#play-input')?.focus();}
+  function inspectPerson(person){
+    if(!person)return;
+    const same=talkCharacter&&(talkCharacter.id===person.id||(groupTalk&&talk?.participants?.some(p=>p.id===person.id)));
+    openPersonCard({person,esc,portrait,load:()=>participantDetails(person.id),canTalk:!talkCharacter||!!same,talkLabel:same?t('play.backToTalk'):t('play.addressPerson'),
+      onTalk:wrap(()=>talkCharacter?resumeTalk():startTalk(person,'in_person')),
+      onMessage:wrap(async()=>{phoneWith=person.id;phoneExtra={id:person.id,name:person.name,cover_id:person.cover_id,can_talk:true,unread:0};phoneTalk=null;mode='messages';await render(root,{reuse:true});}),
+      onAlbum:wrap(()=>openAlbum(person))});
+  }
+  function bindTalkInput(){
+    const input=$('#play-input'),form=$('#play-form');if(!input||!form)return;
+    input.setAttribute('aria-describedby','play-input-help');
+    bindGrowingInput(input,{submit:()=>form.requestSubmit(),lastLine:()=>[...(talk?.lines||[])].reverse().find(line=>line.speaker==='palor')?.text||''});
+    if(!$('#play-input-help'))form.insertAdjacentHTML('afterend',`<small id="play-input-help" class="play-sr">${t('play.inputHelp')}</small>`);
+  }
+  function bindQuickChoices(){for(const button of $$('[data-quick]')){
+    button.title=t(settings.quick_send?'play.quickImmediate':'play.quickEdit');
+    button.onclick=e=>{if(settings.quick_send){if(e.detail<=1)submitWith('#play-input','#play-form',button.dataset.quick);}else{const input=$('#play-input');if(input){input.value=button.dataset.quick;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();input.setSelectionRange(input.value.length,input.value.length);}}};
+    button.ondblclick=e=>{if(!settings.quick_send){e.preventDefault();submitWith('#play-input','#play-form',button.dataset.quick);}};
+  }}
   async function startTalk(person,channel){
+    talkMinimized=false;talkDraft='';conversationContext=null;const oldInput=$('#play-input');if(oldInput)oldInput.value='';
     talk=null;groupTalk=false;talkCharacter=person;talkChannel=channel;showHistory=false;showShared=false;sharedFor=[];autoSceneId=null;
     api('/api/play/shared-photos/'+person.id).then(r=>{if(talkCharacter?.id===person.id){sharedFor=r.photos;renderTalk();}}).catch(()=>{});
     if(channel!=='in_person'){renderTalk();refreshStage();$('#play-input')?.focus();return;}
     busy=true;renderTalk();refreshStage();
-    try{talk=await talkApi({character_id:person.id,channel,opener:true});if(talk.mood){moodBy.set(person.id,talk.mood);refreshStage();}}
+    try{conversationContext=await participantDetails(person.id).catch(()=>null);talk=await talkApi({character_id:person.id,channel,opener:true});if(talk.mood){moodBy.set(person.id,talk.mood);refreshStage();}}
     catch(e){toast(e.message,true);}
     finally{busy=false;renderTalk();$('#play-input')?.focus();}
   }
   // Redrawing the talk never loses what Palor is typing (2026-11-13): the draft and the focus are
   // carried over; a line that could not be sent comes back into the box (failedText).
-  let failedText='';
+  let failedText='',talkDraft='',talkMinimized=false,conversationContext=null;
   function renderTalk(){
-    const input=document.getElementById('play-input'),draft=input?.value||'',focused=document.activeElement===input,caret=input?.selectionStart;
+    const input=document.getElementById('play-input'),draft=input?.value||'',focused=document.activeElement===input,caret=input?.selectionStart,end=input?.selectionEnd;
+    if(input&&talkCharacter)talkDraft=draft;if(!talkCharacter)talkDraft='';
     renderTalkInner();
     const next=document.getElementById('play-input');
-    if(next&&(draft||failedText)){next.value=draft||failedText;if(!draft)failedText='';}
-    if(next&&focused){next.focus();if(Number.isFinite(caret))try{next.setSelectionRange(caret,caret);}catch{}}
+    if(next&&(talkDraft||failedText)){next.value=talkDraft||failedText;talkDraft=next.value;if(failedText)failedText='';}
+    if(next)bindTalkInput();
+    if(next&&focused){next.focus();if(Number.isFinite(caret))try{next.setSelectionRange(caret,Number.isFinite(end)?end:caret);}catch{}}
   }
   // The narrator ("Rendszer") answers outside the story: a box over the scene until closed.
   function showNarration(n){
@@ -1215,6 +1364,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   // after the await, the redraw still showed the previous line and the talk seemed stuck (2026-11-14).
   async function sendLine(text,send){
     const box=document.getElementById('play-input');if(box)box.value='';
+    talkDraft='';
     busy=true;renderTalk();
     try{const r=await send();clearNotice('talk');
       // "*Rendszer! …*": the narrator's answer is shown apart; an order alone leaves the talk as it was.
@@ -1226,19 +1376,22 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   }
   function renderTalkInner(){
     const scene=$('#vn-dialog');
+    if(talkCharacter&&talkMinimized){
+      if(scene){renderSceneDialog(scene);fitStage();paintDoors();}
+      const box=$('#play-talk');if(box)paintTalkPill(box);return;
+    }
     if(scene&&(!talkCharacter||talkChannel==='in_person')){$('#play-talk').innerHTML='';renderSceneDialog(scene);fitStage();paintDoors();return;}
     const box=$('#play-talk');if(!box)return;
     if(!talkCharacter){box.innerHTML='';return;}
     // A face-to-face talk while another screen is open (journal, map…): one small reminder that
     // leads back to it, instead of a second chat window (2026-11-13).
     if(talkChannel==='in_person'&&current?.node){
-      box.innerHTML=`<div class="play-talk-pill" role="status">${portrait(talkCharacter,'play-chip')}<span>${esc(t('play.talkOngoing',{name:talkCharacter.name}))}</span><button type="button" class="primary" id="play-talk-back">${t('play.backToTalk')}</button></div>`;
-      $('#play-talk-back').onclick=wrap(async()=>{mode='place';await render(root);});
+      paintTalkPill(box);
       return;
     }
     const lines=talk?.lines||[],ended=talk?.status==='closed';
     box.innerHTML=`<div class="play-talk"><div class="play-talk-head">${portrait(talkCharacter,'play-portrait small')}<b>${esc(talkCharacter.name)}</b><small>${talkChannel==='phone'?t('play.phone'):''}</small><button class="subtle" id="play-close" aria-label="${esc(t('common.closeDialog'))}">✕</button></div>
-      <div class="play-log" id="play-log">${lines.map(l=>`<p class="play-line ${l.speaker==='palor'?'play-me':'play-them'}"><b>${l.speaker==='palor'?'Palor':esc(talkCharacter.name)}</b> ${esc(l.text)}</p>`).join('')||(busy?'':`<p class="muted">${t('play.startHint')}</p>`)}${busy?`<p class="play-line play-them"><b>${esc(talkCharacter.name)}</b> <span class="vn-typing">${t('play.waiting')}</span></p>`:''}
+      <div class="play-log" id="play-log">${lines.map(l=>`<p class="play-line ${l.speaker==='palor'?'play-me':'play-them'}"><b>${l.speaker==='palor'?'Palor':esc(talkCharacter.name)}</b> ${esc(l.text)}</p>`).join('')}${busy?`<p class="play-line play-them"><b>${esc(talkCharacter.name)}</b> <span class="vn-typing">${t('play.waiting')}</span></p>`:''}
       ${ended&&talk.summary?`<div class="note">${t('play.saved')}: ${esc(talk.summary.summary||talk.summary.title)}${talk.summary.level_delta?` (${talk.summary.level_delta>0?'+':''}${talk.summary.level_delta})`:''}</div>`:''}</div>
       ${ended?'':`<form id="play-form" class="play-form"><textarea id="play-input" aria-label="${esc(t('play.inputLabel'))}" rows="2" maxlength="2000" placeholder="${esc(t('play.placeholder'))}"></textarea><button class="primary" ${busy?'disabled':''}>${busy?t('play.waiting'):t('play.send')}</button>${talk?`<button type="button" id="play-end" class="subtle">${t('play.end')}</button>`:''}</form>`}</div>`;
     const log=$('#play-log');log.scrollTop=log.scrollHeight;
@@ -1250,5 +1403,77 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     }
     if($('#play-end'))$('#play-end').onclick=wrap(async()=>{busy=true;renderTalk();try{talk=await api(`/api/play/conversations/${talk.id}/end`,{});toast(talk.summary?.milestone?'★ '+talk.summary.milestone:t('play.savedToast'));}finally{busy=false;renderTalk();}});
   }
-  return {render,leave:()=>{document.body.classList.remove('play-mode');synced=false;}};
+  function paintTalkPill(box){
+    box.innerHTML=`<div class="play-talk-pill" role="status">${portrait(talkCharacter,'play-chip')}<span>${esc(t('play.talkOngoing',{name:talkCharacter.name}))}</span><button type="button" class="primary" id="play-talk-back">${t('play.backToTalk')}</button></div>`;
+    $('#play-talk-back').onclick=wrap(resumeTalk);
+    placeNotices();
+  }
+  return {render,commands,travelToPlace:id=>openPlace(id,true),leave:()=>{travelHints.hide();if(!studio)document.body.classList.remove('play-mode');synced=false;if(studio){root=null;data=null;clearTimeout(guestPoll);}}};
+}
+
+// Delegated hints survive map/scene updates. A long press consumes only its own
+// click; short taps keep the existing navigation and travel behavior.
+export function installTravelHints({active=()=>true,describe,doc=document,delay=430}){
+  const selector='.lu-map [data-play-town], [data-town-pin], [data-door]';
+  let hint=null,target=null,timer=null,press=null,blocked=null,blockedUntil=0,observer=null;
+  const cancel=()=>{clearTimeout(timer);timer=null;press=null;};
+  function hide(){
+    observer?.disconnect();observer=null;
+    if(target&&hint){const ids=(target.getAttribute('aria-describedby')||'').split(/\s+/).filter(id=>id&&id!==hint.id);if(ids.length)target.setAttribute('aria-describedby',ids.join(' '));else target.removeAttribute('aria-describedby');}
+    hint?.remove();hint=null;target=null;
+  }
+  function show(el){
+    if(!active()||!el?.isConnected)return;
+    hide();target=el;hint=doc.createElement('div');hint.className='play-travel-hint';hint.id='play-travel-hint';hint.setAttribute('role','tooltip');
+    const update=()=>{
+      hint.textContent=describe(el);const r=el.getBoundingClientRect(),view=doc.defaultView;
+      const box=hint.getBoundingClientRect(),w=view.innerWidth,h=view.innerHeight;
+      hint.style.left=Math.max(8,Math.min(w-box.width-8,r.left+(r.width-box.width)/2))+'px';
+      hint.style.top=Math.max(8,Math.min(h-box.height-8,r.bottom+8))+'px';
+    };
+    doc.body.appendChild(hint);el.setAttribute('aria-describedby',[(el.getAttribute('aria-describedby')||''),hint.id].filter(Boolean).join(' '));update();
+    observer=new MutationObserver(update);observer.observe(el,{attributes:true,attributeFilter:['title','aria-label'],childList:true,characterData:true,subtree:true});
+  }
+  const match=e=>e.target.closest?.(selector);
+  doc.addEventListener('pointerover',e=>{if(e.pointerType!=='touch'){const el=match(e);if(el&&el!==target)show(el);}});
+  doc.addEventListener('pointerout',e=>{if(target&&!target.contains(e.relatedTarget))hide();});
+  doc.addEventListener('focusin',e=>{const el=match(e);if(el)show(el);});
+  doc.addEventListener('focusout',hide);
+  doc.addEventListener('pointerdown',e=>{
+    cancel();blocked=null;const el=match(e);if(!el||e.pointerType!=='touch'||!active())return;
+    press={x:e.clientX,y:e.clientY};timer=setTimeout(()=>{timer=null;show(el);blocked=el;blockedUntil=Date.now()+30000;},delay);
+  },true);
+  doc.addEventListener('pointermove',e=>{if(press&&Math.hypot(e.clientX-press.x,e.clientY-press.y)>10){cancel();hide();}},true);
+  doc.addEventListener('pointerup',()=>{cancel();if(blocked)blockedUntil=Date.now()+1500;},true);
+  doc.addEventListener('pointercancel',()=>{cancel();hide();blocked=null;},true);
+  doc.addEventListener('contextmenu',e=>{if(blocked&&blocked.contains(e.target)&&Date.now()<blockedUntil)e.preventDefault();},true);
+  doc.addEventListener('click',e=>{if(blocked&&blocked.contains(e.target)&&Date.now()<blockedUntil){e.preventDefault();e.stopImmediatePropagation();blocked=null;}},true);
+  doc.addEventListener('scroll',()=>{cancel();hide();},true);
+  doc.addEventListener('keydown',e=>{if(e.key==='Escape'){cancel();hide();}},true);
+  doc.defaultView.addEventListener('resize',hide);
+  return {hide:()=>{cancel();hide();}};
+}
+
+// A12: opening and cancelling this chooser are entirely local. The opener is sent
+// only after a valid explicit selection is returned to startGroup.
+export function chooseGroupParticipants(people,esc){
+  const available=[...new Map(people.map(p=>[p.id,p])).values()];
+  if(available.length<2)return Promise.resolve(null);
+  const previous=document.activeElement;
+  return new Promise(resolve=>{
+    const dialog=document.createElement('dialog');dialog.className='play-group-picker';
+    dialog.setAttribute('aria-labelledby','play-group-picker-title');dialog.setAttribute('aria-describedby','play-group-picker-hint');
+    dialog.innerHTML=`<form><header><h2 id="play-group-picker-title">${t('play.groupChoose')}</h2><button type="button" data-group-cancel aria-label="${esc(t('common.closeDialog'))}">✕</button></header>
+      <p id="play-group-picker-hint">${t('play.groupChooseHint')}</p><fieldset><legend>${t('play.groupPeople')}</legend>${available.map((p,i)=>`<label><input type="checkbox" value="${esc(p.id)}" ${i<4?'checked':''}><span>${esc(p.name)}</span></label>`).join('')}</fieldset>
+      <p data-group-count role="status" aria-live="polite"></p><div class="dialog-footer"><button type="button" class="subtle" data-group-cancel>${t('common.cancel')}</button><button type="submit" class="primary" data-group-confirm>${t('play.groupBegin')}</button></div></form>`;
+    let result=null;
+    const boxes=[...dialog.querySelectorAll('input[type="checkbox"]')],submit=dialog.querySelector('[data-group-confirm]');
+    const selected=()=>available.filter((p,i)=>boxes[i].checked);
+    const update=()=>{const count=selected().length;submit.disabled=count<2||count>4;dialog.querySelector('[data-group-count]').textContent=t('play.groupSelected',{count});};
+    for(const box of boxes)box.onchange=update;
+    for(const button of dialog.querySelectorAll('[data-group-cancel]'))button.onclick=()=>dialog.close();
+    dialog.querySelector('form').onsubmit=event=>{event.preventDefault();update();if(submit.disabled)return;result=selected();dialog.close();};
+    dialog.addEventListener('close',()=>{dialog.remove();if(previous?.isConnected)previous.focus({preventScroll:true});resolve(result);},{once:true});
+    update();document.body.appendChild(dialog);dialog.showModal();boxes[0]?.focus();
+  });
 }

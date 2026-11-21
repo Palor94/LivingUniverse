@@ -1,3 +1,4 @@
+import {crowdLayout} from './play-map-layout.js';
 // Illustrated world map for Play: an atlas-style picture of the real region (Budapest, Fejér
 // county, Lake Balaton). Farmland patchwork, forested hills with relief, vineyards on the
 // Balaton uplands, lakes with ripples, the Danube, the M7, road 63 and the railway. Every
@@ -125,6 +126,15 @@ export function mapSvg({towns,label,peopleIn,placeCount,palorTownId,slot,avatar,
   const night=slot===3,rnd=seeded(20261110);
   const shown=towns.map(n=>({n,g:PLACES[n.name.toLocaleLowerCase('hu')]})).filter(x=>x.g);
   const here=shown.find(x=>x.n.id===palorTownId);
+  const ribbons=shown.map(({n,g})=>{
+    const people=peopleIn(n.id),places=placeCount(n.id),name=label(n),title=(n.id===palorTownId?'★ ':'')+name;
+    // Only the name, and the way there when it is off the map (owner, 2026-11-21: no place and
+    // people counts under every city; the face badge already shows who is there).
+    const sub=g.offmap||'',width=Math.max(84,title.length*8.8+34,sub.length*6.3+30);
+    // One face plus a count badge: the crowd box is sized for two circles at most.
+    return {id:n.id,x:Math.max(24,Math.min(W-width-24,g.at[0]+g.lab[0]-width/2)),y:g.at[1]+g.lab[1]-6,width,height:sub?34:24,count:Math.min(2,people.length),title,sub};
+  });
+  const crowds=crowdLayout(ribbons),frontRibbons=[];
   let s=`<svg class="play-svg lu-map${night?' lm-night':''}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(ariaLabel)}"${here?` data-focus="${(here.g.at[0]/W).toFixed(3)}"`:''}>
   <defs>
     <linearGradient id="lm-land" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d9dfb6"/><stop offset=".5" stop-color="#c6d19f"/><stop offset="1" stop-color="#b3c48d"/></linearGradient>
@@ -184,22 +194,24 @@ export function mapSvg({towns,label,peopleIn,placeCount,palorTownId,slot,avatar,
   // Towns: drawing, "you are here" ring, ribbon with counts, and who is there now.
   for(const {n,g} of shown){
     const [x,y]=g.at,isHere=n.id===palorTownId,people=peopleIn(n.id),places=placeCount(n.id),name=label(n);
-    s+=`<g class="lm-pin${isHere?' lm-here':''}" data-play-town="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(name)}"><title>${esc(name)}${places?` · ${places} hely`:''}${people.length?` · ${people.length} szereplő`:''}</title>`;
+    s+=`<g class="lm-pin${isHere?' lm-here':''}" data-play-town="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(name)}"><title>${esc(name)}</title>`;
     if(night)s+=`<circle cx="${x}" cy="${y-14}" r="70" fill="url(#lm-glow)"/>`;
     s+=`<ellipse cx="${x}" cy="${y+3}" rx="62" ry="15" class="lm-ground"/>`;
     if(isHere)s+=`<ellipse class="lm-pulse" cx="${x}" cy="${y+3}" rx="64" ry="17"/>`;
     s+=`<g transform="translate(${x},${y})" filter="url(#lm-shadow)"><g class="lm-art"><g transform="scale(${g.scale||1})">${(ART[g.art]||FALLBACK)()}</g></g></g>`;
-    const title=`${isHere?'★ ':''}${name.length>22?name.slice(0,21)+'…':name}`;
-    const sub=[places?`${places} hely`:'',people.length?`${people.length} szereplő`:'',g.offmap||''].filter(Boolean).join(' · ');
-    const lx=x+g.lab[0],ly=y+g.lab[1],pw=Math.max(84,title.length*8.8+34,sub.length*6.3+30);
-    s+=`<g class="lm-ribbon" transform="translate(${lx},${ly})" filter="url(#lm-shadow)"><path d="M${-pw/2-10} 4l8 -8v${sub?28:20}l-8 -8Z M${pw/2+10} 4l-8 -8v${sub?28:20}l8 -8Z" class="lm-ribbon-tail"/><rect x="${-pw/2}" y="-6" width="${pw}" height="${sub?34:24}" rx="3" class="lm-plate"/><text class="lm-name" y="11" text-anchor="middle">${esc(title)}</text>${sub?`<text class="lm-sub" y="24" text-anchor="middle">${esc(sub)}</text>`:''}</g>`;
-    // Up to three round portraits above the drawing, then +N.
-    const k=g.scale||1,side=g.av||(x>W-200?-1:1),ax=i=>x+side*(46*k+i*24),ay=y-60*k-4;
-    people.slice(0,3).forEach((p,i)=>{const px=ax(i),src=avatar(p);
+    const ribbon=ribbons.find(r=>r.id===n.id),{title,sub,width:pw}=ribbon,lx=ribbon.x+pw/2,ly=ribbon.y+6;
+    const ribbonHtml=`<g class="lm-ribbon" transform="translate(${lx},${ly})" filter="url(#lm-shadow)"><path d="M${-pw/2-10} 4l8 -8v${sub?28:20}l-8 -8Z M${pw/2+10} 4l-8 -8v${sub?28:20}l8 -8Z" class="lm-ribbon-tail"/><rect x="${-pw/2}" y="-6" width="${pw}" height="${sub?34:24}" rx="3" class="lm-plate"/><text class="lm-name" y="11" text-anchor="middle">${esc(title)}</text>${sub?`<text class="lm-sub" y="24" text-anchor="middle">${esc(sub)}</text>`:''}</g>`;
+    s+=ribbonHtml;frontRibbons.push(ribbonHtml);
+    // One round portrait above the drawing and, with more people there, how many in all.
+    const crowd=crowds.get(n.id),ax=i=>(crowd?.x||0)+14+i*24,ay=(crowd?.y||0)+14;
+    if(people.length)s+='<g class="lm-crowd">';
+    people.slice(0,1).forEach((p,i)=>{const px=ax(i),src=avatar(p);
       s+=`<g filter="url(#lm-shadow)"><clipPath id="lm-av-${esc(n.id)}-${i}"><circle cx="${px}" cy="${ay}" r="12"/></clipPath><circle cx="${px}" cy="${ay}" r="14" fill="#fffaf0" stroke="#5c5440" stroke-width="1"/>${src?`<image href="${esc(src)}" x="${px-12}" y="${ay-12}" width="24" height="24" preserveAspectRatio="xMidYMid slice" clip-path="url(#lm-av-${esc(n.id)}-${i})"/>`:`<circle cx="${px}" cy="${ay}" r="12" fill="#b8452d"/><text class="lm-initial" x="${px}" y="${ay+4}" text-anchor="middle">${esc(p.name[0]||'?')}</text>`}<title>${esc(p.name)}</title></g>`;});
-    if(people.length>3)s+=`<g><circle cx="${ax(3)}" cy="${ay}" r="12" fill="#3d3a33"/><text class="lm-more" x="${ax(3)}" y="${ay+4}" text-anchor="middle">+${people.length-3}</text></g>`;
+    if(people.length>1)s+=`<g><circle cx="${ax(1)}" cy="${ay}" r="12" fill="#3d3a33"/><text class="lm-more" x="${ax(1)}" y="${ay+4}" text-anchor="middle">${people.length}</text></g>`;
+    if(people.length)s+='</g>';
     s+='</g>';
   }
+  s+=`<g class="lm-front-ribbons" aria-hidden="true" pointer-events="none">${frontRibbons.join('')}</g>`;
   // Cartouche, compass, scale bar and a double frame.
   s+=`<g transform="translate(34,34)" filter="url(#lm-shadow)"><rect width="250" height="66" rx="6" class="lm-cartouche"/><rect x="5" y="5" width="240" height="56" rx="4" fill="none" stroke="#8a7650" stroke-width="1"/><text class="lm-title" x="125" y="32" text-anchor="middle">Világtérkép</text><text class="lm-subtitle" x="125" y="50" text-anchor="middle">Budapest · Fejér · Balaton</text></g>`;
   s+=`<g transform="translate(${W-74},${H-92})" class="lm-compass"><circle r="32" fill="rgba(255,250,236,.75)" stroke="#5c5440" stroke-width="1.5"/><circle r="25" fill="none" stroke="#5c5440" stroke-width=".8" stroke-dasharray="2 3"/><path d="M0-26L7 0 0 26-7 0Z" fill="#5c5440"/><path d="M0-26L7 0H-7Z" fill="#b8452d"/><path d="M-26 0L0 5 26 0 0-5Z" fill="#8a7650" opacity=".6"/><text y="-38" text-anchor="middle">É</text></g>`;

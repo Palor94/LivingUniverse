@@ -64,7 +64,7 @@ export function figurePrompt({name,appearance,referenceCount,folder,useReference
     appearance?`Approved appearance notes: ${appearance.replace(/\s+/g,' ').trim().slice(0,900)}`:'',
     'Pose: standing upright, full body from head to toe, facing the viewer with a slight three-quarter turn, arms relaxed at his sides, weight evenly on both feet.',
     'Clothing: his everyday clothes that fit the appearance notes; keep exactly the same outfit in every expression version.',
-    folderOnly?'Continuity: use the same supplied pictures for the entire dressed and shirtless rows. Keep the trousers and shoes visible in the source pictures; never randomly change garments between expressions. If a required detail is not visible, report the missing coverage rather than inventing it.':'',
+    folderOnly?'Continuity: use the supplied pictures to preserve the same person and visible build across the dressed and shirtless rows. Complete body areas hidden by cropping or clothing naturally and anatomically consistently with the visible proportions; do not stop because an area is covered. Keep the same chosen outfit, trousers and shoes in every expression version.':'',
     'Lighting: soft, even studio light from the front-left, no harsh shadows, no rim light, natural skin tones.',
     'Background: a completely flat, solid chroma-key green (#00B140). No floor, no shadow on the ground, no props, no text, no logo, no watermark.',
     'Framing: vertical 2:3 portrait, the whole body inside the frame with a small margin above the head and below the feet, camera at chest height, sharp focus.',
@@ -72,5 +72,18 @@ export function figurePrompt({name,appearance,referenceCount,folder,useReference
   ].filter(Boolean).join('\n');
   const variants=FIGURE_EXPRESSIONS.slice(1).map(x=>`${x.file}.png — "Same person, same outfit, pose, light, background and framing as the previous image; change only the facial expression to ${x.en}."`).join('\n');
   return {base,variants,save_as:`${folder}\\alap.png`,folder,
-    howto:`1) ${useReferences?`In Grok attach ${name}'s approved reference photos and send`:'In Grok send (without any photo)'} the base prompt. 2) Save the result as alap.png into ${folder}. 3) For each expression send the matching follow-up in the same chat and save it under that file name. The app picks the files up automatically and removes the green background.`};
+    howto:`ChatGPT makes the figures (owner, 2026-11-15): paste the ChatGPT order into a chat with the Living Universe connector; it generates each picture and saves it into the app itself. Manual fallback: ${useReferences?`attach ${name}'s approved reference photos and send`:'send (without any photo)'} the base prompt, save the result as alap.png into ${folder}, then each expression in the same chat under its file name. The app picks the files up and removes the green background.`};
+}
+// The figure order for ChatGPT (owner, 2026-11-15: "Chatgpt csinálja az alakpromtokat"): one message
+// for a chat with the Living Universe connector. ChatGPT takes the brief from the app (prompt and
+// allowed references), generates natively and hands the picture back with finish_generation_job.
+// missing: {dressed, shirtless, intimate} → expression file names still without a figure.
+export function chatgptFigureOrder({id,name,missing}){
+  const rows=[['dressed','hétköznapi ruhában, teljes alak'],['police','rendőregyenruhában, teljes alak'],['shirtless','félmeztelen, teljes alak'],['intimate','félmeztelen, derékig']].filter(([k])=>missing[k]?.length);
+  if(!rows.length)return `${name}: minden alakja megvan; nincs teendő.`;
+  return [`Use the Living Universe connector. Make the visual-novel figures of ${name} (character_id ${id}) yourself, inside the app. Never ask me to download or save anything.`,
+    `Missing figures (outfit → expressions): ${rows.map(([k,hu])=>`${k} (${hu}): ${missing[k].join(', ')}`).join('; ')}.`,
+    `For each one, dressed row first and "alap" first in every row: call start_generation_job {target:"figure", character_id:"${id}", expression, outfit}, generate the picture natively from the brief's prompt with the references it allows (same man, same outfit, pose, light, green background and framing in the whole row), then call finish_generation_job with the picture attached and outcome "done".`,
+    'If the brief says the references are missing, stop and tell me. If your generator declines, call finish_generation_job with outcome "refused" and the reason, and go on; never reword a request to get around a refusal.',
+    'Draw only this character. Presentation only: no canon, profile or catalogue change. Up to six pictures per answer; then report in Hungarian what was saved and what is left, and wait until I write "tovább".'].join('\n\n');
 }

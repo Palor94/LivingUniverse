@@ -35,6 +35,14 @@ test('play mode: map positions, live talk only where the character is, save poin
     const nodes=[node('n-city','Város',null,null),node('n-work','Kórház','n-city',work.id),node('n-home','Aladár háza','n-city',home.id),node('n-flat','Palor lakása','n-city',flat.id)];
     await fs.writeFile(path.join(dataDir,'location-canvas.json'),JSON.stringify({schema:1,head:'r1',approved_head:'r1',revisions:[{id:'r1',parent_id:null,kind:'approved',state:{schema:1,types:[],nodes}}]}));
 
+    assert.equal((await call('/api/play/settings')).data.quick_send,false);
+    assert.equal((await call('/api/play/settings',{quick_send:true})).data.quick_send,true);
+    assert.equal((await call('/api/play/settings',{quick_send:'yes'})).status,400);
+    assert.equal((await call('/api/play/settings')).data.quick_send,true);
+    await call('/api/play/settings',{quick_send:false});
+    assert.equal((await call('/api/play/settings')).data.travel_always_ask,false);
+    assert.equal((await call('/api/play/settings',{travel_always_ask:true})).data.travel_always_ask,true);
+    assert.equal((await call('/api/play/settings',{travel_always_ask:'yes'})).status,400);
     let o=(await call('/api/play')).data;
     assert.equal(o.clock.slot,'reggel');assert.equal(o.node_id,'n-flat','Palor starts at home');
     assert.equal(o.people.find(p=>p.id===a.id).location_id,work.id,'weekday morning: at work');
@@ -46,8 +54,9 @@ test('play mode: map positions, live talk only where the character is, save poin
     assert.equal(city.children.find(c=>c.id==='n-work').people_count,1);
     assert.ok((await call('/api/play')).data.nodes.every(n=>'image_id' in n));
     const at=(await call('/api/play/travel',{node_id:'n-work'})).data;assert.deepEqual(at.people.map(p=>p.id),[a.id]);
-    // Without a world event this day part, the activity comes from the place role.
-    assert.equal(at.people[0].activity,'Dolgozik.');assert.deepEqual(at.today,[]);
+    // Without a world event this day part, the on-screen line comes from the place role and the
+    // time of day (owner, 2026-11-21: never only "Dolgozik."); prompts keep their own wording.
+    assert.match(at.people[0].activity,/^(Reggeli műszakban dolgozik|Dolgozik|Még dolgozik|Éjszakai műszakban dolgozik)\./);assert.deepEqual(at.today,[]);
     // Walking up: he speaks first; the prompt knows what he is doing and how close they are.
     let conv=(await call('/api/play/talk',{character_id:a.id,opener:true})).data;
     assert.equal(conv.status,'open');assert.deepEqual(conv.lines.map(l=>l.speaker),['character']);

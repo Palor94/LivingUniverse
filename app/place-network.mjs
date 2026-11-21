@@ -91,8 +91,8 @@ const PASSAGE=/^(utca|street)$|lépcsőház/i;
 export const isPassage=node=>!!node&&(!node.kind||node.kind==='place')&&PASSAGE.test(String(node.short_name||node.name||'').trim());
 // The room one arrives in: the living room of a home, the common room of a dormitory or
 // workers' hostel, the shore of the lake ("Nagyszoba" is the living room of a village house).
-// "Nézőtér" is the stadium's way in (owner, 2026-11-14).
-const ORIGIN=/(^|\s)(nappali|közösségi tér|tópart|nagyszoba|nézőtér)$/i;
+// "Nézőtér" is the stadium's way in (owner, 2026-11-14); "Recepció" the hotel's (2026-11-15).
+const ORIGIN=/(^|\s)(nappali|közösségi tér|tópart|nagyszoba|nézőtér|recepció)$/i;
 export const isOriginName=node=>ORIGIN.test(String(node?.short_name||node?.name||'').trim());
 // The entry room of a place: a direct child with an entry-room name (first by tree order).
 // index (optional, from originIndex): the same answer without scanning the tree (2026-11-14).

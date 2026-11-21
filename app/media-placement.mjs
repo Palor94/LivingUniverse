@@ -85,7 +85,10 @@ export function installMediaPlacement({root,one,all,run,transaction,fail,fingerp
     const hasAssets=!!one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='play_asset_sources'");
     const palorId=one("SELECT id FROM characters WHERE lower(trim(name))='palor' LIMIT 1")?.id||null;
     const owned=new Map();for(const s of all("SELECT folder,character_id FROM sorted_folders WHERE folder LIKE '10\\_CHARACTERS%' ESCAPE '\\'"))if(!owned.has(s.character_id))owned.set(s.character_id,s.folder.replace(/\//g,'\\'));
-    const rows=all(`SELECT m.id,m.relative_path,(SELECT group_concat(c.id||char(31)||c.name,char(30)) FROM depictions d JOIN characters c ON c.id=d.character_id WHERE d.media_id=m.id) who,
+    // Archived (merged) characters do not own folders: their kept links must not pull a picture
+    // out of the surviving character's folder (2026-11-15: legacy "Tibor" merged into Palor).
+    const merged=one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='character_ui'")?'AND NOT EXISTS(SELECT 1 FROM character_ui u WHERE u.character_id=c.id AND u.merged_into IS NOT NULL)':'';
+    const rows=all(`SELECT m.id,m.relative_path,(SELECT group_concat(c.id||char(31)||c.name,char(30)) FROM depictions d JOIN characters c ON c.id=d.character_id WHERE d.media_id=m.id ${merged}) who,
       ${hasAssets?'EXISTS(SELECT 1 FROM play_asset_sources pa WHERE pa.media_id=m.id)':'0'} asset FROM active_media m ORDER BY m.relative_path`);
     const out=[];
     for(const r of rows){

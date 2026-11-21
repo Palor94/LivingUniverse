@@ -64,10 +64,11 @@ export function palorVoice(text,characterName,{intimate=false,max=intimate?4200:
 
 export const PALOR_VOICE_HEAD='PALOR BESZÉDMÓDJA (ahhoz, hogy a "choices" Palor saját hangján szóljon):\n';
 
-// The suggested lines (owner, 2026-11-15): one direct reaction, two that move the scene on in
-// clearly different directions. Pose and sexual-mood examples only inside an intimate scene.
+// The suggested lines (owner, 2026-11-21, replacing 2026-11-15's "one direct reaction"): all
+// three only move the story on, each in a clearly different direction; no plain reply to the last
+// line. Pose and sexual-mood examples only inside an intimate scene.
 export function CHOICE_RULES(intimate,{group=false}={}){
-  return `"choices": három rövid javaslat arra, mit mondhatna vagy tehetne Palor most${group?' a társaságban':''}, Palor szájából, a saját beszédmódján (ha meg van adva), magyarul, legfeljebb 18 szó; lehet mondat, *cselekvés csillagok között*, vagy a kettő együtt. Az 1. közvetlen reakció arra, amit ${group?'az előbb mondtak vagy tettek':'te épp mondtál vagy tettél'}. A 2. és a 3. a jelenet mostani állására építve viszi előre a jelenetet, de két egymástól jól eltérő irányba (például ${intimate?'két különböző pózváltás, két különböző hangulatváltás – az egyik vadabb, indulatosabb, a másik érzékibb –, ':'két különböző hangulatváltás, '}két különböző fejlemény, vagy az egyik a helyzetből következik, a másik egy váratlan történeti csavar); ezek csak példák, főként saját, a helyzethez illő ötleteid legyenek. Ne ismételd a korábbi javaslatokat, és Palor korábbi mondatait se.`;
+  return `"choices": három rövid javaslat arra, mivel vihetné tovább Palor a történetet most${group?' a társaságban':''}, Palor szájából, a saját beszédmódján (ha meg van adva), magyarul, legfeljebb 16 szó; lehet mondat, *cselekvés csillagok között*, vagy a kettő együtt. Mindhárom kizárólag a történet továbbhaladását szolgálja: ne puszta válasz vagy reakció arra, amit ${group?'az előbb mondtak vagy tettek':'te épp mondtál vagy tettél'}, hanem egy lépés, ami után másképp áll a jelenet. A három három egymástól jól eltérő irányba vigyen (például ${intimate?'két különböző pózváltás, egy hangulatváltás – vadabb, indulatosabb vagy érzékibb –, ':'egy javaslat vagy meghívás, egy helyszín- vagy tevékenységváltás, '}egy új fejlemény, vagy egy váratlan történeti csavar); ezek csak példák, főként saját, a helyzethez illő ötleteid legyenek. Ne ismételd a korábbi javaslatokat, és Palor korábbi mondatait se.`;
 }
 
 // The speech text of a Szellemprofil: the filled "speech" field, else the older speech text.

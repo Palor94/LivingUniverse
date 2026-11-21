@@ -1,3 +1,4 @@
+import {confirmBox} from './interactions.js';
 import {installGhostProfile} from './ghost-profile.js';
 import {installLocationEditor} from './location-editor.js';
 import {initMobileSorting} from './mobile-sorting.js';
@@ -36,7 +37,7 @@ function field({id,key,title,current,max=30000,send,latest,relationship=false}){
   async function saveField(explicit=false){
     clearTimeout(timer);if(disposed||busy||blocked||!record.dirty())return;
     const value=input.value;
-    if(relationship&&!value&&baseline){if(!explicit){show(t('mobile.confirmRemoval'));return;}if(!confirm(t('mobile.removeRelationship')))return;}
+    if(relationship&&!value&&baseline){if(!explicit){show(t('mobile.confirmRemoval'));return;}if(!await confirmBox(t('mobile.removeRelationship')))return;}
     busy=true;save.disabled=true;show(t('enh.saving'));let succeeded=false;
     try{
       await send(value,baseline);baseline=relationship?(value||null):value;succeeded=true;

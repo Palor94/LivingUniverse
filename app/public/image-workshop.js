@@ -1,3 +1,6 @@
+import {openPictureOrder} from './picture-order.js';
+import {openAssetGeneration} from './asset-generation.js';
+import {sortNames} from './name-picker.js';
 // Képműhely: one screen for getting pictures ready for use (server: app/image-workshop.mjs).
 // Tabs: Új képek (inbox with steps), Képgyártás (Grok queue with briefs), Ellenőrzés (verdicts
 // on generated pictures), Javaslatok (carry-over and paid-tagging priority), Készültség.
@@ -14,7 +17,7 @@ const MARKS=['none','match','mismatch','unsure'],MARK_ICON={none:'·',match:'✓
 const STARTER='Use the Living Universe connector. First call get_generation_instructions and follow it exactly for this whole chat. Then start: list_generation_needs, open a batch of 3 jobs and make them one by one. Reply to me in Hungarian.';
 
 export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfile,openMediaReview,getState}){
-  let tab='inbox',keyHandler=null,busy=false;
+  let tab='inbox',keyHandler=null,busy=false,moreObserver=null;let autoSignals=true;try{autoSignals=localStorage.getItem('lu-workshop-auto-signals')!=='off';}catch{}
   const inbox={missing:'any',character:'',items:[],total:0,counts:null,sel:0};
   const checks={status:'open',items:[],sel:0,marks:new Map()};
   const signals=createSignalsWorker(api);
@@ -23,14 +26,14 @@ export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfi
   const run=fn=>async(...a)=>{if(busy)return;busy=true;try{await fn(...a);}catch(e){toast(e.message,true);}finally{busy=false;}};
 
   async function render(root,preset){
-    if(preset&&TABS.includes(preset))tab=preset;
+    moreObserver?.disconnect();if(preset&&TABS.includes(preset))tab=preset;if(tab!=='inbox')signals.stop?.();
     root.innerHTML=`<div class="iw"><header class="mr-head"><h1>${t('iw.title')}</h1><p class="muted">${t('iw.lead')}</p>
       <div class="mr-tabs" role="tablist">${TABS.map(x=>`<button role="tab" aria-selected="${x===tab}" class="${x===tab?'active':''}" data-iw-tab="${x}">${t('iw.tab.'+x)}</button>`).join('')}</div></header><div id="iw-body"></div></div>`;
     for(const b of $$('[data-iw-tab]'))b.onclick=()=>{tab=b.dataset.iwTab;render(root);};
     detachKeys();
     await ({inbox:paintInbox,generation:paintGeneration,checks:paintChecks,suggestions:paintSuggestions,readiness:paintReadiness,ideas:paintIdeas})[tab](root);
   }
-  function leave(){detachKeys();signals.stop?.();}
+  function leave(){detachKeys();moreObserver?.disconnect();signals.stop?.();}
   function detachKeys(){if(keyHandler)document.removeEventListener('keydown',keyHandler);keyHandler=null;}
   function attachKeys(root,fn){keyHandler=e=>{if(!root.isConnected||!$('#iw-body')){detachKeys();return;}if(e.target.closest?.('input,textarea,select')||e.ctrlKey||e.metaKey||e.altKey)return;fn(e);};document.addEventListener('keydown',keyHandler);}
 
@@ -40,7 +43,7 @@ export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfi
     inbox.items=more?inbox.items.concat(r.items):r.items;inbox.total=r.total;inbox.counts=r.counts;if(!more)inbox.sel=0;
   }
   async function paintInbox(root){
-    await loadInbox();drawInbox();
+    await loadInbox();drawInbox();if(autoSignals&&tab==='inbox'&&root.isConnected)void runSignals();
     attachKeys(root,e=>{const item=inbox.items[inbox.sel];
       if(e.key==='ArrowRight'||e.key==='j'){e.preventDefault();select(inbox.sel+1);}
       else if(e.key==='ArrowLeft'||e.key==='k'){e.preventDefault();select(inbox.sel-1);}
@@ -50,22 +53,20 @@ export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfi
   }
   function select(i){if(!inbox.items.length)return;inbox.sel=Math.max(0,Math.min(inbox.items.length-1,i));for(const el of $$('[data-iw-item]'))el.classList.toggle('iw-sel',Number(el.dataset.iwItem)===inbox.sel);$(`[data-iw-item="${inbox.sel}"]`)?.scrollIntoView({block:'nearest'});}
   function drawInbox(){
-    const box=$('#iw-body');if(!box)return;const c=inbox.counts||{};const chars=(getState()?.characters||[]);
+    const box=$('#iw-body');if(!box)return;const c=inbox.counts||{};const chars=sortNames(getState()?.characters||[]);
     const filters=['any','ready',...STEPS].map(k=>`<button class="${k===inbox.missing?'active':''}" data-iw-missing="${k}">${t('iw.missing.'+k)} <small>${k==='any'?Math.max(0,(c.total||0)-(c.ready||0)):k==='ready'?c.ready||0:c[k]||0}</small></button>`).join('');
     box.innerHTML=`<div class="mr-filter">${filters}<select id="iw-char" aria-label="${t('iw.characterFilter')}"><option value="">${t('iw.allCharacters')}</option>${chars.map(ch=>`<option value="${esc(ch.id)}"${ch.id===inbox.character?' selected':''}>${esc(ch.name)}</option>`).join('')}</select></div>
-      ${c.signals?`<div class="iw-banner"><span>${t('iw.signalsMissing',{count:c.signals})}</span><button id="iw-signals">${t('iw.signalsStart')}</button><span id="iw-sig-progress" class="muted"></span></div>`:''}
+      ${c.signals?`<div class="iw-banner"><label class="play-check"><input type="checkbox" id="iw-auto-signals" ${autoSignals?'checked':''}>${t('iw.autoSignals')}</label><span>${t('iw.signalsMissing',{count:c.signals})}</span><button id="iw-signals">${t('iw.signalsStart')}</button><span id="iw-sig-progress" class="muted"></span></div>`:''}
       <p class="muted iw-keys">${t('iw.inboxKeys')}</p>
-      ${inbox.items.length?`<div class="iw-grid">${inbox.items.map((it,i)=>card(it,i)).join('')}</div>`:`<div class="empty"><div class="symbol">✓</div><h2>${t('iw.inboxEmpty')}</h2></div>`}
+      ${inbox.items.length?`<div class="iw-grid">${inbox.items.map((it,i)=>({it,i})).filter(({it})=>!it.availability||it.availability==='local').map(({it,i})=>card(it,i)).join('')}</div>${inbox.items.some(it=>it.availability&&it.availability!=='local')?`<section class="iw-cloud"><h3>${t('iw.cloudTitle')}</h3><p>${t('iw.cloudLead')}</p><div class="iw-grid">${inbox.items.map((it,i)=>({it,i})).filter(({it})=>it.availability&&it.availability!=='local').map(({it,i})=>card(it,i)).join('')}</div></section>`:''}`:`<div class="empty"><div class="symbol">✓</div><h2>${t('iw.inboxEmpty')}</h2></div>`}
       ${inbox.items.length<inbox.total?`<button id="iw-more" class="subtle">${t('iw.more',{count:inbox.total-inbox.items.length})}</button>`:''}
       <datalist id="iw-names">${chars.map(ch=>`<option value="${esc(ch.name)}"></option>`).join('')}</datalist>`;
     for(const b of $$('[data-iw-missing]'))b.onclick=run(async()=>{inbox.missing=b.dataset.iwMissing;await loadInbox();drawInbox();});
     $('#iw-char').onchange=run(async e=>{inbox.character=e.target.value;await loadInbox();drawInbox();});
-    if($('#iw-more'))$('#iw-more').onclick=run(async()=>{await loadInbox(true);drawInbox();});
+    moreObserver?.disconnect();if($('#iw-more')){const more=run(async()=>{const y=window.scrollY;await loadInbox(true);drawInbox();window.scrollTo(0,y);});$('#iw-more').onclick=more;moreObserver=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))void more();},{rootMargin:'300px'});moreObserver.observe($('#iw-more'));}
+    if($('#iw-auto-signals'))$('#iw-auto-signals').onchange=()=>{autoSignals=$('#iw-auto-signals').checked;try{localStorage.setItem('lu-workshop-auto-signals',autoSignals?'on':'off');}catch{}if(autoSignals)void runSignals();else signals.stop();};
     // The page stays usable while it runs; a stop by error re-enables the button (no silent hang).
-    if($('#iw-signals'))$('#iw-signals').onclick=async()=>{$('#iw-signals').disabled=true;
-      try{await signals.start(n=>{const el=$('#iw-sig-progress');if(el)el.textContent=t('sig.running',{done:n});});toast(t('sig.done'));}
-      catch(e){toast(e.message,true);}
-      finally{if($('#iw-body')){await loadInbox().catch(()=>{});drawInbox();}}};
+    if($('#iw-signals'))$('#iw-signals').onclick=()=>void runSignals();
     for(const el of $$('[data-iw-item]')){const it=inbox.items[Number(el.dataset.iwItem)];
       el.querySelector('.iw-thumb').onclick=()=>{select(Number(el.dataset.iwItem));mediaDialog(it.media_id);};
       for(const b of el.querySelectorAll('[data-iw-level]'))b.onclick=()=>setLevel(it,b.dataset.iwLevel);
@@ -75,9 +76,17 @@ export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfi
       for(const b of el.querySelectorAll('[data-iw-idea]'))b.onclick=()=>toIdeas(it,b.dataset.iwIdea);
       const form=el.querySelector('form');if(form)form.onsubmit=e=>{e.preventDefault();assign(it,form.querySelector('input').value);};
       el.addEventListener('focusin',()=>select(Number(el.dataset.iwItem)));}
+    for(const button of $$('[data-iw-download]'))button.onclick=run(async()=>{button.disabled=true;await api('/api/workshop/hydrate',{media_ids:[button.dataset.iwDownload]});await loadInbox();drawInbox();if(autoSignals)void runSignals();});
     select(inbox.sel);
   }
+  async function runSignals(){if(signals.running||tab!=='inbox')return;if($('#iw-signals'))$('#iw-signals').disabled=true;
+    try{await signals.start(n=>{const el=$('#iw-sig-progress');if(el)el.textContent=t('sig.running',{done:n});});}
+    catch(error){toast(error.message,true);}finally{if(tab==='inbox'&&$('#iw-body')){await loadInbox().catch(()=>{});drawInbox();}}
+  }
   function card(it,i){
+    const metadata=[new Date(it.created_at).toLocaleDateString('hu-HU'),it.size!=null?t('iw.fileSize',{size:(it.size/1048576).toFixed(1)}):''].filter(Boolean).join(' · ');
+    if(it.availability&&it.availability!=='local')return `<article class="iw-card" data-cloud-item="${i}"><div class="iw-thumb iw-offline">☁</div><div class="iw-info"><b>${esc(it.people.map(p=>p.name).join(', ')||t('mr.nobody'))}</b><small title="${esc(it.file)}">${esc(metadata)}</small><button type="button" data-iw-download="${esc(it.media_id)}">${t('iw.download')}</button></div></article>`;
+
     const steps=STEPS.map(s=>`<span class="iw-step ${it.steps[s]?'ok':it.next===s?'next':'todo'}" title="${t('iw.step.'+s)}">${it.steps[s]?'✓':'•'} ${t('iw.stepShort.'+s)}</span>`).join('');
     const action=it.next==='people'?`<form class="iw-assign"><input list="iw-names" placeholder="${t('iw.who')}" aria-label="${t('iw.who')}"><button>${t('iw.link')}</button><button type="button" class="subtle" data-iw-nobody>${t('iw.nobody')} <kbd>N</kbd></button></form>`
       :it.next==='content'?`<div class="iw-levels">${LEVELS.map(([l,icon,k])=>`<button data-iw-level="${l}" title="${t('ml.level.'+l)}">${icon} <kbd>${k}</kbd></button>`).join('')}</div>`
@@ -85,8 +94,8 @@ export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfi
       :it.next==='tagged'?`<button class="subtle" data-iw-tagq>${t('iw.toTagging')}</button>`
       :it.next==='signals'?`<span class="muted">${t('iw.needsSignals')}</span>`:`<span class="muted">${t('iw.ready')}</span>`;
     return `<article class="iw-card" data-iw-item="${i}" tabindex="0"><button class="iw-thumb" aria-label="${esc(it.file)}">${thumb(it.media_id,it.kind)}</button>
-      <div class="iw-info"><b>${esc(it.people.map(p=>p.name).join(', ')||t('mr.nobody'))}</b><small class="muted">${esc(it.file)}</small>${it.level?`<small>${t('ml.level.'+it.level)}</small>`:''}
-      <div class="iw-steps">${steps}</div>${action}
+      <div class="iw-info"><b>${esc(it.people.map(p=>p.name).join(', ')||t('mr.nobody'))}</b><small class="muted" title="${esc(it.file)}">${esc(metadata)}</small>
+      <small class="iw-steps" title="${esc(STEPS.map(s=>t('iw.step.'+s)+': '+(it.steps[s]?'✓':'○')).join(' · '))}">${it.next?t('iw.step.'+it.next):t('iw.ready')}</small>${it.next==='signals'?'':action}
       <div class="iw-idea-actions"><small class="muted">${t('iw.ideas.put')}</small>${IDEA_KINDS.map(k=>`<button type="button" class="subtle" data-iw-idea="${k}">${t('iw.ideas.kind.'+k)}</button>`).join('')}</div></div></article>`;
   }
   // After an action the item is re-read, so its steps and next action stay true.
@@ -111,8 +120,8 @@ export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfi
         <div class="iw-info"><b>${t('iw.ideas.kind.'+it.kind)}</b><small class="muted">${esc(it.file)}</small>
         <textarea rows="2" maxlength="1000" placeholder="${esc(t('iw.ideas.notePlaceholder'))}" aria-label="${esc(t('iw.ideas.note'))}">${esc(it.note)}</textarea>
         <div class="iw-idea-actions">${IDEA_KINDS.filter(k=>k!==it.kind).map(k=>`<button type="button" class="subtle" data-iw-ideamove="${k}">${t('iw.ideas.moveTo',{kind:t('iw.ideas.kind.'+k)})}</button>`).join('')}<button type="button" class="subtle" data-iw-ideaout>${t('iw.ideas.remove')}</button></div></div></article>`).join('')}</div>`:`<div class="empty"><div class="symbol">💡</div><h2>${t('iw.ideas.empty')}</h2></div>`}`;
-    for(const b of $('[data-iw-ideakind]'))b.onclick=run(async()=>{ideas.kind=b.dataset.iwIdeakind;await paintIdeas();});
-    for(const el of $('[data-iw-ideaitem]')){const it=ideas.items[Number(el.dataset.iwIdeaitem)];
+    for(const b of $$('[data-iw-ideakind]'))b.onclick=run(async()=>{ideas.kind=b.dataset.iwIdeakind;await paintIdeas();});
+    for(const el of $$('[data-iw-ideaitem]')){const it=ideas.items[Number(el.dataset.iwIdeaitem)];
       el.querySelector('.iw-thumb').onclick=()=>mediaDialog(it.media_id);
       const note=el.querySelector('textarea');note.onchange=run(async()=>{await api('/api/workshop/ideas/note',{media_id:it.media_id,note:note.value});it.note=note.value.trim();toast(t('iw.ideas.noteSaved'));});
       for(const b of el.querySelectorAll('[data-iw-ideamove]'))b.onclick=run(async()=>{await api('/api/workshop/ideas',{media_id:it.media_id,kind:b.dataset.iwIdeamove});await paintIdeas();});
@@ -142,7 +151,8 @@ export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfi
         <p><b>${t('iw.gen.saveAs')}</b> <code>${esc(save)}</code> · ${t('iw.gen.content')}: ${t('ml.level.'+(b.content_expected||'non_intimate'))}</p>
         ${b.references?.length?`<div class="iw-refs">${b.references.map(r=>`<img src="${small(r.media_id)}" alt="" loading="lazy" title="${esc(r.role||'')}">`).join('')}</div>`:`<p class="muted">${t('iw.gen.textOnly')}</p>`}
         ${b.owner_feedback?.length?`<p class="iw-feedback">${t('iw.gen.feedback')}: ${b.owner_feedback.map(esc).join(' · ')}</p>`:''}
-        <div class="we-row"><button data-copy>${t('iw.gen.copyPrompt')}</button><input data-note placeholder="${t('iw.gen.notePlaceholder')}" aria-label="${t('iw.gen.notePlaceholder')}"><button class="primary" data-open>${t('iw.gen.openJob')}</button></div>`;
+        <div class="we-row">${n.target==='figure'||n.target==='background'?`<button data-sogni-order>${t('iw.gen.sogniOrder')}</button>`:''}<button data-copy>${t('iw.gen.copyPrompt')}</button><input data-note placeholder="${t('iw.gen.notePlaceholder')}" aria-label="${t('iw.gen.notePlaceholder')}"><button class="primary" data-open>${t('iw.gen.openJob')}</button></div>`;
+      if(box.querySelector('[data-sogni-order]'))box.querySelector('[data-sogni-order]').onclick=run(()=>n.target==='background'?openAssetGeneration({targetId:n.location_id,time:n.time_of_day||'nappal',api}):openPictureOrder({target:q,api}));
       box.querySelector('[data-copy]').onclick=run(async()=>{await navigator.clipboard.writeText(b.prompt+(save?'\n\nSave as: '+save:''));toast(t('iw.copied'));});
       box.querySelector('[data-open]').onclick=run(async()=>{const j=await api('/api/workshop/generation/open',{...q,note:box.querySelector('[data-note]').value});toast(j.reused?t('iw.gen.jobUpdated'):t('iw.gen.jobOpened'));await paintGeneration();});
     }catch(e){box.textContent=e.message;}

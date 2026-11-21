@@ -4,12 +4,12 @@
 // module finds them; the browser cuts the plain background away when showing them.
 // Figures are presentation assets only: never canon, never approved references, and the
 // catalogue scan skips this folder. Files are never moved, renamed or changed.
-import {promises as fs} from 'node:fs';
+import {promises as fs,existsSync} from 'node:fs';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {organized} from './storage-layout.mjs';
 import {validateMedia} from './media-imports.mjs';
-import {figurePrompt,FIGURE_EXPRESSIONS} from './figure-prompts.mjs';
+import {figurePrompt,chatgptFigureOrder,FIGURE_EXPRESSIONS} from './figure-prompts.mjs';
 import {createFigureReferences} from './figure-references.mjs';
 
 export const SPRITE_FOLDER='Szereplő-alakok';
@@ -22,7 +22,7 @@ export const expressionOf=file=>path.parse(file).name.trim().toLocaleLowerCase('
 // in a "felmeztelen" subfolder are the shirtless set, shown only in undressing/intimate moments.
 // The "intim" subfolder (2026-11-12) holds waist-up figures for intimate beats; the game fades
 // them out below the waist, so nothing explicit is ever drawn.
-export const OUTFIT_FOLDERS={felmeztelen:'shirtless','félmeztelen':'shirtless',intim:'intimate'};
+export const OUTFIT_FOLDERS={felmeztelen:'shirtless','félmeztelen':'shirtless',intim:'intimate',rendőregyenruha:'police',rendor:'police'};
 
 export function installCharacterSprites({db,root,one,all,run,transaction,fail,castIds=()=>[],mayUseReferences=()=>true,allowedReferences=null}){
   const folderReferences=createFigureReferences({root,one,all});
@@ -120,7 +120,13 @@ export function installCharacterSprites({db,root,one,all,run,transaction,fail,ca
     if(selected)refs=selected.references.length;
     const ready=!selected||refs>0;
     const prompts=figurePrompt({name:c.name,appearance:canon?.appearance||'',referenceCount:refs,useReferences,folder:path.join(base(),safeName(c.name)),folderOnly:!!selected});
-    return {character_id:c.id,name:c.name,reference_count:useReferences?refs:0,reference_policy:selected?'character_folder':useReferences?'approved_references':'text_only',existing:forCharacter(c.id).map(s=>s.expression),
+    // Same rows as the Szereplőgyár avatar series: the intimate row has only alap, mosoly, flortol.
+    const policeFolder=path.join(base(),safeName(c.name),'rendőregyenruha'),hasPoliceFolder=existsSync(path.resolve(root,policeFolder));
+    const rows=['dressed','shirtless','intimate',...(hasPoliceFolder?['police']:[])];
+    const missing=Object.fromEntries(rows.map(outfit=>{const have=new Set(forCharacter(c.id,{outfit}).map(s=>s.expression));
+      return [outfit,FIGURE_EXPRESSIONS.map(e=>e.file).filter(f=>(outfit!=='intimate'||['alap','mosoly','flortol'].includes(f))&&!have.has(f))];}));
+    const chatgpt=ready?chatgptFigureOrder({id:c.id,name:c.name,missing}):null;
+    return {character_id:c.id,name:c.name,chatgpt,missing,reference_count:useReferences?refs:0,reference_policy:selected?'character_folder':useReferences?'approved_references':'text_only',existing:forCharacter(c.id).map(s=>s.expression),
       ...prompts,...(selected?{references:selected.references,source_folder:selected.folder,available_reference_count:selected.available_count,
         generation_ready:ready,generation_blocked:ready?null:'No usable image in '+selected.folder+'. Figure generation from text alone is disabled.',
         ...(!ready?{base:null,variants:null}:{} )}:{})};
@@ -128,9 +134,10 @@ export function installCharacterSprites({db,root,one,all,run,transaction,fail,ca
   // For Grok (read-only): which characters need figures, their folder, expressions, prompts.
   function overview(){
     return {folder_root:base(),file_names:FIGURE_EXPRESSIONS.map(x=>x.file+'.png').join(', ')+' (alap.png is required)',
-      characters:castIds().map(id=>one('SELECT id FROM characters WHERE id=?',id)).filter(Boolean).map(c=>{const p=promptFor(c.id);return {character_id:p.character_id,name:p.name,folder:p.folder,expressions:p.existing,approved_reference_count:p.references?p.references.filter(r=>r.canon_approved).length:p.reference_count,reference_policy:p.reference_policy,base_prompt:p.base,expression_prompts:p.variants,
+      characters:castIds().map(id=>one('SELECT id FROM characters WHERE id=?',id)).filter(Boolean).map(c=>{const p=promptFor(c.id),policeFolder=path.join(p.folder,'rendőregyenruha'),hasPoliceFolder=existsSync(path.resolve(root,policeFolder));return {character_id:p.character_id,name:p.name,folder:p.folder,expressions:p.existing,approved_reference_count:p.references?p.references.filter(r=>r.canon_approved).length:p.reference_count,reference_policy:p.reference_policy,base_prompt:p.base,expression_prompts:p.variants,chatgpt_order:p.chatgpt,
         ...(p.references?{references:p.references,source_folder:p.source_folder,available_reference_count:p.available_reference_count,generation_ready:p.generation_ready,generation_blocked:p.generation_blocked}:{}),
         shirtless:{folder:path.join(p.folder,'felmeztelen'),expressions:forCharacter(c.id,{outfit:'shirtless'}).map(s=>s.expression)},
+        ...(hasPoliceFolder?{police:{folder:policeFolder,expressions:forCharacter(c.id,{outfit:'police'}).map(s=>s.expression)}}:{}),
         intimate:{folder:path.join(p.folder,'intim'),expressions:forCharacter(c.id,{outfit:'intimate'}).map(s=>s.expression)}};})};
   }
   return {scan,forCharacter,reject,handle,startWatcher,stopWatcher,base,overview,promptFor};

@@ -19,23 +19,47 @@ export function installEventTimeline({$,$$,esc,api,action,toast,openDialog,getSt
   function payload(e){return {title:e.title,summary:e.summary,details:e.details,consequences:e.consequences,timeline:e.timeline,visibility:e.visibility,chronology:e.chronology,participants:e.participants.map(p=>({character_id:p.character_id,role:p.role,knows:p.knows===true})),location_ids:e.locations.map(l=>l.id),sources:e.sources,tags:e.tags,related_event_ids:e.related_event_ids};}
   async function render(c){if(character?.id!==c.id){filters={};offset=0;talkShown=TALK_PAGE;}character=c;await listing();}
   // Talks in play mode (2026-11-15): read-only log under the story events; lines load on opening.
-  const TALK_PAGE=30;let talkShown=TALK_PAGE;
+  const TALK_PAGE=30;let talkShown=TALK_PAGE,talkKind='all';
   async function talkLog(){
     const box=$('#talk-log');if(!box)return;
     let data;try{data=await api('/api/play/talk-log/'+character.id);}catch{data=null;}
-    if(!Array.isArray(data?.talks)){box.remove?.();return;}
+    if(!Array.isArray(data?.items)){box.remove?.();return;}
     if(!$('#talk-log'))return;
     const delta=v=>v>0?'+'+v:String(v);
-    const item=v=>`<details class="talk-entry" data-talk="${esc(v.id)}"><summary><b>${esc(v.world_day)}</b> · ${esc(v.slot)} · ${esc(v.channel==='phone'?t('talklog.phone'):t('talklog.inPerson'))}${v.mode==='group'?' · '+esc(t('talklog.group',{names:v.participants.join(', ')})):''}${v.intimate?' · '+esc(t('talklog.intimate')):''} — ${esc(v.title||(v.status==='open'?t('talklog.open'):t('talklog.noSummary')))}</summary>
-      ${v.summary?`<p>${esc(v.summary)}</p>`:''}${v.character_memory?`<p><i>${t('talklog.memory')}:</i> ${esc(v.character_memory)}</p>`:''}${v.level_delta?`<p><i>${t('talklog.level')}:</i> ${esc(delta(v.level_delta))}${v.reason?' – '+esc(v.reason):''}</p>`:''}${v.milestone?`<p><b>${esc(v.milestone)}</b></p>`:''}
-      <p class="note">${esc(t('talklog.lines',{count:v.line_count}))}${v.status==='open'?' · '+esc(t('talklog.open')):''}</p><div class="talk-lines"></div></details>`;
+    const names=list=>list.map(p=>p.name).join(', ');
+    const items=data.items.filter(v=>talkKind==='all'||v.kind===talkKind);
+    const head=v=>`<b>${esc(v.world_day)}</b>${v.slot?' · '+esc(v.slot):''} · ${v.kind==='world'?esc(t('talklog.worldEvent')):esc(v.channel==='phone'?t('talklog.phone'):t('talklog.inPerson'))}${v.mode==='group'?' · '+esc(t('talklog.group',{names:names(v.participants.slice(1))})):''}${v.role==='mentioned'?' · '+esc(t('talklog.roleMentioned')):''}${v.intimate?' · '+esc(t('talklog.intimate')):''}${v.importance?' · '+'★'.repeat(v.importance):''} — ${esc(v.title||(v.status==='open'?t('talklog.open'):t('talklog.noSummary')))}`;
+    const talkBody=v=>`${v.summary?`<p>${esc(v.summary)}</p>`:''}${v.tags?.length?`<p class="note">${v.tags.map(x=>'#'+esc(x)).join(' ')}</p>`:''}
+      ${v.learned?.character||v.learned?.palor?`<p><i>${t('talklog.learned')}:</i> ${[v.learned.character&&esc(v.participants[1]?.name||'')+' → '+esc(v.learned.character),v.learned.palor&&'Palor → '+esc(v.learned.palor)].filter(Boolean).join('<br>')}</p>`:''}
+      ${v.mood?`<p><i>${t('talklog.mood')}:</i> ${esc([v.mood.character&&(v.participants[1]?.name||'')+': '+v.mood.character,v.mood.palor&&'Palor: '+v.mood.palor].filter(Boolean).join(' · '))}</p>`:''}
+      ${v.character_memory?`<p><i>${t('talklog.memory')}:</i> ${esc(v.character_memory)}</p>`:''}${v.level_delta?`<p><i>${t('talklog.level')}:</i> ${esc(delta(v.level_delta))}${v.reason?' – '+esc(v.reason):''}</p>`:''}${v.milestone?`<p><b>${esc(v.milestone)}</b></p>`:''}
+      ${v.mentioned_people?.length||v.mentioned_places?.length?`<p><i>${t('talklog.mentions')}:</i> ${[...v.mentioned_people.map(p=>`<button class="link" data-talk-person="${esc(p.id)}">${esc(p.name)}</button>`),...v.mentioned_places.map(p=>esc(p.name))].join(', ')}</p>`:''}
+      ${v.location?`<p class="note">${esc(v.location.name)}</p>`:''}
+      <p class="note">${esc(t('talklog.lines',{count:v.line_count}))}${v.status==='open'?' · '+esc(t('talklog.open')):''}</p>
+      <div class="actions">${v.story_event_id?`<button data-talk-event="${esc(v.story_event_id)}">${t('talklog.promoted')}</button>`:v.status==='closed'?`<button data-talk-promote="${esc(v.id)}">${t('talklog.promote')}</button>`:''}</div><div class="talk-lines"></div>`;
+    const worldBody=v=>`<p>${esc(v.summary)}</p><p class="note">${esc(names(v.participants))}${v.location?' · '+esc(v.location.name):''}</p>`;
+    const item=v=>`<details class="talk-entry" ${v.kind==='talk'?`data-talk="${esc(v.id)}"`:''}><summary>${head(v)}</summary>${v.kind==='talk'?talkBody(v):worldBody(v)}</details>`;
     box.innerHTML=`<div class="eyebrow">${t('talklog.kicker')}</div><h2>${t('talklog.title')}</h2><p>${t('talklog.intro')}</p>
-      <h3>${t('talklog.shared')}</h3><div class="event-prose">${esc(data.shared_history||t('talklog.sharedEmpty'))}</div>
-      ${data.talks.length?data.talks.slice(0,talkShown).map(item).join(''):`<p>${t('talklog.empty')}</p>`}
-      ${data.talks.length>talkShown?`<button id="talk-more">${t('talklog.more',{count:data.talks.length-talkShown})}</button>`:''}`;
+      ${data.shared_history!==''||character.name!=='Palor'?`<h3>${t('talklog.shared')}</h3><div class="event-prose">${esc(data.shared_history||t('talklog.sharedEmpty'))}</div>`:''}
+      <label>${t('talklog.show')} <select id="talk-kind">${['all','talk','world'].map(k=>`<option value="${k}" ${k===talkKind?'selected':''}>${t('talklog.kind.'+k)}</option>`).join('')}</select></label>
+      ${items.length?items.slice(0,talkShown).map(item).join(''):`<p>${t('talklog.empty')}</p>`}
+      ${items.length>talkShown?`<button id="talk-more">${t('talklog.more',{count:items.length-talkShown})}</button>`:''}`;
+    $('#talk-kind').onchange=action(async e=>{talkKind=e.target.value;talkShown=TALK_PAGE;await talkLog();});
     for(const d of $$('[data-talk]',box))d.ontoggle=action(async()=>{const out=$('.talk-lines',d);if(!d.open||out.dataset.loaded)return;out.dataset.loaded='1';
-      const {lines}=await api('/api/play/talk-log/lines/'+d.dataset.talk);out.innerHTML=lines.map(l=>`<p><b>${esc(l.name)}:</b> ${esc(l.text)}</p>`).join('');});
+      const {lines}=await api('/api/play/talk-log/talk/'+d.dataset.talk);out.innerHTML=lines.map(l=>`<p><b>${esc(l.name)}:</b> ${esc(l.text)}</p>`).join('');});
+    for(const b of $$('[data-talk-person]',box))b.onclick=action(()=>openCharacter(b.dataset.talkPerson));
+    for(const b of $$('[data-talk-event]',box))b.onclick=action(()=>detail(b.dataset.talkEvent));
+    for(const b of $$('[data-talk-promote]',box))b.onclick=action(async()=>{const v=data.items.find(x=>x.id===b.dataset.talkPromote);await edit(null,promotion(v));});
     if($('#talk-more'))$('#talk-more').onclick=action(async()=>{talkShown+=TALK_PAGE;await talkLog();});
+  }
+  // A talk proposed as a story event (opened in the editor first; saving makes a proposal, never
+  // an approved event). The source key points back to the talk, so it cannot be recorded twice.
+  function promotion(v){
+    const lines=[v.learned?.character&&`${v.participants[1]?.name||''} megtudta: ${v.learned.character}`,v.learned?.palor&&`Palor megtudta: ${v.learned.palor}`,v.reason&&`Viszony: ${v.reason}`,v.milestone].filter(Boolean);
+    return {title:v.title||t('talklog.noSummary'),summary:v.summary||v.title||'',details:lines.join('\n'),consequences:'',timeline:'main',visibility:'participants',
+      chronology:{kind:'exact',start:v.world_day,label:v.slot||''},participants:v.participants.map(p=>({character_id:p.id,role:'participant',knows:true})),
+      location_ids:[...new Set([v.location?.id,...(v.mentioned_places||[]).map(p=>p.id)].filter(Boolean))],
+      sources:[{system:'Living Universe játék',external_id:'play-conversation:'+v.id,url:'',locator:`${v.world_day} ${v.slot||''}`.trim(),excerpt:''}],tags:v.tags||[],related_event_ids:[]};
   }
   async function listing(){
     const data=await api('/api/characters/'+character.id+'/timeline?'+new URLSearchParams({...filters,offset,limit:20}));

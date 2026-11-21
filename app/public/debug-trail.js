@@ -7,19 +7,38 @@
 //    status, time, request id) and browser errors.
 // Screens can register a context function (the Play screen: view, place, open talk) that the
 // F9 panel and the bug report read.
+// B7: explicitly started task measurements persist counters across reload. On Finish only
+// preset task/surface, UUID, click count and elapsed ms go to the local diagnostic log.
 const KEY='lu-trail-v1',MAX_STEPS=60,MAX_API=40,MAX_ERRORS=20;
 const now=()=>new Date().toISOString();
 const short=(s,n=40)=>String(s??'').replace(/\s+/g,' ').trim().slice(0,n);
 
 function load(){try{const v=JSON.parse(sessionStorage.getItem(KEY)||'null');return Array.isArray(v?.steps)?v:{steps:[],api:[],errors:[]};}catch{return {steps:[],api:[],errors:[]};}}
 
-export function createTrail({storage=true}={}){
+export function createTrail({storage=true,clock=()=>Date.now(),makeId=()=>crypto.randomUUID()}={}){
   const data=storage?load():{steps:[],api:[],errors:[]};
   const inflight=new Map(),contexts=new Map();let saveTimer=null,seq=0;
   const save=()=>{if(!storage)return;clearTimeout(saveTimer);saveTimer=setTimeout(()=>{try{sessionStorage.setItem(KEY,JSON.stringify(data));}catch{}},200);};
   const push=(list,item,max)=>{list.push(item);if(list.length>max)list.splice(0,list.length-max);save();};
+  const persistTask=()=>{if(storage)try{sessionStorage.setItem(KEY,JSON.stringify(data));}catch{}};
+  const countClick=()=>{if(data.task){data.task.clicks++;persistTask();}};
+  data.measurements=Array.isArray(data.measurements)?data.measurements.slice(-20):[];
   const trail={
-    note(kind,text){push(data.steps,{at:now(),kind,text:short(text,120)},MAX_STEPS);},
+    note(kind,text,{measure=true}={}){if(kind==='click'&&measure)countClick();push(data.steps,{at:now(),kind,text:short(text,120)},MAX_STEPS);},
+    countClick,
+    startTask(task,surface='desktop'){
+      if(data.task||!['talk','background','other'].includes(task)||!['desktop','phone'].includes(surface))return false;
+      data.task={id:makeId(),task,surface,started:clock(),clicks:0};persistTask();return true;
+    },
+    activeTask:()=>data.task?{...data.task,ms:Math.max(0,clock()-data.task.started)}:null,
+    finishTask(){
+      if(!data.task)return null;
+      const {started,...task}=data.task,result={...task,ms:Math.max(0,Math.round(clock()-started))};
+      data.task=null;data.measurements.push(result);data.measurements=data.measurements.slice(-20);persistTask();return {...result};
+    },
+    cancelTask(){data.task=null;persistTask();},
+    measurements:()=>data.measurements.map(m=>({...m})),
+    taskSaved(id){const m=data.measurements.find(m=>m.id===id);if(m){m.saved=true;persistTask();}},
     error(message,where=''){push(data.errors,{at:now(),message:short(message,300),where:short(where,120)},MAX_ERRORS);trail.note('error',message);},
     apiStart(method,route){const id=++seq;inflight.set(id,{method,route,started:performance.now(),at:now()});return id;},
     apiEnd(id,status,requestId){const r=inflight.get(id);if(!r)return;inflight.delete(id);
@@ -58,7 +77,7 @@ export function installTrail(){
     try{const r=await original(input,init);trail.apiEnd(id,r.status,r.headers.get('x-request-id'));return r;}
     catch(e){trail.apiEnd(id,0,null);throw e;}
   };
-  document.addEventListener('click',e=>{const label=controlLabel(e.target);if(label)trail.note('click',label);},true);
+  document.addEventListener('click',e=>{const label=controlLabel(e.target),measure=!e.target?.closest?.('.pdbg');if(label)trail.note('click',label,{measure});else if(measure)trail.countClick();},true);
   window.addEventListener('hashchange',()=>trail.note('view',location.hash||'/'));
   window.addEventListener('error',e=>trail.error(e.message,e.filename?String(e.filename).split('/').pop()+':'+e.lineno:''));
   window.addEventListener('unhandledrejection',e=>{const r=e.reason;if(r?.status)return;trail.error(r?.message||String(r));});

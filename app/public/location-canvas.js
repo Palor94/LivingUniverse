@@ -1,6 +1,8 @@
-import {translateServerMessage} from './i18n.js';
+import {ask} from './interactions.js';
+import {t,translateServerMessage} from './i18n.js';
+import {requestJson,appendStatusRetry} from './api-json.js';
 import {scanPictures,openMissingBackdrops,importBackgroundZip} from './place-tools.js';
-import {WORLD_ROOT,copy,normalizeCanvas,catalogueCanvas,canvasChildren,descendants,reparentCanvas,retireCanvas,canvasLayout,moveCanvasBranch,zoomCanvas,cleanupSuggestions,applyTidy,pickDuplicateKeeper,mergeDuplicates} from './location-canvas-model.js';
+import {WORLD_ROOT,fitCanvasCamera,groupCanvasSources,copy,normalizeCanvas,catalogueCanvas,canvasChildren,descendants,reparentCanvas,retireCanvas,canvasLayout,moveCanvasBranch,zoomCanvas,cleanupSuggestions,applyTidy,pickDuplicateKeeper,mergeDuplicates} from './location-canvas-model.js';
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 const button=(text,fn,cls)=>{const b=el('button',text,cls);b.type='button';b.onclick=fn;return b;};
 const label=(text,control)=>{const l=el('label',text);l.append(control);return l;};
@@ -9,16 +11,22 @@ const textKey=s=>s.normalize('NFD').replace(/\p{M}/gu,'').toLocaleLowerCase('hu'
 const svg=tag=>document.createElementNS('http://www.w3.org/2000/svg',tag);
 const uid=()=>crypto.randomUUID();
 
-export async function mountLocationCanvas({host}){
+export async function mountLocationCanvas({host,onInspect=null,embedded=false,initialSelection=null}){
   const abort=new AbortController(),signal=abort.signal;
   let context=await request('/api/location-canvas'),base=normalizeCanvas(context.state),state=copy(base),selected=WORLD_ROOT,layout,camera={x:0,y:20,z:1},collapsed=new Set(),carry=null,linkParent=null,busy=false,pending=null,undo=[],redo=[],destroyed=false,dirty=false,focusMode=false,nativeFullscreen=false;
   const storageKey='lu-location-canvas-v1:'+context.catalogue_id;
+  if(!host.isConnected)return {destroy(){}};
   let local=null;try{local=JSON.parse(localStorage.getItem(storageKey)||'null');}catch{}
   if(local){try{state=normalizeCanvas(local.state);camera=local.camera||camera;collapsed=new Set(local.collapsed||[]);}catch{local=null;}}
+  if(local&&(local.head!==context.head||local.catalogue_version!==context.catalogue_version)){
+    try{sessionStorage.setItem(storageKey+':recovery',JSON.stringify(local));}catch{}
+    const choice=await ask({title:t('places.draftConflict'),message:t('places.draftConflictLead'),cancellable:false,fields:[{name:'choice',label:t('places.chooseVersion'),required:true,options:[['',t('common.choose')],['server',t('places.useServer')],['local',t('places.useLocal')]]}],accept:t('places.useVersion')});
+    if(!choice)return {destroy(){}};if(choice.choice==='server')state=copy(base);local=null;camera={x:0,y:20,z:1};collapsed=new Set();
+  }
   if(!local)for(const child of canvasChildren(state,WORLD_ROOT))if(canvasChildren(state,child.id).length)collapsed.add(child.id);
   const shell=el('section',undefined,'lc-shell'),heading=el('div',undefined,'lc-heading'),titles=el('div'),actions=el('div',undefined,'actions'),status=el('span',undefined,'lc-status');
-  titles.append(el('div','A VILÁGOD HELYSZÍNEI','eyebrow'),el('h1','Locations'),el('p','Egy világ, egyre több hely. Nagyíts rá egy ágra, és építsd tovább.'));
-  const saveButton=button('Piszkozat mentése',()=>attempt(()=>save('draft','Helyszínterv mentése.')),'primary'),approveButton=button('Terv áttekintése',review),historyButton=button('Előzmények',history),exportButton=button('Terv letöltése',download);
+  titles.append(el('div','A VILÁGOD HELYSZÍNEI','eyebrow'),el('h1',t('places.title')),el('p','Egy világ, egyre több hely. Nagyíts rá egy ágra, és építsd tovább.'));
+  const saveButton=button(t('places.save'),()=>attempt(()=>save('draft','Helyszínterv mentése.')),'primary'),approveButton=button(t('places.review'),review),historyButton=button('Előzmények',history),exportButton=button('Terv letöltése',download);
   const importFile=el('input');importFile.type='file';importFile.accept='application/json';importFile.hidden=true;const importButton=button('Terv betöltése…',()=>importFile.click());
   // Tidy-up: suggested parents applied to the unsaved plan; saving and approving stay with the owner.
   const tidyButton=button('Rendrakási javaslatok',()=>attempt(tidy));
@@ -27,7 +35,10 @@ export async function mountLocationCanvas({host}){
   const missingButton=button('Hiányzó hátterek',()=>attempt(()=>openMissingBackdrops(tell)));
   // Background package (2026-11-14): one ZIP with a folder per place.
   const zipButton=button('📦 Háttércsomag (ZIP) betöltése',()=>importBackgroundZip(tell));zipButton.title='Egy ZIP, benne helyenként egy mappa (a hely katalógusneve) a képekkel. A program minden képet a helyére tesz; amit nem tud biztosan elhelyezni, félreteszi átnézésre.';
-  actions.append(status,saveButton,approveButton,historyButton,exportButton,importButton,tidyButton,scanButton,zipButton,missingButton,importFile);heading.append(titles,actions);
+  const more=el('details',undefined,'lc-more'),moreMenu=el('div',undefined,'lc-more-menu');more.append(el('summary',t('places.more')),moreMenu);moreMenu.append(historyButton,exportButton,importButton,tidyButton,scanButton,zipButton,missingButton);more.addEventListener('click',event=>{if(event.target.closest('button'))more.open=false;});
+  if(embedded){scanButton.remove();zipButton.remove();missingButton.remove();}
+  const recovery=button(t('places.recoverDraft'),()=>attempt(()=>{const saved=JSON.parse(sessionStorage.getItem(storageKey+':recovery')||'null');if(!saved)return;change(next=>{const restored=normalizeCanvas(saved.state);next.nodes=restored.nodes;next.types=restored.types;});local=null;pending=null;cache();renderGraph();renderPalette();fit();}));try{recovery.hidden=!sessionStorage.getItem(storageKey+':recovery');}catch{recovery.hidden=true;}moreMenu.append(recovery);
+  actions.append(status,saveButton,approveButton,more,importFile);if(!embedded)heading.append(titles);heading.append(actions);
   const message=el('div',undefined,'lc-toast');message.setAttribute('role','status');message.setAttribute('aria-live','polite');
   const wrapper=el('div',undefined,'lc-layout'),palette=el('aside',undefined,'lc-palette'),main=el('div',undefined,'lc-main'),tools=el('div',undefined,'lc-tools');
   palette.setAttribute('aria-label','Helyszíncímkék és típusok');const search=el('input');search.type='search';search.placeholder='Helyszíncímke keresése…';search.setAttribute('aria-label','Helyszíncímke keresése');const sourceList=el('div',undefined,'lc-source-list'),typeDetails=el('details'),typeList=el('div'),archiveDetails=el('details'),archiveList=el('div');
@@ -37,12 +48,13 @@ export async function mountLocationCanvas({host}){
   const paletteButton=button('Címkék',()=>togglePanel('palette'), 'lc-focus-control'),inspectorButton=button('Részletek',()=>togglePanel('inspector'), 'lc-focus-control');
   paletteButton.setAttribute('aria-expanded','false');inspectorButton.setAttribute('aria-expanded','false');fullButton.setAttribute('aria-pressed','false');
   const refreshButton=button('Címkék frissítése',()=>attempt(refreshLabels));
-  const spacer=el('span',undefined,'lc-spacer');tools.append(zoomOut,zoomReadout,zoomIn,fitButton,rootButton,arrangeButton,allButton,refreshButton,spacer,undoButton,redoButton,paletteButton,inspectorButton,fullButton);
+  const spacer=el('span',undefined,'lc-spacer');const toolsMore=el('details',undefined,'lc-more'),toolsMenu=el('div',undefined,'lc-more-menu');toolsMore.append(el('summary',t('places.more')),toolsMenu);toolsMenu.append(rootButton,arrangeButton,allButton,refreshButton,redoButton);toolsMore.addEventListener('click',event=>{if(event.target.closest('button'))toolsMore.open=false;});tools.append(zoomOut,zoomReadout,zoomIn,fitButton,toolsMore,spacer,paletteButton,inspectorButton,fullButton);undoButton.textContent=t('places.undo');actions.insertBefore(undoButton,more);
   const board=el('div',undefined,'lc-board');board.tabIndex=0;board.setAttribute('role','region');board.setAttribute('aria-label','Living Universe nagyítható helyszínvászon');
   const world=el('div',undefined,'lc-world'),lines=svg('svg');lines.classList.add('lc-edges');lines.setAttribute('aria-hidden','true');world.append(lines);board.append(world);
-  const help=el('div',undefined,'lc-help'),inspector=el('div',undefined,'lc-inspector');main.append(tools,board,help,inspector);wrapper.append(palette,main);shell.append(heading,message,wrapper);host.replaceChildren(shell);
+  const help=el('div',undefined,'lc-help'),inspector=el('div',undefined,'lc-inspector');const inspectorPanel=el('details',undefined,'lc-inspector-panel');inspectorPanel.append(el('summary',t('places.details')),inspector);main.append(tools,board,help,inspectorPanel);wrapper.append(palette,main);shell.append(heading,message,wrapper);host.replaceChildren(shell);
   const dialog=el('dialog',undefined,'lc-dialog');document.body.append(dialog);
-  async function request(url,body){const response=await fetch(url,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-LU-Location-CSRF':context.csrf}:{},body:body?JSON.stringify(body):undefined});const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.error?translateServerMessage(value.error):'A helyszínterv nem tölthető be.'),{status:response.status});return value;}
+  async function request(url,body){return requestJson(url,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-LU-Location-CSRF':context.csrf}:{},body:body?JSON.stringify(body):undefined});}
+  function requestError(error,out=message){if(destroyed)return;out.textContent=error.message;out.dataset.error='true';if(error.transport)appendStatusRetry(out,async()=>{try{await request('/api/location-canvas');out.textContent=t('api.responding');out.dataset.error='false';}catch(next){requestError(next,out);}});}
   function tell(text,error=false){if(destroyed)return;message.textContent=text;message.dataset.error=String(error);}
   async function refreshLabels(){
     if(busy)return;busy=true;refreshButton.disabled=true;updateStatus();
@@ -63,7 +75,7 @@ export async function mountLocationCanvas({host}){
       tell('Címkék frissítve: '+renamed+' átnevezés, '+added+' új címke. A hierarchia és a pozíciók megmaradtak. A változást piszkozatként mentheted.');
     }finally{busy=false;refreshButton.disabled=false;updateStatus();}
   }
-  async function attempt(fn){try{await fn();}catch(e){tell(e.message,true);if(e.status===409)help.replaceChildren(el('span','A saját piszkozatod megmaradt.'),button('Friss változat összehasonlítása',conflict));}}
+  async function attempt(fn){try{await fn();}catch(e){requestError(e);if(e.status===409&&!e.transport)help.replaceChildren(el('span','A saját piszkozatod megmaradt.'),button('Friss változat összehasonlítása',conflict));}}
   function cache(){try{localStorage.setItem(storageKey,JSON.stringify({head:local?local.head:context.head,catalogue_version:local?.catalogue_version||context.catalogue_version,state,camera,collapsed:[...collapsed]}));}catch{tell('A böngésző nem tudja megőrizni a piszkozatot. Mentsd a tervet vagy töltsd le.',true);}}
   // Each undo step holds a full plan copy, so the history is capped.
   const UNDO_LIMIT=100;
@@ -106,7 +118,7 @@ export async function mountLocationCanvas({host}){
   function pathTo(id){const parts=[];let n=state.nodes.find(n=>n.id===id);while(n){parts.unshift(n.name);n=n.parent_id?state.nodes.find(p=>p.id===n.parent_id):null;}return parts.join(' › ');}
   function applyCamera(){world.style.transform=`translate(${camera.x}px,${camera.y}px) scale(${camera.z})`;zoomReadout.textContent=Math.round(camera.z*100)+'%';}
   function zoomAt(z,point={x:board.clientWidth/2,y:board.clientHeight/2}){camera=zoomCanvas(camera,z,point);applyCamera();cacheSoon();}
-  function fit(){const rects=[...layout.positions.values()],minX=Math.min(...rects.map(p=>p.x)),minY=Math.min(...rects.map(p=>p.y)),maxX=Math.max(...rects.map(p=>p.x+p.width)),maxY=Math.max(...rects.map(p=>p.y+p.height));const z=Math.min(1.05,(board.clientWidth-70)/(maxX-minX),(board.clientHeight-70)/(maxY-minY));camera={x:(board.clientWidth-(maxX-minX)*z)/2-minX*z,y:(board.clientHeight-(maxY-minY)*z)/2-minY*z,z:Math.max(.025,z)};applyCamera();cache();}
+  function fit(){camera=fitCanvasCamera(layout.positions,board.clientWidth,board.clientHeight);applyCamera();cache();}
   function focusNode(id){let n=state.nodes.find(n=>n.id===id);while(n?.parent_id){collapsed.delete(n.parent_id);n=state.nodes.find(p=>p.id===n.parent_id);}selected=id;renderGraph();const p=layout.positions.get(id);if(p){camera={x:board.clientWidth/2-(p.x+p.width/2)*1.05,y:board.clientHeight/2-(p.y+p.height/2)*1.05,z:1.05};applyCamera();cache();}}
   function updateLines(preview=null){lines.replaceChildren();for(const edge of layout.edges){const a=layout.positions.get(edge.parent),b=layout.positions.get(edge.child),path=svg('path'),x=a.x+a.width/2,y=a.y+a.height,bx=b.x+b.width/2,by=b.y;path.setAttribute('d',`M ${x} ${y} C ${x} ${(y+by)/2}, ${bx} ${(y+by)/2}, ${bx} ${by}`);lines.append(path);}if(preview){const p=svg('path');p.classList.add('lc-link-preview');p.setAttribute('d',`M ${preview.x} ${preview.y} L ${preview.toX} ${preview.toY}`);lines.append(p);}}
   function showHelp(){help.replaceChildren();if(carry){help.append(el('span',(carry.type?'Új hely ebből a típusból: ':'Elhelyezendő címke: ')+(carry.type?typeName(carry.id):nodeName(carry.id))),button('Mégse',()=>{carry=null;showHelp();}));}else if(linkParent){help.append(el('span','Szülő: '+nodeName(linkParent)+' · kattints a gyermekhelyre.'),button('Kapcsolás megszakítása',()=>{linkParent=null;showHelp();}));}else help.append(el('span','Háttér húzása: mozgatás · görgő / két ujj: nagyítás · hely neve: ág mozgatása · alsó kör: gyermekkapcsolat.'));}
@@ -124,16 +136,17 @@ export async function mountLocationCanvas({host}){
   }
   function selectNode(id){attempt(async()=>{if(carry){if(carry.type){const type=carry.id;carry=null;showHelp();addNodeDialog(id,type);}else{const child=carry.id;carry=null;change(s=>{if(!s.nodes.some(n=>n.id===child)){const source=context.catalogue.find(n=>n.id===child);if(!source)throw Error('A forráscímke közben eltűnt.');s.nodes.push({id:child,name:source.name,source_id:child,parent_id:null,kind:'place',placed:false,archived:false,order:s.nodes.length,type_ids:[],note:'',x:null,y:null});}reparentCanvas(s,child,id);});tell('A címke az új szülő alá került a tervben.');}return;}if(linkParent){const parent=linkParent;linkParent=null;change(s=>reparentCanvas(s,id,parent));tell('A szülő–gyermek kapcsolat frissült.');return;}selected=id;renderGraph();});}
   function renderPalette(){
-    sourceList.replaceChildren();const q=textKey(search.value),choices=[...context.catalogue.map(n=>({...n,name:state.nodes.find(p=>p.id===n.id)?.name||n.name})),...state.nodes.filter(n=>!n.source_id&&!n.archived).map(n=>({id:n.id,name:n.name,planned:true}))],matches=choices.filter(n=>textKey(n.name).includes(q)).toSorted((a,b)=>a.name.localeCompare(b.name,'hu'));
-    for(const item of matches){const n=state.nodes.find(n=>n.id===item.id),isType=n?.kind==='type-source',b=button(item.name,()=>{if(n?.placed&&!n.archived)focusNode(n.id);else if(n?.archived){selected=n.id;renderInspector();}else if(isType){selected=n.id;renderInspector();tell('Ez általános típus. Új konkrét helyhez használd a Típusok palettát.');}else{carry={id:item.id};showHelp();}});b.append(el('small',isType?'általános típus':n?.archived?'archivált a tervben':item.planned?'helyszínterv · fókuszálás':n?.placed?'elhelyezve · fókuszálás':'húzd a szülőre'));if(!isType&&!n?.archived&&n?.id!==WORLD_ROOT)paletteDrag(b,{id:item.id});sourceList.append(b);}
+    const q=textKey(search.value),choices=[...context.catalogue.map(n=>({...n,name:state.nodes.find(p=>p.id===n.id)?.name||n.name})),...state.nodes.filter(n=>!n.source_id&&!n.archived).map(n=>({id:n.id,name:n.name,planned:true}))],matches=choices.filter(n=>textKey(n.name).includes(q)).toSorted((a,b)=>a.name.localeCompare(b.name,'hu'));
+    const oldOpen=new Set([...sourceList.querySelectorAll('details[open]')].map(group=>group.dataset.group));sourceList.replaceChildren();for(const group of groupCanvasSources(matches,state)){const details=el('details',undefined,'lc-source-group');details.dataset.group=group.key;details.open=!!q||oldOpen.has(group.key);details.append(el('summary',(group.label||t(group.key==='types'?'places.typeGroup':'places.unplacedGroup'))+' · '+group.items.length));sourceList.append(details);
+    for(const item of group.items){const n=state.nodes.find(n=>n.id===item.id),isType=n?.kind==='type-source',b=button(item.name,()=>{if(n?.placed&&!n.archived)focusNode(n.id);else if(n?.archived){selected=n.id;renderInspector();}else if(isType){selected=n.id;renderInspector();tell('Ez általános típus. Új konkrét helyhez használd a Típusok palettát.');}else{carry={id:item.id};showHelp();}});b.append(el('small',isType?'általános típus':n?.archived?'archivált a tervben':item.planned?'helyszínterv · fókuszálás':n?.placed?'elhelyezve · fókuszálás':'húzd a szülőre'));if(!isType&&!n?.archived&&n?.id!==WORLD_ROOT)paletteDrag(b,{id:item.id});details.append(b);}}
     if(!matches.length)sourceList.append(el('p','Nincs ilyen címke. Új helyet a csomópont + gombjával hozhatsz létre.'));
     typeList.replaceChildren();for(const t of state.types.toSorted((a,b)=>a.name.localeCompare(b.name,'hu'))){const b=button(t.name,()=>{carry={id:t.id,type:true};linkParent=null;showHelp();});b.setAttribute('aria-label','Új hely típusa: '+t.name);paletteDrag(b,{id:t.id,type:true});typeList.append(b);}
     archiveList.replaceChildren();const retired=state.nodes.filter(n=>n.archived);archiveDetails.hidden=!retired.length;for(const n of retired)archiveList.append(button(n.name,()=>{selected=n.id;renderInspector();}));
   }
   function renderInspector(){const n=state.nodes.find(n=>n.id===selected)||state.nodes.find(n=>n.id===WORLD_ROOT);inspector.replaceChildren(el('h3',n.name),el('p',n.placed?pathTo(n.id):'Még nincs konkrét helyként a fában.'));if(n.note)inspector.append(el('p',n.note));if(n.source_id)inspector.append(el('p','Az eredeti címkéhez kapcsolva · a képkapcsolatok megmaradnak.'));const buttons=el('div',undefined,'actions');
-    if(n.archived)buttons.append(button('Visszahozás…',()=>parentDialog(n,true)));else{buttons.append(button('Adatok és típus…',()=>editNode(n)),button('+ Gyermekhely',()=>addNodeDialog(n.id)));if(n.id!==WORLD_ROOT&&n.kind!=='type-source')buttons.append(button('Új szülő…',()=>parentDialog(n)),button('Archiválás…',()=>archiveDialog(n)));if(n.kind==='type-source')buttons.replaceChildren(button('Típus megtekintése',()=>{typeDetails.open=true;tell('A helyszíntípus új konkrét hely létrehozásához húzható a fába.');}));}inspector.append(buttons);}
+    if(n.archived)buttons.append(button('Visszahozás…',()=>parentDialog(n,true)));else{buttons.append(button('Adatok és típus…',()=>editNode(n)),button('+ Gyermekhely',()=>addNodeDialog(n.id)));if(n.id!==WORLD_ROOT&&n.kind!=='type-source')buttons.append(button('Új szülő…',()=>parentDialog(n)),button('Archiválás…',()=>archiveDialog(n)));if(n.kind==='type-source')buttons.replaceChildren(button('Típus megtekintése',()=>{typeDetails.open=true;tell('A helyszíntípus új konkrét hely létrehozásához húzható a fába.');}));}inspector.append(buttons);if(onInspect)Promise.resolve(onInspect(n,inspector)).catch(error=>tell(error.message,true));}
   function modal(title,build,onSubmit,submit='Rendben'){
-    dialog.replaceChildren();const form=el('form'),heading=el('h2',title),body=el('div'),error=el('p',undefined,'lc-errors'),footer=el('div',undefined,'lc-actions'),cancel=button('Mégse',()=>dialog.close()),confirm=el('button',submit,'primary');error.setAttribute('role','alert');confirm.type='submit';footer.append(cancel,confirm);form.append(heading,body,error,footer);dialog.append(form);const read=build(body,confirm);form.onsubmit=async e=>{e.preventDefault();confirm.disabled=true;try{await onSubmit(read?.());dialog.close();}catch(err){error.textContent=err.message;}finally{confirm.disabled=false;}};dialog.showModal();
+    dialog.replaceChildren();const form=el('form'),heading=el('h2',title),body=el('div'),error=el('p',undefined,'lc-errors'),footer=el('div',undefined,'lc-actions'),cancel=button('Mégse',()=>dialog.close()),confirm=el('button',submit,'primary');error.setAttribute('role','alert');confirm.type='submit';footer.append(cancel,confirm);form.append(heading,body,error,footer);dialog.append(form);const read=build(body,confirm);form.onsubmit=async e=>{e.preventDefault();confirm.disabled=true;try{await onSubmit(read?.());dialog.close();}catch(err){requestError(err,error);}finally{confirm.disabled=false;}};dialog.showModal();
   }
   function typeSelect(value=''){return select([['','Nincs megadva'],...state.types.toSorted((a,b)=>a.name.localeCompare(b.name,'hu')).map(t=>[t.id,t.name])],value);}
   function addNodeDialog(parentId,typeId=''){modal('Új gyermekhelyszín',body=>{const name=el('input');name.required=true;name.maxLength=100;const kind=select([['place','Konkrét hely'],['collection','Rendezési gyűjtő']], 'place'),type=typeSelect(typeId);body.append(el('p','Szülő: '+nodeName(parentId)),label('Helyszín neve',name),label('Jellege',kind),label('Helyszíntípus',type));return()=>({name:name.value,kind:kind.value,type_ids:type.value?[type.value]:[]});},value=>{const id='draft:'+uid();change(s=>s.nodes.push({id,...value,parent_id:parentId,source_id:null,placed:true,archived:false,order:s.nodes.length,note:'',x:null,y:null}));collapsed.delete(parentId);selected=id;renderGraph();focusNode(id);tell('Az új hely a tervhez hozzáadva.');},'Hozzáadás a tervhez');}
@@ -148,7 +161,7 @@ export async function mountLocationCanvas({host}){
       const route='/api/location-canvas/'+(kind==='approved'?'approve':'draft');let result;
       try{result=await request(route,pending.body);}
       catch(e){
-        if(e.status!==409)throw e;
+        if(e.status!==409||e.transport)throw e;
         // 2026-11-11: when only the location catalogue moved on (a new, renamed or tidied place) and
         // the saved plan is still the one this draft started from, carry the draft over to the fresh
         // catalogue and save once more. If the plan itself changed elsewhere, the owner chooses.
@@ -213,8 +226,9 @@ export async function mountLocationCanvas({host}){
   board.addEventListener('wheel',e=>{e.preventDefault();zoomAt(camera.z*Math.exp(-e.deltaY*.0015),relative(e));},{passive:false,signal});
   board.addEventListener('keydown',e=>{if(e.target!==board)return;if(['+','=','-','0','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Escape'].includes(e.key))e.preventDefault();if(e.key==='+'||e.key==='=')zoomAt(camera.z*1.2);else if(e.key==='-')zoomAt(camera.z/1.2);else if(e.key==='0')fit();else if(e.key==='Escape'){carry=null;linkParent=null;showHelp();}else{const dx=e.key==='ArrowLeft'?60:e.key==='ArrowRight'?-60:0,dy=e.key==='ArrowUp'?60:e.key==='ArrowDown'?-60:0;camera.x+=dx;camera.y+=dy;applyCamera();cacheSoon();}},{signal});
   let boardSize={width:board.clientWidth,height:board.clientHeight};
-  search.oninput=renderPalette;const resize=new ResizeObserver(()=>{if(destroyed)return;const next={width:board.clientWidth,height:board.clientHeight};camera.x+=(next.width-boardSize.width)/2;camera.y+=(next.height-boardSize.height)/2;boardSize=next;applyCamera();});resize.observe(board);
+  search.oninput=renderPalette;const resize=new ResizeObserver(()=>{if(destroyed)return;const next={width:board.clientWidth,height:board.clientHeight};boardSize=next;if(layout)fit();});resize.observe(board);
+  if(initialSelection&&state.nodes.some(node=>node.id===initialSelection)){selected=initialSelection;let node=state.nodes.find(node=>node.id===selected);while(node?.parent_id){collapsed.delete(node.parent_id);node=state.nodes.find(parent=>parent.id===node.parent_id);}}
   dirty=JSON.stringify(state)!==JSON.stringify(base);renderGraph();renderPalette();updateStatus();
-  if(!local){const rootBox=layout.positions.get(WORLD_ROOT);camera={x:board.clientWidth/2-(rootBox.x+rootBox.width/2)*.9,y:65-rootBox.y*.9,z:.9};applyCamera();cache();tell('A Living Universe gyökérből kiindulva a + gombbal bővítheted a világot.');}else if(local.head!==context.head||local.catalogue_version!==context.catalogue_version){tell('A megőrzött saját piszkozatod és a szerver változata eltér. Összehasonlítás után menthető.',true);help.append(button('Változatok összehasonlítása',conflict));}
+  fit();if(!local)tell(t('places.startHint'));
   return{destroy(){clearTimeout(cacheTimer);cache();destroyed=true;abort.abort();resize.disconnect();if(document.fullscreenElement===shell)document.exitFullscreen().catch(()=>{});document.body.classList.remove('lu-location-focus');dialog.close();dialog.remove();document.querySelectorAll('.lc-ghost').forEach(n=>n.remove());}};
 }

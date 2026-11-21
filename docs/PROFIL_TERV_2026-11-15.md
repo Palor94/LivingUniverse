@@ -6,10 +6,16 @@ Status: steps 1–3 done 2026-11-15 (proposals accepted by the owner; 85 place l
 
 ## Missing places (D2: list only, for the owner)
 
-Homes the tree does not have; until one exists the character is off the map at night:
-Gyuszi (house in Káloz), Gábor (flat in Székesfehérvár), Jessi (rented flat, Budapest),
-Kevin, Kristóf, Krisztián, Matt, Zsolti, Serge, Ricsi (flats in Budapest), Raul (rented
+Owner (2026-11-15): not everyone has to be on the map at night; Palor does not know them well
+enough to know where they live. So the list below needs no action; homes are added only when
+the owner asks. Raul (and Doyoon, formerly Hyunjin, who has no profile yet) live in a Budapest hotel while
+travelling; Raul's profile says so, Doyoon's note waits for his profile.
+Homes the tree does not have (off the map at night, which is fine):
+Gábor (flat in Székesfehérvár), Kevin, Kristóf, Krisztián, Matt, Zsolti, Serge, Ricsi (flats in Budapest), Raul (rented
 flat, Budapest), Tamás (a town near Budapest), Ádám (Székesfehérvár).
+Done on the owner's word (2026-11-15): Jessi lives with Jonas ("Jonas háza - Jessi szobája");
+Gyuszi has "Gyuszi háza" in Káloz with "Gyuszi háza - Nappali". Their backgrounds and doors
+are ChatGPT orders.
 Other places the routines mention that the tree lacks: Albert's, Krisztián's and Valentin's
 offices, Jessi's training school, Laci's workplace, the Székesfehérvár university (Ádám),
 the Székesfehérvár police station as a place of its own (only "Fogdacella" exists).
@@ -26,8 +32,9 @@ the Székesfehérvár police station as a place of its own (only "Fogdacella" ex
     Gábor, Jessi, Kristóf, Ricsi also lack residence; Ghor-Ka and Zzap lack occupation.
   - 17 of them have no relationship at all; only Kevin, Kristóf, Tamás, Ádám know Palor.
   - None has a linked world place, so none can be met in Play yet.
-- Excluded on purpose: Csanád, Dávid, Goblin harcos, Hyunjin, Jinu, Matyi,
-  Metro kopasz srác, Mingi, Máté, Namjoon, Seo Kang Joon, Soobin, Tóni.
+- Second batch (owner, later the same day): Csanád, Dávid, Grix, Doyoon, Gunwoo, Matyi,
+  Szilárd, Hajun, Máté, Wonjae, Moon Ihan, Jiwan, Tóni (names as renamed 2026-11-15) got full
+  profile proposals too; places for them follow after acceptance, as in step 3.
 
 ## Rules this plan keeps
 

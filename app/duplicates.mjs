@@ -8,7 +8,7 @@ const exec=promisify(execFile);
 export async function cloudAvailability(file){
   return (await cloudAvailabilityMany([file])).get(file);
 }
-async function cloudAvailabilityMany(files){
+export async function cloudAvailabilityMany(files){
   if(process.platform!=='win32')return new Map(files.map(file=>[file,'local']));
   // One PowerShell process per batch, not per file. Paths are data, never code.
   const script="$ErrorActionPreference='Stop'; $paths=ConvertFrom-Json $env:LU_ATTRIBUTE_PATHS; $values=@(foreach($p in $paths){try{[int64][System.IO.File]::GetAttributes($p)}catch{-1}}); ConvertTo-Json -Compress -InputObject $values";

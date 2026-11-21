@@ -30,5 +30,5 @@ export function installLocationEditor({host,api,onSaved=()=>{}}){
       finally{busy=false;if(save.isConnected){save.disabled=false;for(const input of Object.values(fields))input.disabled=false;}}
     };
   }
-  return {open:async()=>{try{await refresh();if(!current)main.replaceChildren(el('p','Válassz helyszínt vagy címkét a szerkesztéshez.'));}catch(e){notice.textContent=e.message;}}};
+  return {open:async(id=null)=>{try{await refresh();if(id)await choose(id);else if(!current)main.replaceChildren(el('p','Válassz helyszínt vagy címkét a szerkesztéshez.'));}catch(e){notice.textContent=e.message;}}};
 }

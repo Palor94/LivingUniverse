@@ -3,7 +3,7 @@ import path from 'node:path';
 import {GenerationError} from './image-providers.mjs';
 
 // Desktop-only creator controls. MCP callers retain their separate bearer routes.
-export function installDesktopGeneration({imageGeneration,one,all}){
+export function installDesktopGeneration({imageGeneration,assetGeneration=null,generationSessions,one,all}){
   const csrf=randomBytes(32).toString('hex');
   const fail=(code,message,status=400)=>{throw new GenerationError(code,message,status);};
   const shape=(body,keys)=>{if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(k=>!keys.includes(k)))fail('INVALID_ARGUMENT','Unexpected generation fields.');};
@@ -22,7 +22,18 @@ export function installDesktopGeneration({imageGeneration,one,all}){
     return {csrf,...capabilities,canon:canon?{revision_id:canon.id,appearance:canon.appearance,references}:null,runs};
   }
   return {async handle({p,body,req,json}){
-    const match=p.match(/^\/api\/characters\/([a-f0-9-]{36})\/generation(?:\/([a-f0-9-]{36})(?:\/(decision|execute))?)?$/i);if(!match)return false;
+    const sessionRoute=p.match(/^\/api\/generation-sessions(?:\/([a-f0-9-]{36})(?:\/(approve|revoke|execute))?)?$/i);
+    if(sessionRoute){try{
+      const [,sid,operation]=sessionRoute;if(req.method==='GET'&&!operation){json(sid?generationSessions.get(sid):{csrf,sessions:generationSessions.list()});return true;}
+      const supplied=req.headers['x-lu-generation-csrf'];if(req.method!=='POST'||req.headers.origin!=='http://'+req.headers.host||typeof supplied!=='string'||!/^[a-f0-9]{64}$/.test(supplied)||!timingSafeEqual(Buffer.from(supplied),Buffer.from(csrf)))fail('FORBIDDEN','Reload the generation panel before making this change.',403);
+      if(!sid)json(generationSessions.prepare(body,'local-creator'));else if(operation==='approve')json(generationSessions.approve(sid,body,'local-creator'));else if(operation==='revoke'){shape(body,[]);json(generationSessions.revoke(sid,'local-creator'));}else if(operation==='execute'){shape(body,['run_id']);const session=generationSessions.get(sid);if(!session.scope.jobs.some(job=>job.run_id===body.run_id))fail('SESSION_SCOPE_CHANGED','This run is outside the approved session.',409);json(await imageGeneration.execute(body.run_id,sid));}else fail('METHOD_NOT_ALLOWED','Choose a session action.',405);
+    }catch(error){json({code:error.code||'SESSION_UNAVAILABLE',error:error.status?error.message:'The session could not be processed.'},error.status||500);}return true;}
+    if(p==='/api/generation-jobs'&&req.method==='GET'){
+      let capabilities;try{capabilities=imageGeneration.capabilities();}catch{capabilities={enabled:false};}
+      const rows=capabilities.enabled?all("SELECT id FROM image_generation_runs WHERE json_extract(manifest_json,'$.provider')='sogni' ORDER BY rowid DESC LIMIT 30"):[];
+      json({jobs:[...rows.map(({id})=>{const value=imageGeneration.view(id),character=value.manifest.characters[0];return {run_id:id,status:value.status,character_id:character.character_id,name:character.name,count:value.manifest.n||1,output:value.output,created_at:value.created_at};}),...(assetGeneration?.jobs()||[])]});return true;
+    }
+    const match=p.match(/^\/api\/characters\/([a-f0-9-]{36})\/generation(?:\/([a-f0-9-]{36})(?:\/(decision|execute|estimate|withdraw))?)?$/i);if(!match)return false;
     try{
       const [,cid,rid,operation]=match;
       if(!one('SELECT c.id FROM characters c LEFT JOIN character_ui u ON u.character_id=c.id WHERE c.id=? AND u.merged_into IS NULL',cid))fail('NOT_FOUND','Character not found.',404);
@@ -31,10 +42,12 @@ export function installDesktopGeneration({imageGeneration,one,all}){
       const supplied=req.headers['x-lu-generation-csrf'];
       if(req.headers.origin!=='http://'+req.headers.host||typeof supplied!=='string'||!/^[a-f0-9]{64}$/.test(supplied)||!timingSafeEqual(Buffer.from(supplied),Buffer.from(csrf)))fail('FORBIDDEN','Reload the generation panel before making this change.',403);
       if(!rid){
-        shape(body,['request_key','prompt','size','revision_id','reference_ids']);
-        json(await imageGeneration.prepare({request_key:body.request_key,provider:'sogni',prompt:body.prompt,size:body.size,characters:[{character_id:cid,revision_id:body.revision_id,reference_ids:body.reference_ids}]}));return true;
+        shape(body,['request_key','prompt','size','revision_id','reference_ids','max_estimated_capacity_units','output_count']);
+        json(await imageGeneration.prepare({request_key:body.request_key,provider:'sogni',prompt:body.prompt,size:body.size,...(body.output_count===undefined?{}:{output_count:body.output_count}),...(body.max_estimated_capacity_units===undefined?{}:{max_estimated_capacity_units:body.max_estimated_capacity_units}),characters:[{character_id:cid,revision_id:body.revision_id,reference_ids:body.reference_ids}]}));return true;
       }
       const plan=view(cid,rid);
+      if(operation==='estimate'){json(await imageGeneration.estimateRun(rid,body,'local-creator'));return true;}
+      if(operation==='withdraw'){json(imageGeneration.withdraw(rid,body,'local-creator'));return true;}
       if(operation==='decision'){json(await imageGeneration.decide(rid,body,'local-creator'));return true;}
       if(operation==='execute'){
         shape(body,['manifest_hash']);if(body.manifest_hash!==plan.manifest_hash)fail('STALE_PLAN','Review the exact stored plan before starting.',409);

@@ -3,6 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": {"start": "node app/server.mjs", "test": "node ops/test.mjs", "sandbox": "node ops/sandbox.mjs", "doctor": "node ops/doctor.mjs", "perf": "node ops/perf-baseline.mjs", "dbdiff": "node ops/db-diff.mjs", "coverage": "node ops/test.mjs --coverage"},
-  "engines": {"node": ">=24"}
+  "scripts": {
+    "start": "node app/server.mjs",
+    "test": "node ops/test.mjs",
+    "sandbox": "node ops/sandbox.mjs",
+    "doctor": "node ops/doctor.mjs",
+    "perf": "node ops/perf-baseline.mjs",
+    "dbdiff": "node ops/db-diff.mjs",
+    "coverage": "node ops/test.mjs --coverage",
+    "shots": "node ops/ui-shots.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
 }

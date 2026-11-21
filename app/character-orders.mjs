@@ -66,6 +66,39 @@ export const GALLERY_SCENES=Object.freeze([
   {key:'shared_selfie',set:'palor',label:'közös szelfi',purpose:'shared photos, phone',idea:'a selfie of the two of them'},
   {key:'activity',set:'palor',label:'közös program',purpose:'scene, diary',idea:'doing something together with Palor (training, work, a game, a party)'},
 ]);
+
+// Life moments for existing characters (2026-11-16, owner): pictures from his recorded profile and
+// from his recorded relationship with Palor. Nothing is invented: the daily set follows his
+// weekly_routine / habits / occupation / residence; the Palor set and the shared shirtless pictures
+// exist only when a relationship with Palor is recorded (relationship note or approved shared
+// story event). A new approved shared event later opens its own order (one picture per event).
+const DAILY_SCENES=[
+  {key:'daily_morning',label:'reggel',idea:'his morning as his routine and habits describe it'},
+  {key:'daily_day',label:'napközben',idea:'his main daytime activity (his work or what fills his day)'},
+  {key:'daily_afternoon',label:'délután',idea:'an afternoon errand, habit or hobby from his profile'},
+  {key:'daily_evening',label:'este',idea:'his evening as his routine describes it'},
+  {key:'daily_free',label:'szabadidő',idea:'his free time or weekend, from his habits'},
+].map(s=>({...s,set:'solo',purpose:'everyday life, scene, diary',idea:s.idea+'; only what his profile supports'}));
+// Shirtless: not all on a beach. With a recorded relationship the first three are with Palor.
+const SHIRTLESS_SCENES=[
+  {key:'bare_couch',label:'kanapén',idea:'lying or lounging on a couch at home',together:true},
+  {key:'bare_hike',label:'túra',idea:'on a hike outdoors, shirt off in the heat',together:true},
+  {key:'bare_bed',label:'ágyban',idea:'lying in bed, relaxed and calm (not sexual)',together:true},
+  {key:'bare_workout',label:'edzés',idea:'working out (gym, home workout or running)'},
+  {key:'bare_yard',label:'udvar',idea:'tidying the yard or the garden'},
+  {key:'bare_work',label:'fizikai munka',idea:'doing physical work (carrying, building, repairing)'},
+];
+export function lifeScenes({daily=true,palor=true,shirtless=true,relation=null}={}){
+  const out=[];
+  if(daily)out.push(...DAILY_SCENES.map(s=>({...s,content:'non_intimate'})));
+  if(palor&&relation){const n=Math.min(5,Math.max(3,relation.events.length));
+    for(let i=0;i<n;i++){const e=relation.events[i];out.push({key:'palor_'+(i+1),set:'palor',label:'közös pillanat',purpose:'shared photos, diary',content:'non_intimate',
+      idea:e?`the recorded event "${e.title}": ${e.summary}`:'a moment of their relationship exactly as recorded (relationship notes and events); never closer than recorded'});}}
+  if(shirtless)for(const s of SHIRTLESS_SCENES){const together=!!s.together&&!!relation;
+    out.push({key:s.key,set:together?'palor':'solo',label:s.label,purpose:together?'shared shirtless moment':'shirtless moment of his own life',content:'nudity',
+      idea:`shirtless (bare upper body, trousers on), ${s.idea}${together?', together with Palor in a way their recorded relationship supports':', alone'}`});}
+  return out;
+}
 export const OPTIONAL_FIELDS=new Set(['birth_date','origin']);
 const PLACEHOLDER=/^(?:\[?ismeretlen\]?|nincs(?: rögzítve)?|nem ismert|n\/a|tbd|-|–|\?)(?:[\s.,;:]|$)/i;
 const TYPES={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp'};
@@ -86,18 +119,55 @@ const cosine=(a,b)=>{let s=0;for(let i=0;i<a.length;i++)s+=a[i]*b[i];return s;};
 const vectorOf=f=>{const buf=Buffer.from(f.embedding,'base64');return new Float32Array(buf.buffer.slice(buf.byteOffset,buf.byteOffset+buf.byteLength));};
 
 export function installCharacterOrders({db,one,all,run,transaction,fail,root,dataDir,folderSync,ghostProfiles,characterPolicy=null,analyse=null,now=()=>new Date(),
-  palor=()=>one("SELECT id,name FROM characters WHERE lower(trim(name))='palor' LIMIT 1")||null,intimateAllowed=()=>true}){
+  palor=()=>one("SELECT id,name FROM characters WHERE lower(trim(name))='palor' LIMIT 1")||null}){
   db.exec(`CREATE TABLE IF NOT EXISTS character_orders(id TEXT PRIMARY KEY,character_id TEXT NOT NULL,description TEXT NOT NULL,want_profile INTEGER NOT NULL,want_avatars INTEGER NOT NULL,want_gallery INTEGER NOT NULL,gallery_count INTEGER NOT NULL,status TEXT NOT NULL,steps_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS character_order_faces(order_id TEXT NOT NULL,media_id TEXT NOT NULL,vector BLOB,PRIMARY KEY(order_id,media_id));
     CREATE TABLE IF NOT EXISTS character_order_sources(order_id TEXT NOT NULL,media_id TEXT NOT NULL,PRIMARY KEY(order_id,media_id));`);
+  // Shared Palor events already covered by an order (or present before this feature: order_id NULL).
+  const eventsTableNew=!one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='character_order_events'");
+  db.exec('CREATE TABLE IF NOT EXISTS character_order_events(event_id TEXT NOT NULL,character_id TEXT NOT NULL,order_id TEXT,created_at TEXT NOT NULL,PRIMARY KEY(event_id,character_id));');
   const iso=()=>now().toISOString();
   const orderOf=id=>{const r=one('SELECT * FROM character_orders WHERE id=?',id);return r?{...r,steps:JSON.parse(r.steps_json)}:null;};
-  const openOrderFor=cid=>{const r=one("SELECT id FROM character_orders WHERE character_id=? AND status='open' ORDER BY created_at DESC LIMIT 1",cid);return r?orderOf(r.id):null;};
+  // The newest open order of his whose profile step is in use (life orders have none).
+  const openOrderFor=cid=>{for(const r of all("SELECT id FROM character_orders WHERE character_id=? AND status='open' ORDER BY created_at DESC",cid)){const o=orderOf(r.id);if(o.steps.profile.state!=='skipped')return o;}return null;};
+  const kindOf=o=>o.steps.kind||'new';
+
+  // ---- his recorded relationship with Palor ---------------------------------------------------
+  const hasStory=()=>!!one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='story_event_participants'");
+  const clip=(s,n)=>String(s||'').replace(/\s+/g,' ').trim().slice(0,n);
+  // Approved story events with both of them, oldest first.
+  function sharedEvents(cid){
+    const p=palor();if(!p||p.id===cid||!hasStory())return [];
+    return all(`SELECT e.id,r.payload_json,e.created_at FROM story_events e JOIN story_event_revisions r ON r.event_id=e.id AND r.version=e.version
+      WHERE r.status='approved' AND EXISTS(SELECT 1 FROM story_event_participants a WHERE a.event_id=e.id AND a.character_id=?)
+      AND EXISTS(SELECT 1 FROM story_event_participants b WHERE b.event_id=e.id AND b.character_id=?) ORDER BY e.created_at,e.id`,cid,p.id)
+      .map(r=>{let j={};try{j=JSON.parse(r.payload_json);}catch{}return {event_id:r.id,title:clip(j.title,160),summary:clip(j.summary,600),at:r.created_at};});
+  }
+  // null when nothing is recorded: then no Palor picture is ordered and nothing is made up.
+  function relationOf(cid){
+    const p=palor();if(!p||p.id===cid)return null;
+    const notes=all('SELECT description FROM relationships WHERE (source_id=? AND target_id=?) OR (source_id=? AND target_id=?)',cid,p.id,p.id,cid).map(r=>clip(r.description,600)).filter(Boolean);
+    const events=sharedEvents(cid);
+    return notes.length||events.length?{notes,events}:null;
+  }
+  const markEvents=(cid,events,orderId)=>{for(const e of events)run('INSERT OR IGNORE INTO character_order_events VALUES(?,?,?,?)',e.event_id,cid,orderId,iso());};
+  // First start of this feature: the events that already exist are not new.
+  if(eventsTableNew&&hasStory()){const p=palor();if(p)for(const r of all('SELECT DISTINCT o.character_id cid FROM story_event_participants o JOIN story_event_participants q ON q.event_id=o.event_id AND q.character_id=? WHERE o.character_id<>?',p.id,p.id))markEvents(r.cid,sharedEvents(r.cid),null);}
+
+  // Scene definitions of an order: the stored ones (life orders) or the fixed Szereplőgyár list.
+  const defOf=(o,key)=>{const sc=o.steps.gallery.scenes?.[key];return sc?(sc.def?{key,...sc.def}:GALLERY_SCENES.find(s=>s.key===key)||null):null;};
+  const sceneKeys=o=>Object.keys(o.steps.gallery.scenes||{});
+  const sceneEntry=s=>({state:'open',content:s.content,def:{set:s.set,label:s.label,purpose:s.purpose,idea:s.idea}});
   const save=o=>{const status=['profile','avatars','gallery'].every(k=>!o.steps[k]||['done','skipped'].includes(o.steps[k].state))?'done':o.status==='cancelled'?'cancelled':'open';
     run('UPDATE character_orders SET steps_json=?,status=?,updated_at=? WHERE id=?',JSON.stringify(o.steps),status,iso(),o.id);o.status=status;return o;};
   const folderOf=cid=>one('SELECT folder FROM sorted_folders WHERE character_id=? ORDER BY rowid LIMIT 1',cid)?.folder||null;
   // Source pictures are recorded per order; orders from before that are found by the old "forras-<n>" name.
-  const sources=o=>{const r=all("SELECT m.id,m.relative_path FROM character_order_sources s JOIN active_media m ON m.id=s.media_id WHERE s.order_id=? ORDER BY m.relative_path",o.id);
+  // Life orders compare faces with his approved canon references.
+  const canonRefs=cid=>{let refs=[];try{refs=JSON.parse(one('SELECT references_json FROM canon WHERE character_id=? ORDER BY rowid DESC LIMIT 1',cid)?.references_json||'[]');}catch{}
+    const ids=(Array.isArray(refs)?refs:[]).map(r=>r?.media_id).filter(x=>typeof x==='string');
+    return ids.map(id=>one("SELECT id,relative_path FROM active_media WHERE id=? AND kind='image'",id)).filter(Boolean).slice(0,12);};
+  const sources=o=>kindOf(o)!=='new'?canonRefs(o.character_id):sourcesOfNew(o);
+  const sourcesOfNew=o=>{const r=all("SELECT m.id,m.relative_path FROM character_order_sources s JOIN active_media m ON m.id=s.media_id WHERE s.order_id=? ORDER BY m.relative_path",o.id);
     return r.length||one('SELECT 1 FROM character_order_sources WHERE order_id=?',o.id)?r:all("SELECT m.id,m.relative_path FROM depictions d JOIN active_media m ON m.id=d.media_id WHERE d.character_id=? AND m.kind='image' AND m.relative_path LIKE ? ORDER BY m.relative_path",o.character_id,'%forras-%');};
 
   // The owner's short note on a source picture → existing structured tags whose name (or a word the
@@ -194,12 +264,8 @@ export function installCharacterOrders({db,one,all,run,transaction,fail,root,dat
     return score>=FACE_PASS?{state:'ok',score}:{state:'mismatch',score,reason:`Az arc nem egyezik a csatolt képekkel (${score} < ${FACE_PASS}).`};
   }
 
-  // The collection origin gate (same as every other placement path): a non-everyday picture only
-  // when the character (and Palor in a shared scene) may have one. An open scene that fails it is
-  // "blocked": shown, never made, and it does not hold the order open.
-  const sceneBlocked=(o,key)=>{const sc=o.steps.gallery.scenes?.[key],s=GALLERY_SCENES.find(x=>x.key===key);if(!sc||sc.state!=='open'||sc.content==='non_intimate')return false;
-    const p=s.set==='palor'?palor():null;return !intimateAllowed(o.character_id)||(s.set==='palor'&&(!p||!intimateAllowed(p.id)));};
-  const blockedCount=o=>Object.keys(o.steps.gallery.scenes||{}).filter(k=>sceneBlocked(o,k)).length;
+  // No collection-origin gate here (owner, 2026-11-16): the owner checks origins himself; the content
+  // level he picks for each picture or scene is what is made.
 
   // ---- progress -----------------------------------------------------------------------------------
   // Recounts the avatars (checking new or changed figures) and the profile; saves the order.
@@ -219,7 +285,7 @@ export function installCharacterOrders({db,one,all,run,transaction,fail,root,dat
       s.avatars.have=good;
       s.avatars.state=!profileReady?'waiting':good>=s.avatars.want?'done':'open';
     }
-    if(s.gallery.state!=='skipped')s.gallery.state=!profileReady?'waiting':s.gallery.have+s.gallery.refused+blockedCount(o)>=s.gallery.want?'done':'open';
+    if(s.gallery.state!=='skipped')s.gallery.state=!profileReady?'waiting':s.gallery.have+s.gallery.refused>=s.gallery.want?'done':'open';
     return save(o);
   }
 
@@ -230,17 +296,69 @@ export function installCharacterOrders({db,one,all,run,transaction,fail,root,dat
     const label=id=>tpl.find(f=>f.id===id)?.label||id;
     const avatarsMissing=[];
     if(o.steps.avatars.state!=='skipped')for(const outfit of ORDER_OUTFITS)for(const e of rowExpressions(outfit)){const k=e.file+'/'+outfit,ch=o.steps.avatars.checks[k];if(!ch||!['ok','unchecked'].includes(ch.state))avatarsMissing.push({expression:e.file,outfit,...(ch?{redo:true,reason:ch.reason,score:ch.score??null}:{})});}
-    return {order_id:o.id,character_id:o.character_id,name:c?.name||'?',description:o.description,status:o.status,created_at:o.created_at,updated_at:o.updated_at,
+    const kind=kindOf(o),rel=kind!=='new'?relationOf(o.character_id):null;
+    return {order_id:o.id,character_id:o.character_id,name:c?.name||'?',kind,description:o.description,status:o.status,created_at:o.created_at,updated_at:o.updated_at,
+      ...(kind!=='new'?{relationship_with_palor:rel?{notes:rel.notes,events:rel.events.map(({event_id,...e})=>e)}:'none recorded: do not invent one',
+        identity:'His approved references (source_pictures) and get_character_visual_pack; his life from get_ghost_profile (weekly_routine, habits, occupation, residence, identity).'}:{}),
       source_pictures:sources(o).map(s=>{const note=noteOf(s.id),tags=tagNames(s.id);return {media_id:s.id,fetch_with:'get_media',...(note?{owner_note:note}:{}),...(tags.length?{tags}:{})};}),
       profile:{state:o.steps.profile.state,missing_fields:(o.steps.profile.missing||[]).map(id=>({id,label:label(id)})),weak_fields:(o.steps.profile.weak||[]).map(id=>({id,label:label(id)}))},
       avatars:{state:o.steps.avatars.state,have:o.steps.avatars.have||0,want:o.steps.avatars.want||0,missing:avatarsMissing},
       gallery:{state:o.steps.gallery.state,have:o.steps.gallery.have||0,want:o.steps.gallery.want||0,refused:o.steps.gallery.refused||0,rejected:(o.steps.gallery.rejected||[]).slice(-10),
-        ...(o.steps.gallery.scenes?{blocked:blockedCount(o),scenes:GALLERY_SCENES.filter(s=>o.steps.gallery.scenes[s.key]).map(s=>({scene:s.key,with_palor:s.set==='palor',purpose:s.purpose,default_idea:s.idea,
-          content:o.steps.gallery.scenes[s.key].content,...(sceneBlocked(o,s.key)?{state:'blocked',reason:'Not allowed: only everyday pictures for this character (collection origin). Skip it.'}:{state:o.steps.gallery.scenes[s.key].state})}))}:{})},
+        ...(o.steps.gallery.scenes?{scenes:sceneKeys(o).map(k=>defOf(o,k)).filter(Boolean).map(s=>({scene:s.key,label:s.label,with_palor:s.set==='palor',purpose:s.purpose,default_idea:s.idea,
+          content:o.steps.gallery.scenes[s.key].content,state:o.steps.gallery.scenes[s.key].state}))}:{})},
       face_check:faceAvailable()?'local':'not installed'};
   }
 
+  // Characters a life order can be made for (not Palor, not merged away), with what is recorded.
+  const merged=!!one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='character_ui'");
+  function lifeCandidates(){
+    const p=palor();
+    return all(`SELECT c.id,c.name FROM characters c${merged?' LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL':''} ORDER BY c.name COLLATE NOCASE`)
+      .filter(c=>!p||c.id!==p.id).map(c=>({id:c.id,name:c.name,is_group:!!one('SELECT 1 FROM character_groups WHERE character_id=?',c.id),relationship:!!relationOf(c.id),
+        open_life:all("SELECT steps_json FROM character_orders WHERE character_id=? AND status='open'",c.id).some(r=>JSON.parse(r.steps_json).kind==='life')}));
+  }
+  // A life-moment order for an existing character (owner form or batch).
+  function insertLifeOrder(cid,kind,scenes,description){
+    const id=randomUUID(),steps={kind,profile:{state:'skipped'},avatars:{state:'skipped'},
+      gallery:{state:'open',have:0,want:scenes.length,refused:0,rejected:[],scenes:Object.fromEntries(scenes.map(s=>[s.key,sceneEntry(s)]))}};
+    run('INSERT INTO character_orders VALUES(?,?,?,?,?,?,?,?,?,?,?)',id,cid,description,0,0,1,scenes.length,'open',JSON.stringify(steps),iso(),iso());
+    return id;
+  }
+  async function createLife(body){
+    const p=palor();
+    let ids=body?.all===true?lifeCandidates().map(r=>r.id):Array.isArray(body?.character_ids)?body.character_ids:[];
+    ids=[...new Set(ids)].filter(id=>typeof id==='string');
+    if(!ids.length||ids.length>500)throw fail('Choose at least one character.');
+    const want={daily:body.daily!==false,palor:body.palor!==false,shirtless:body.shirtless!==false};
+    if(!want.daily&&!want.palor&&!want.shirtless)throw fail('Tick at least one picture set.');
+    const made=[],skipped=[];
+    for(const cid of ids){
+      const c=one('SELECT id,name FROM characters WHERE id=?',cid);if(!c){skipped.push({character_id:cid,reason:'unknown'});continue;}
+      if(p&&c.id===p.id){skipped.push({name:c.name,reason:'palor'});continue;}
+      if(all("SELECT steps_json FROM character_orders WHERE character_id=? AND status='open'",cid).some(r=>JSON.parse(r.steps_json).kind==='life')){skipped.push({name:c.name,reason:'open'});continue;}
+      const relation=relationOf(cid),scenes=lifeScenes({...want,relation});
+      if(!scenes.length){skipped.push({name:c.name,reason:'no_relationship'});continue;}
+      const id=insertLifeOrder(cid,'life',scenes,'');if(relation)markEvents(cid,relation.events,id);
+      made.push(view(await refresh(orderOf(id))));
+    }
+    return {made,skipped};
+  }
+  // A new approved shared event with Palor → one picture of that moment (new events only).
+  async function scanEvents(){
+    const p=palor();if(!p||!hasStory())return;
+    const cids=all('SELECT DISTINCT o.character_id cid FROM story_event_participants o JOIN story_event_participants q ON q.event_id=o.event_id AND q.character_id=? WHERE o.character_id<>?',p.id,p.id).map(r=>r.cid);
+    for(const cid of cids){
+      const fresh=sharedEvents(cid).filter(e=>!one('SELECT 1 FROM character_order_events WHERE event_id=? AND character_id=?',e.event_id,cid));
+      if(!fresh.length||!one('SELECT 1 FROM characters WHERE id=?',cid))continue;
+      const scenes=fresh.slice(-5).map(e=>({key:'event_'+e.event_id.replace(/[^a-z0-9]/gi,'').slice(0,12),set:'palor',label:'közös pillanat',purpose:'shared photos, diary',content:'non_intimate',
+        idea:`the recorded event "${e.title}": ${e.summary}`}));
+      const id=insertLifeOrder(cid,'palor_event',scenes,'Új közös esemény Palorral: '+fresh.map(e=>e.title).join('; ').slice(0,400));
+      markEvents(cid,fresh,id);
+    }
+  }
+
   async function list({open_only=false}={}){
+    await scanEvents();
     const rows=all(`SELECT id FROM character_orders ${open_only?"WHERE status='open'":''} ORDER BY created_at DESC LIMIT 100`);
     const out=[];for(const r of rows)out.push(view(await refresh(orderOf(r.id))));return out;
   }
@@ -264,15 +382,11 @@ export function installCharacterOrders({db,one,all,run,transaction,fail,root,dat
     await refresh(o);if(o.steps.gallery.state==='waiting')throw fail('The gallery waits for the profile.',409);
     if(o.steps.gallery.state==='done')throw fail('The gallery of this order is complete.',409);
     // Scene orders: every picture names its open scene; content and label come from the scene.
-    const sc=o.steps.gallery.scenes,scene=sc?GALLERY_SCENES.find(s=>s.key===a.scene&&sc[s.key]):null;
-    if(sc&&!scene)throw fail('scene is one of the open scenes of this order: '+GALLERY_SCENES.filter(s=>sc[s.key]?.state==='open').map(s=>s.key).join(', ')+'.');
-    if(scene&&sc[scene.key].state!=='open')throw fail('This scene is already done.',409);
-    if(scene&&sceneBlocked(o,scene.key))throw fail('Only everyday pictures (content "non_intimate") can be placed for these characters: no assigned media is covered by the collection origin declaration.',403);
-    if(a.outcome==='refused'){o.steps.gallery.refused++;o.steps.gallery.rejected.push({at:iso(),...(scene?{scene:scene.key}:{}),reason:'Elutasítva: '+String(a.note||'').slice(0,300)});if(scene)sc[scene.key].state='refused';save(o);await refresh(o);return {saved:false,refused_recorded:true,gallery:view(o).gallery};}
+    const sc=o.steps.gallery.scenes,scene=sc&&typeof a.scene==='string'?defOf(o,a.scene):null;
+    if(sc&&!scene)throw fail('scene is one of the open scenes of this order: '+sceneKeys(o).filter(k=>sc[k].state==='open').join(', ')+'.');
+    if(scene&&sc[scene.key].state!=='open')throw fail('This scene is already done.',409);    if(a.outcome==='refused'){o.steps.gallery.refused++;o.steps.gallery.rejected.push({at:iso(),...(scene?{scene:scene.key}:{}),reason:'Elutasítva: '+String(a.note||'').slice(0,300)});if(scene)sc[scene.key].state='refused';save(o);await refresh(o);return {saved:false,refused_recorded:true,gallery:view(o).gallery};}
     const content=scene?sc[scene.key].content:['non_intimate','nudity','sexual_activity'].includes(a.content)?a.content:'non_intimate';
-    const withPalor=scene?.set==='palor'?palor():null;if(scene?.set==='palor'&&!withPalor)throw fail('Palor is not in the world yet, so shared pictures cannot be saved.',409);
-    if(!scene&&content!=='non_intimate'&&!intimateAllowed(o.character_id))throw fail('Only everyday pictures (content "non_intimate") can be placed for these characters: no assigned media is covered by the collection origin declaration.',403);
-    if(typeof a.prompt==='string'){assertAdultMan(a.prompt,fail);characterPolicy?.assertPrompt?.(a.prompt);}
+    const withPalor=scene?.set==='palor'?palor():null;if(scene?.set==='palor'&&!withPalor)throw fail('Palor is not in the world yet, so shared pictures cannot be saved.',409);    if(typeof a.prompt==='string'){assertAdultMan(a.prompt,fail);characterPolicy?.assertPrompt?.(a.prompt);}
     // Name parts (checked before any download): his name, an optional place from the location tree,
     // an optional short label; the label must not read as a person or a content word.
     const who=one('SELECT name FROM characters WHERE id=?',o.character_id)?.name||'';
@@ -292,7 +406,8 @@ export function installCharacterOrders({db,one,all,run,transaction,fail,root,dat
       const face=await faceCheck(o,tmp);
       if(face.state==='mismatch'||face.state==='no_face'){o.steps.gallery.rejected.push({at:iso(),...(scene?{scene:scene.key}:{}),reason:face.reason,score:face.score??null});save(o);
         return {saved:false,face,next:'Not kept: make a new picture of the same man (use the source pictures) and send it again.'};}
-      const folder=folderOf(o.character_id);if(!folder)throw fail('The character has no folder.',409);
+      // An existing character without his own folder gets one (same-name folder reused, no conflicts).
+      const folder=folderOf(o.character_id)||(await folderSync.createCharacterWithFolder(o.character_id,who,'férfi')).folder;if(!folder)throw fail('The character has no folder.',409);
       const pic=await addPicture(o.character_id,path.join(folder,'Galéria'),stem,got.bytes,ext,withPalor?[withPalor.id]:[]);
       run('INSERT INTO play_content(media_id,level,set_at) VALUES(?,?,?) ON CONFLICT(media_id) DO UPDATE SET level=excluded.level,set_at=excluded.set_at',pic.media_id,content,iso());
       o.steps.gallery.have++;if(scene)sc[scene.key]={...sc[scene.key],state:'done',media_id:pic.media_id};save(o);await refresh(o);
@@ -305,6 +420,8 @@ export function installCharacterOrders({db,one,all,run,transaction,fail,root,dat
   async function handle({p,req,body,json}){
     if(p==='/api/character-orders'&&req.method==='GET'){json({orders:await list(),face_check:faceAvailable()?'local':'not installed'});return true;}
     if(p==='/api/character-orders'&&req.method==='POST'){json(await create(body||{}),201);return true;}
+    if(p==='/api/character-orders/life'&&req.method==='GET'){json({characters:lifeCandidates()});return true;}
+    if(p==='/api/character-orders/life'&&req.method==='POST'){json(await createLife(body||{}),201);return true;}
     const m=p.match(/^\/api\/character-orders\/([0-9a-f-]{36})(\/cancel)?$/);
     if(m&&req.method==='GET'&&!m[2]){const o=orderOf(m[1]);if(!o)throw fail('Order not found.',404);json(view(await refresh(o)));return true;}
     if(m&&req.method==='POST'&&m[2]){json(cancel(m[1]));return true;}
@@ -327,6 +444,6 @@ export function installCharacterOrders({db,one,all,run,transaction,fail,root,dat
   const HOW={
       profile:'Read get_ghost_profile with include_admin_notes:true and get_profile_template; look at the source pictures with get_media (owner_note is the owner\'s own short description of that picture: trust it over your reading of the picture); then propose_ghost_profile with the current versions. For these characters it is accepted at once and checked: fill every field except birth_date and origin with real, specific Hungarian text, including the sexual fields; adult male only. A non-human, monster or fantasy being is allowed when he is male (hím): describe him as what he is, never turn him into a human.',
       avatars:'When profile is done: get_character_visual_pack, then start_generation_job target figure for each missing {expression, outfit}, generate natively, finish_generation_job. Rows: dressed (full body), shirtless (full body, bare upper body, his trousers and shoes kept) and intimate (only alap, mosoly, flortol: waist-up, bare upper body, the frame ends just below the navel so no clothing at all is visible; the game fades it out at the waist). A figure listed with redo:true failed the face check: make it again.',
-      gallery:'When profile is done. First read the order description and his profile (get_ghost_profile) and the owner notes on the source pictures, and work out who he is: species or kind of being, body, abilities, world, era, way of life. He may be a non-human male (a monster, a fantasy being): draw him as what he is, never as a human. If gallery.scenes is listed, make one picture per scene whose state is "open" (skip "blocked" ones: that content is not allowed for him): keep the scene\'s purpose (where the game uses it) but adapt its default_idea to him; if the idea does not fit who he is (a humanoid monster does not take a selfie, someone without a home has no "home"), choose a fitting moment with the same purpose instead (for a selfie: a close, candid shot as if a companion took it). Never add features his description does not support. with_palor:true scenes show Palor and him together (Palor from his own references). content is the owner\'s choice for that scene: non_intimate = everyday, nudity = shirtless/flirt, sexual_activity = intimate between the two adult males; never go beyond it. Save with save_order_picture {order_id, scene, image}; optional location_id (list_locations) and label (one extra short word). The file is named by the Új képek rule ("[Palor + ]<name> - [place] - <scene label> - <content word> - <date>-<n>.png"). Without gallery.scenes (older orders): save_order_picture with content of your choice. A picture that does not match his face is not kept. If the generator declines, call save_order_picture with outcome "refused", the scene and its reason; never reword to get around a refusal.'};
+      gallery:'Orders of kind "life" (life moments of an existing character) and "palor_event" (a new recorded event with Palor) have no profile step: start at once. His identity comes from his approved references (source_pictures, get_character_visual_pack); the daily scenes follow his recorded weekly_routine, habits, occupation and residence; the Palor scenes follow relationship_with_palor exactly (its notes and events) and never invent a meeting, an event or a closer bond. Shirtless scenes: bare upper body, trousers on, the listed everyday activity (not a beach), never sexual. When profile is done (new characters). First read the order description and his profile (get_ghost_profile) and the owner notes on the source pictures, and work out who he is: species or kind of being, body, abilities, world, era, way of life. He may be a non-human male (a monster, a fantasy being): draw him as what he is, never as a human. If gallery.scenes is listed, make one picture per scene whose state is "open": keep the scene\'s purpose (where the game uses it) but adapt its default_idea to him; if the idea does not fit who he is (a humanoid monster does not take a selfie, someone without a home has no "home"), choose a fitting moment with the same purpose instead (for a selfie: a close, candid shot as if a companion took it). Never add features his description does not support. with_palor:true scenes show Palor and him together (Palor from his own references). content is the owner\'s choice for that scene: non_intimate = everyday, nudity = shirtless/flirt, sexual_activity = intimate between the two adult males; never go beyond it. Save with save_order_picture {order_id, scene, image}; optional location_id (list_locations) and label (one extra short word). The file is named by the Új képek rule ("[Palor + ]<name> - [place] - <scene label> - <content word> - <date>-<n>.png"). Without gallery.scenes (older orders): save_order_picture with content of your choice. A picture that does not match his face is not kept. If the generator declines, call save_order_picture with outcome "refused", the scene and its reason; never reword to get around a refusal.'};
   return {create,list,afterProposal,savePicture,refresh,handle,ops,faceCheck,view:id=>view(orderOf(id))};
 }

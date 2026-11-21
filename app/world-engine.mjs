@@ -31,7 +31,7 @@ import {profileText,profileScale} from './profile-prompt.mjs';
 // Memories that carry a hurt (quarrel, letdown, lie …): weighted by the character's grievances.
 const HURT=/veszeked|sért|csalód|harag|dühö|bánt|elmaradt|cserben|hazud|megaláz|szakít|vereked|kiabál|féltékeny|elárul/i;
 const MAX_CATCH_UP_DAYS=7;
-const DEFAULT_SETTINGS=Object.freeze({enabled:false,daily_cap_usd:1.5,model:DEFAULT_MODEL,prices:DEFAULT_PRICES,last_day:null,last_slot:null,last_run_at:null,last_error:null});
+const DEFAULT_SETTINGS=Object.freeze({enabled:false,world_provider:'xai',daily_cap_usd:1.5,model:DEFAULT_MODEL,prices:DEFAULT_PRICES,last_day:null,last_slot:null,last_run_at:null,last_error:null});
 
 // Season from the month, so the world dresses and behaves accordingly.
 const SEASON=['tél','tél','tavasz','tavasz','tavasz','nyár','nyár','nyár','ősz','ősz','ősz','tél'];
@@ -82,6 +82,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     // Grok text model (owner 2026-11-13): one of TEXT_MODELS; used from the next reply on.
     if(body.model!==undefined){if(!Object.hasOwn(TEXT_MODELS,body.model))throw fail('Unknown Grok model.');s.model=body.model;s.prices=TEXT_MODELS[body.model].prices;}
     // Model of the background world rounds (2026-11-13), separate from the talks' model.
+    if(body.world_provider!==undefined){if(!['xai','ollama'].includes(body.world_provider))throw fail('Válassz Grok vagy helyi Ollama szolgáltatót.');s.world_provider=body.world_provider;}
     if(body.world_model!==undefined){if(!Object.hasOwn(TEXT_MODELS,body.world_model))throw fail('Unknown Grok model.');s.world_model=body.world_model;}
     if(body.daily_cap_usd!==undefined){const cap=Number(body.daily_cap_usd);if(!Number.isFinite(cap)||cap<0||cap>20)throw fail('The daily cap must be between 0 and 20 USD.');s.daily_cap_usd=Math.round(cap*100)/100;}
     return writeSettings(s);
@@ -120,10 +121,10 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   // by default) and its prices; Play talks keep the owner's chosen model.
   async function ask(system,user,maxTokens,{onText=null,purpose='play'}={}){
     const ai=provider?.(purpose);if(!ai)throw Object.assign(fail('No Grok key is configured. Run Connect Grok first.',409),{code:'NO_PROVIDER'});
-    const s0=settings(),s=purpose==='world'?{...s0,prices:pricesFor(s0.world_model||DEFAULT_MODEL,s0.prices)}:s0,estimate=priceOf({input:estimateTokens(system+user),output:maxTokens},s.prices);
+    const s0=settings(),s=purpose==='world'?{...s0,prices:pricesFor(s0.world_model||DEFAULT_MODEL,s0.prices)}:s0,estimate=ai.local?0:priceOf({input:estimateTokens(system+user),output:maxTokens},s.prices);
     if(spentToday()+reserved+estimate>s.daily_cap_usd)throw Object.assign(fail('The daily AI cost cap is reached. The world continues tomorrow.',429),{code:'CAP_REACHED'});
     reserved+=estimate;
-    try{const result=await ai.complete({system,user,maxTokens,...(onText?{onDelta:onText}:{})});record(result.usage,ai.name==='mock'?0:priceOf(result.usage,s.prices));
+    try{const result=await ai.complete({system,user,maxTokens,...(onText?{onDelta:onText}:{})});record(result.usage,ai.name==='mock'||ai.local?0:priceOf(result.usage,s.prices));
       const parsed=parseJson(result.text);
       // An answer cut at maxTokens is invalid JSON: hand the raw text back so the caller can keep
       // what arrived (the reply) instead of throwing away a paid answer.
@@ -398,7 +399,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     const when=`Dátum: ${day} (${WEEKDAYS[date.getDay()]}${weekend?', hétvége':''}${holiday?', ünnep: '+holiday:''}), évszak: ${SEASON[date.getMonth()]}, napszak: ${slot.label}.`;
     const tempo=TEMPO[settings().tempo]||TEMPO.normal;
     // Start a round only if the whole round fits in today's remaining budget (no half rounds).
-    const s0=settings(),roundEstimate=priceOf({input:3500*(cast.length+1),output:300*cast.length+GM_TOKENS},pricesFor(s0.world_model||DEFAULT_MODEL,s0.prices));
+    const s0=settings(),roundEstimate=provider?.('world')?.local?0:priceOf({input:3500*(cast.length+1),output:300*cast.length+GM_TOKENS},pricesFor(s0.world_model||DEFAULT_MODEL,s0.prices));
     if(provider?.('world')?.name!=='mock'&&spentToday()+roundEstimate>s0.daily_cap_usd)throw Object.assign(fail('The daily AI cost cap is reached. The world continues tomorrow.',429),{code:'CAP_REACHED'});
     // A round may cross real midnight: its cost is then what it added to both days.
     const startDay=costDay(),spentBefore=spentToday();
@@ -547,7 +548,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
       usage_history:all('SELECT day,calls,cost_usd,input_tokens,cached_tokens FROM world_usage ORDER BY day DESC LIMIT 7'),
       runs:all('SELECT world_day,slot,events,messages,dropped,cost_usd,created_at FROM world_runs ORDER BY created_at DESC LIMIT 12').map(r=>({...r,slot:slotLabel(r.slot)})),
       round:lastRound(),
-      settings:{tempo:s.tempo||'normal',enabled:s.enabled,daily_cap_usd:s.daily_cap_usd,model:s.model,world_model:s.world_model||DEFAULT_MODEL,last_day:s.last_day,last_slot:s.last_day?SLOTS[s.last_slot??SLOTS.length-1]?.label??null:null,last_run_at:s.last_run_at,last_error:s.last_error,paused_at:s.enabled?null:s.paused_at||null,resumed:s.resumed||null},
+      settings:{tempo:s.tempo||'normal',enabled:s.enabled,daily_cap_usd:s.daily_cap_usd,model:s.model,world_model:s.world_model||DEFAULT_MODEL,world_provider:s.world_provider||'xai',world_provider_status:(()=>{const selected=provider?.('world');return selected?{name:selected.name,model:selected.model,local:!!selected.local}:null;})(),last_day:s.last_day,last_slot:s.last_day?SLOTS[s.last_slot??SLOTS.length-1]?.label??null:null,last_run_at:s.last_run_at,last_error:s.last_error,paused_at:s.enabled?null:s.paused_at||null,resumed:s.resumed||null},
       provider:ai?{name:ai.name,model:ai.model}:null,models:Object.entries(TEXT_MODELS).map(([id,m])=>({id,label:m.label,prices:m.prices})),running,playing:playing(),spent_today_usd:spentToday(),uncertain_today_usd:uncertainToday(),estimate_per_day_usd:Math.round(perDay*1e4)/1e4,
       palor:palor(),
       characters:cast.map(c=>({id:c.id,name:c.name,places:placesOf(c.id)})),

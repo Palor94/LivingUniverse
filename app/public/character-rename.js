@@ -1,5 +1,7 @@
+import {appRouteHash} from './app-routes.js';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const query=new URLSearchParams(location.search),cid=query.get('character');
+if(cid)document.querySelector('main>a').href='/'+appRouteHash({view:'profile',cid});
 const labels={characters:'Karakterprofil',relationships:'Kapcsolat',media:'Médiafájl',media_notes:'Médiajegyzet',locations:'Helyszín',location_profiles:'Helyszínprofil',story_event_revisions:'Esemény',application_settings:'Strukturált profil / előzmény',canon:'Jóváhagyott megjelenés',name:'Név',biography:'Életrajz',personality:'Személyiség',appearance:'Megjelenésvázlat',sexuality:'Szexualitás',speech_style:'Beszédstílus',notes:'Jegyzet',description:'Leírás',tags:'Címkék',english_name:'Angol név',category:'Kategória',required:'Kötelező névváltoztatás',linked:'ID-val kapcsolt találat',uncertain:'Kétes hivatkozás',other_person:'Más személyre is utalhat',protected:'Védett találat',pending:'Jóváhagyásra vár',applied:'Mentve',rejected:'Elvetve',undone:'Visszavonva'};
 const label=v=>labels[v]||v;
 const date=v=>new Date(v).toLocaleString('hu-HU',{timeZone:'Europe/Budapest'});

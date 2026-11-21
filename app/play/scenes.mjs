@@ -6,7 +6,7 @@ import {STAGE_ALLOW,BEATS,BEAT_WANT,PHONE_MOODS,anchorOf} from './rules.mjs';
 export function createPlayScenes({one,all,fail,w,director,intimacyStage,clock,tree,currentNode}){
   const daypart=()=>clock().slot_index>=2?'night':'day';
   // How far an open intimate scene with him has gone (0..1, by the number of lines).
-  const sceneProgress=cid=>{const c=one("SELECT id FROM play_conversations WHERE character_id=? AND status='open' AND mode='intimate' AND rewound_at IS NULL ORDER BY rowid DESC LIMIT 1",cid);return c?Math.min(1,one('SELECT count(*) n FROM play_lines WHERE conversation_id=?',c.id).n/12):null;};
+  const sceneProgress=cid=>{const c=one("SELECT id FROM play_conversations WHERE character_id=? AND status='open' AND mode='intimate' AND rewound_at IS NULL ORDER BY rowid DESC LIMIT 1",cid);return c?Math.min(1,one('SELECT count(*) n FROM active_play_lines WHERE conversation_id=?',c.id).n/12):null;};
   // Scene photos, chosen by the media director (scene panel): he must be in it, Palor with
   // him ranks higher, this place first, at the level the moment wants and the stage allows.
   // context: the recent conversation text; intimateWanted: an intimate scene is going on;
@@ -16,10 +16,10 @@ export function createPlayScenes({one,all,fail,w,director,intimacyStage,clock,tr
     // of them allows (the same rule that opens an intimate group scene).
     const ORDER={none:0,flirt:1,intimate:2};
     const pid=w.palor()?.id,stage=company?company.map(x=>intimacyStage(x)).reduce((m,s)=>ORDER[s]<ORDER[m]?s:m,'intimate'):intimacyStage(cid);
-    const prev=conv?one('SELECT sc.media_id,sc.beat,l.rowid r FROM play_line_scene sc JOIN play_lines l ON l.id=sc.line_id WHERE l.conversation_id=? ORDER BY l.rowid DESC LIMIT 1',conv.id):null;
-    const since=prev?one("SELECT count(*) n FROM play_lines WHERE conversation_id=? AND speaker='character' AND rowid>?",conv.id,prev.r).n:0;
+    const prev=conv?one('SELECT sc.media_id,sc.beat,l.rowid r FROM play_line_scene sc JOIN active_play_lines l ON l.id=sc.line_id WHERE l.conversation_id=? ORDER BY l.rowid DESC LIMIT 1',conv.id):null;
+    const since=prev?one("SELECT count(*) n FROM active_play_lines WHERE conversation_id=? AND speaker='character' AND rowid>?",conv.id,prev.r).n:0;
     if(prev&&prev.beat===beat&&since<3)return null;
-    const used=conv?all('SELECT sc.media_id FROM play_line_scene sc JOIN play_lines l ON l.id=sc.line_id WHERE l.conversation_id=?',conv.id).map(r=>r.media_id):[];
+    const used=conv?all('SELECT sc.media_id FROM play_line_scene sc JOIN active_play_lines l ON l.id=sc.line_id WHERE l.conversation_id=?',conv.id).map(r=>r.media_id):[];
     const cast=company?[cid,...company.filter(x=>x!==cid),...(pid?[pid]:[])]:pid&&pid!==cid?[cid,pid]:[cid];
     // The beat is also the ceiling: a flirt or a kiss never shows nudity, even when no everyday
     // picture is left (then the previous picture simply stays).
@@ -66,8 +66,8 @@ export function createPlayScenes({one,all,fail,w,director,intimacyStage,clock,tr
   }
   async function phonePhoto(cid,wish,context,conversationId){
     if(!PHONE_MOODS[intimacyStage(cid)].includes(wish))return null;
-    const sent=all('SELECT pm.media_id FROM play_line_media pm JOIN play_lines l ON l.id=pm.line_id JOIN play_conversations p ON p.id=l.conversation_id WHERE p.character_id=?',cid).map(r=>r.media_id);
-    const last=conversationId?one('SELECT pm.media_id FROM play_line_media pm JOIN play_lines l ON l.id=pm.line_id WHERE l.conversation_id=? ORDER BY l.rowid DESC LIMIT 1',conversationId)?.media_id:null;
+    const sent=all('SELECT pm.media_id FROM play_line_media pm JOIN active_play_lines l ON l.id=pm.line_id JOIN play_conversations p ON p.id=l.conversation_id WHERE p.character_id=?',cid).map(r=>r.media_id);
+    const last=conversationId?one('SELECT pm.media_id FROM play_line_media pm JOIN active_play_lines l ON l.id=pm.line_id WHERE l.conversation_id=? ORDER BY l.rowid DESC LIMIT 1',conversationId)?.media_id:null;
     const r=await director.pick({panel:'phone',characters:[cid],mood:wish,allow:STAGE_ALLOW[intimacyStage(cid)],progress:wish==='intimate'?1:null,context,daypart:daypart(),after:last,exclude:sent,limit:1});
     return r.items.find(i=>i.complete)||null;
   }

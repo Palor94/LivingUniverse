@@ -101,6 +101,25 @@ export function createMockProvider(respond){
     return {text,usage:{input:estimateTokens(request.system+request.user),cached:0,output:50}};}};
 }
 
+// Explicitly configured, local-only background provider. It never downloads a
+// model, changes the Play provider or falls back to a paid service on failure.
+export function createOllamaProvider({enabled=false,model,url='http://127.0.0.1:11434',fetchImpl=fetch,timeoutMs=60000}={}){
+  if(enabled!==true)return null;let endpoint;try{endpoint=new URL(url);}catch{return null;}
+  if(endpoint.protocol!=='http:'||!['127.0.0.1','localhost','[::1]'].includes(endpoint.hostname)||endpoint.username||endpoint.password||endpoint.pathname!=='/'||endpoint.search||endpoint.hash||typeof model!=='string'||!model.trim()||model.length>200||/(?:^|[-:/])cloud(?:$|[-:/])/i.test(model))return null;
+  return {name:'ollama',model,local:true,async complete({system,user,maxTokens=600}){
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+    try{
+      const read=async response=>{if(!response.ok)throw Error();let size=0,text='';const decoder=new TextDecoder();for await(const chunk of response.body){size+=chunk.length;if(size>2*1024*1024)throw Error();text+=decoder.decode(chunk,{stream:true});}return JSON.parse(text+decoder.decode());};
+      // The local Ollama API also exposes cloud models. Inspect metadata before
+      // sending a private prompt; refuse a missing model instead of pulling it.
+      const tags=await read(await fetchImpl(new URL('/api/tags',endpoint).href,{redirect:'error',signal:controller.signal})),installed=tags.models?.find(item=>item.name===model||item.model===model);
+      if(!installed||installed.remote_model||installed.remote_host||!Number.isFinite(installed.size)||installed.size<=0||!/^[a-f0-9]{64}$/i.test(installed.digest||''))throw Error();
+      const response=await fetchImpl(new URL('/api/chat',endpoint).href,{method:'POST',redirect:'error',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({model,messages:[{role:'system',content:system},{role:'user',content:user}],format:'json',stream:false,options:{num_predict:maxTokens,temperature:0.2}})});
+      const data=await read(response),tokens=value=>Number.isSafeInteger(value)&&value>=0?value:0;if(data.done!==true||data.remote_host||data.remote_model||typeof data.message?.content!=='string')throw Error();return {text:data.message.content,model_digest:installed.digest,usage:{input:tokens(data.prompt_eval_count),cached:tokens(data.prompt_eval_cached_count),output:tokens(data.eval_count)},finish:data.done_reason==='length'?'length':'stop'};
+    }catch{throw Object.assign(Error('A helyi modell nem válaszolt. Nincs automatikus újrapróbálás vagy felhős helyettesítés.'),{code:'LOCAL_AI_FAILED',status:502});}finally{clearTimeout(timer);}
+  }};
+}
+
 // The value of one string field read from a JSON object that is still arriving, e.g.
 // partialJsonString('{"reply":"Szia, mi u', 'reply') → 'Szia, mi u'. Returns null until the
 // field starts. An escape cut in half is left for the next piece.

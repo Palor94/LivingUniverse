@@ -1,3 +1,6 @@
+import {installDevTasks} from './dev-tasks.mjs';
+import {installLocationHub} from './location-hub.mjs';
+import {installAssetGeneration} from './asset-generation.mjs';
 import {installWorldReview,backupBeforeWorldReview,worldReviewTables} from './world-review.mjs';
 import {installCompleteCharacterRename} from './complete-character-rename.mjs';
 import {createRenameRoutes} from './character-rename-routes.mjs';
@@ -38,6 +41,8 @@ import {installImageGeneration,backupBeforeImageGeneration} from './image-genera
 import {createGrokConnections} from './grok-connections.mjs';
 import {imageCredentialEnvironment} from './sogni-credentials.mjs';
 import {installDesktopGeneration} from './desktop-generation.mjs';
+import {installPlayImageWorker} from './play-image-worker.mjs';
+import {installGenerationSessions} from './generation-sessions.mjs';
 import {createCatalogue as openMcpCatalogue} from '../mcp/catalogue.mjs';
 import {backupBeforeStoryMigration,installStoryEvents} from './story-events.mjs';
 import {installLivingWorld} from './living-world.mjs';
@@ -67,6 +72,7 @@ function pickEncoding(header=''){const h=String(header);return /\bbr\b/.test(h)?
 import {installMediaReview} from './media-review.mjs';
 import {installWorldEngine} from './world-engine.mjs';
 import {installPlayMode} from './play-mode.mjs';
+import {installFirstMeetings} from './first-meetings.mjs';
 import {installPlayAssets} from './play-assets.mjs';
 import {installImageWorkshop} from './image-workshop.mjs';
 import {installSystemStatus} from './system-status.mjs';
@@ -77,7 +83,7 @@ import {installLocationBackgrounds} from './location-backgrounds.mjs';
 import {installCharacterSprites} from './character-sprites.mjs';
 import {installWorldRewind} from './world-rewind.mjs';
 import {createLocationTree} from './location-tree.mjs';
-import {readXaiKey,createXaiProvider,DEFAULT_MODEL} from './world-ai.mjs';
+import {readXaiKey,createXaiProvider,createOllamaProvider,DEFAULT_MODEL} from './world-ai.mjs';
 import {installCharacterGroups} from './character-groups.mjs';
 import {notPlanningSQL} from './media-purpose.mjs';
 import {createErrorLog} from './error-log.mjs';
@@ -236,7 +242,7 @@ export async function createApp(options={}) {
   const storyEvents=installStoryEvents({db,transaction});
   const characterPolicy=installCharacterPolicy({db,dataDir,config:options.characterPolicy,one});
   let livingWorld=null;
-  const ghostProfiles=installGhostProfiles({one,run,transaction,characterPolicy});
+  const ghostProfiles=installGhostProfiles({one,all,run,transaction,characterPolicy});
   const worldReviewMigrationBackup=await backupBeforeWorldReview(db,dataDir);
   const worldReview=installWorldReview({db,root,isBusy:()=>folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),availability:options.worldReviewAvailability});
   const quickTag=installQuickTag({one,all,run,transaction,fail,worldReview});
@@ -282,10 +288,11 @@ export async function createApp(options={}) {
   livingWorld=installLivingWorld({db,one,all,run,transaction,fail,writeConfig:mcpWriteConfig,characterPolicy,storyEvents});
   // Paid Grok calls only with a locally saved key (Connect Grok) and the engine switched on.
   let worldProvider=options.worldProvider;
+  let localAI=options.localAI;if(localAI===undefined){try{localAI=JSON.parse(await fs.readFile(path.join(dataDir,'local-ai.json'),'utf8'));}catch{localAI={};}}const ollama=createOllamaProvider(localAI);
   // One provider per chosen Grok model (world settings), built on first use; a test provider wins.
   const xaiKey=worldProvider===undefined?await readXaiKey(dataDir):null,xaiProviders=new Map();
   // purpose 'world': background rounds use world_model (the fast one by default); talks use model.
-  const currentProvider=(purpose='play')=>{if(worldProvider!==undefined)return worldProvider;if(!xaiKey)return null;let model=DEFAULT_MODEL;try{const s=worldEngine.settings();model=(purpose==='world'?s.world_model:s.model)||DEFAULT_MODEL;}catch{}if(!xaiProviders.has(model))xaiProviders.set(model,createXaiProvider({key:xaiKey,model}));return xaiProviders.get(model);};
+  const currentProvider=(purpose='play')=>{if(worldProvider!==undefined)return worldProvider;if(purpose==='world'&&worldEngine.settings().world_provider==='ollama')return ollama;if(!xaiKey)return null;let model=DEFAULT_MODEL;try{const s=worldEngine.settings();model=(purpose==='world'?s.world_model:s.model)||DEFAULT_MODEL;}catch{}if(!xaiProviders.has(model))xaiProviders.set(model,createXaiProvider({key:xaiKey,model}));return xaiProviders.get(model);};
   const locationTree=createLocationTree(dataDir);
   // Game time: real time plus what Palor's actions added (game-clock.mjs); costs keep real days.
   const gameClock=createGameClock({one,run,realNow:options.worldClock||(()=>new Date())});
@@ -293,7 +300,9 @@ export async function createApp(options={}) {
   // Collection-origin declaration; approval, content and provider rules remain separate.
   const characterOrigin=createCharacterOrigin({one,all,root});
   const sprites=installCharacterSprites({db,root,one,all,run,transaction,fail,castIds:()=>[...worldEngine.internals.meetable().map(c=>c.id),worldEngine.internals.palor()?.id].filter(Boolean),mayUseReferences:characterOrigin.mayUseEverydayReferences,allowedReferences:characterOrigin.everydayReferences});
-  const playMode=installPlayMode({db,one,all,run,transaction,fail,dataDir,root,worldEngine,characterPolicy,sprites,locationTree,now:gameClock.now,gameClock,mayUseReferences:characterOrigin.mayUseReferences,mayUseEverydayReferences:characterOrigin.mayUseEverydayReferences,intimateAllowed:characterOrigin.intimateAllowed,...(options.playRandom?{random:options.playRandom}:{})});
+  // First meeting with Palor → proposed story event + relationship lines (owner decides).
+  const firstMeetings=installFirstMeetings({db,transaction,storyEvents,palorId:()=>enhancements.protagonist()?.id||null});
+  const playMode=installPlayMode({db,one,all,run,transaction,fail,dataDir,root,worldEngine,characterPolicy,sprites,onMeeting:firstMeetings.afterMeeting,locationTree,now:gameClock.now,gameClock,mayUseReferences:characterOrigin.mayUseReferences,mayUseEverydayReferences:characterOrigin.mayUseEverydayReferences,intimateAllowed:characterOrigin.intimateAllowed,...(options.playRandom?{random:options.playRandom}:{})});
   const rewinds=installWorldRewind({db,one,all,run,transaction,fail,worldEngine,now:gameClock.now});
   let zipReceiving=false; // a background ZIP body is being received (owner, 2026-11-14)
   const backgrounds=installLocationBackgrounds({root,one,all,run,transaction,fail,authenticate:h=>mcpChanges.authenticate(h),approvalMode:()=>mcpWriteConfig?.approval_mode??'review',figures:()=>sprites.overview(),prompts:a=>playMode.prompts(a),extraOps:()=>{const town=playMode.townOps(playAssets.imageBytes),orders=characterOrders.ops(playAssets.imageBytes);return {...playAssets.ops,...ideaBox.ops,...playMode.storyOps,...town,...orders,
@@ -322,7 +331,7 @@ export async function createApp(options={}) {
     ...(options.devTools||{})});
   const dataAudit=installDataAudit({one,all,run,transaction,fail,locationTree,root});
   // Szereplőgyár (character-orders.mjs): new character form, open orders for Grok and ChatGPT.
-  const characterOrders=installCharacterOrders({db,one,all,run,transaction,fail,root,dataDir,folderSync,ghostProfiles,characterPolicy,analyse:faceAnalyser,intimateAllowed:characterOrigin.intimateAllowed});
+  const characterOrders=installCharacterOrders({db,one,all,run,transaction,fail,root,dataDir,folderSync,ghostProfiles,characterPolicy,analyse:faceAnalyser});
   // Bug report bundles, connector view and weekly report (debugging package, 2026-11-13).
   const projectRoot=path.resolve(appDir,'..');let sandboxLauncher=options.sandboxLauncher||null;
   const readErrorLines=limit=>{try{return readFileSync(errorLog.file,'utf8').trimEnd().split('\n').slice(-limit).map(l=>{try{return JSON.parse(l);}catch{return null;}}).filter(Boolean).reverse();}catch{return [];}};
@@ -336,9 +345,15 @@ export async function createApp(options={}) {
   let imageConfig=options.imageGeneration;
   if(imageConfig===undefined){try{imageConfig=JSON.parse(await fs.readFile(path.join(dataDir,'image-generation.json'),'utf8'));}catch{imageConfig={};}}
   const imageMigrationBackup=await backupBeforeImageGeneration(db,dataDir);
-  const imageGeneration=installImageGeneration({db,root,dataDir,one,all,run,transaction,mediaImports,characterPolicy,writeConfig:mcpWriteConfig,config:imageConfig,env:await imageCredentialEnvironment(dataDir),isBusy:()=>mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),...(options.generationTestOptions||{})});
+  let assetGeneration=null;const imageEnv=await imageCredentialEnvironment(dataDir);
+  const imageGeneration=installImageGeneration({db,root,dataDir,one,all,run,transaction,mediaImports,characterPolicy,writeConfig:mcpWriteConfig,config:imageConfig,env:imageEnv,isBusy:()=>assetGeneration?.isBusy()||mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),...(options.generationTestOptions||{})});
   const permanentDelete=installPermanentMediaDelete({db,root,dataDir,one,all,run,transaction,moving,isBusy:()=>scanning||folderSync.isBusy()||reconciliation.isRelinking()||mediaImports.isBusy()||imageGeneration.isBusy(),...(options.permanentDeleteTestOptions||{})});
-  const desktopGeneration=installDesktopGeneration({imageGeneration,one,all});
+  assetGeneration=installAssetGeneration({one,all,run,transaction,dataDir,backgrounds,locationTree,guests:{context:playMode.guestGenerationContext,save:playMode.saveGeneratedGuest},characterPolicy,config:imageConfig,env:imageEnv,isBusy:()=>imageGeneration.isBusy()||mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),...(options.assetGenerationTestOptions||{})});
+  const locationHub=installLocationHub({all,editor:locations.editor,locationTree});
+  const generationSessions=installGenerationSessions({one,all,run,transaction,imageGeneration,clock:options.generationTestOptions?.clock});imageGeneration.setSessions(generationSessions);
+  const playImageWorker=installPlayImageWorker({one,all,run,imageGeneration,sessions:generationSessions,playAssets,playMode,origin:characterOrigin,palor:()=>worldEngine.internals.palor(),identity});
+  const devTasks=installDevTasks({one,run,transaction,authenticate:token=>mcpChanges.authenticate(token)});
+  const desktopGeneration=installDesktopGeneration({imageGeneration,assetGeneration,generationSessions,one,all});
   const ideaBox=installIdeaBox({root,db,one,all,run,fail,now,mover:createMediaMover({root,one,run,transaction,fingerprint,moving,now}),isBusy:()=>scanning||folderSync.isBusy()||reconciliation.isRelinking()||mediaImports.isBusy()||imageGeneration.isBusy()});
   const mediaPlacement=installMediaPlacement({root,one,all,run,transaction,fail,fingerprint,moving,now,isBusy:()=>scanning||folderSync.isBusy()||reconciliation.isRelinking()||mediaImports.isBusy()||imageGeneration.isBusy()});
   const newImages=installNewImages({root,one,all,run,transaction,fail,fingerprint,moving,locationTree,now,isBusy:()=>scanning||folderSync.isBusy()||reconciliation.isRelinking()||mediaImports.isBusy()||imageGeneration.isBusy()});
@@ -394,19 +409,29 @@ export async function createApp(options={}) {
         let filename='';try{filename=decodeURIComponent(String(req.headers['x-lu-filename']||'')).slice(0,200);}catch{}
         body={zip,filename};
       }
+      else if(req.method==='POST'&&['/api/backgrounds/upload','/api/play/scenes/upload'].includes(p)&&/^image\/(?:png|jpeg)(?:;|$)/.test(String(req.headers['content-type']))){
+        const limit=20*1024*1024,declared=Number(req.headers['content-length']);if(declared>limit)throw fail('Request is too large',413);
+        if(mediaImports.isBusy()||imageGeneration.isBusy())throw fail('Other work is running. Retry shortly.',409);
+        let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>limit)throw fail('Request is too large',413);chunks.push(chunk);}if(!size)throw fail('Choose a JPEG or PNG image.');
+        let filename='';try{filename=decodeURIComponent(String(req.headers['x-lu-filename']||'')).slice(0,200);}catch{throw fail('Invalid file name.');}
+        body={bytes:Buffer.concat(chunks,size),filename,location_id:url.searchParams.get('location_id'),...(p==='/api/play/scenes/upload'?{character_id:url.searchParams.get('character_id')}:{})};
+      }
       else if(['POST','PUT'].includes(req.method)){
         if(!String(req.headers['content-type']).startsWith('application/json'))throw fail('Expected JSON',415);
         // Collect raw bytes and decode once: decoding chunk by chunk corrupts
         // multi-byte characters (á, ő, ű…) that straddle a chunk boundary.
-        const limit=p==='/api/restore'||p==='/api/character-orders'?50e6:p==='/api/backgrounds/upload'||p==='/api/play/scenes/upload'||p==='/api/signals'?30e6:/^\/api\/media\/[^/]+\/image-crop$/.test(p)?34*1024*1024:2e6;
+        const limit=p==='/api/dev-tasks'?6*1024*1024:p==='/api/restore'||p==='/api/character-orders'?50e6:p==='/api/backgrounds/upload'||p==='/api/play/scenes/upload'||p==='/api/signals'?30e6:/^\/api\/media\/[^/]+\/image-crop$/.test(p)?34*1024*1024:2e6;
         const chunks=[];let size=0;
         for await(const chunk of req){size+=chunk.length;if(size>limit)throw fail('Request is too large',413);chunks.push(chunk);}
         try{body=size?JSON.parse(Buffer.concat(chunks,size).toString('utf8')):{};}catch{throw fail('Invalid JSON');}
       }
+      if(await devTasks.handle({p,req,res,body,json}))return;
       const scopedRead=(p==='/api/mcp-rename'&&['capabilities','get'].includes(body.operation))||(p==='/api/mcp-ghost'&&body.operation==='capabilities')||(p==='/api/mcp-changes'&&['status','get'].includes(body.operation))||(p==='/api/mcp-imports'&&['capabilities','get','upload_get','list'].includes(body.operation));
+      const assetGenerationRoute=p.startsWith('/api/background-generation')||p.startsWith('/api/play/guest-generation');
       const desktopGenerationRoute=/^\/api\/characters\/[a-f0-9-]{36}\/generation(?:\/|$)/i.test(p);
       if(mediaImports.isBusy()&&['POST','PUT','PATCH','DELETE'].includes(req.method)&&p!=='/api/mcp-imports'&&p!=='/api/mcp-generation'&&!desktopGenerationRoute&&!scopedRead)throw fail('A verified media import is running. Retry shortly.',409);
-      if(imageGeneration.isBusy()&&['POST','PUT','PATCH','DELETE'].includes(req.method)&&p!=='/api/mcp-generation'&&!desktopGenerationRoute&&!scopedRead)throw fail('An approved image generation is running. Retry shortly.',409);
+      const parallelPlay=/^\/api\/play\/(?:talk|group-talk|wait|travel|settings|items)(?:\/|$)/.test(p),parallelProfile=/^\/api\/characters\/[a-f0-9-]{36}\/(?:profile-field|ghost\/manual)$/i.test(p);
+      if((imageGeneration.isBusy()||assetGeneration.isBusy())&&['POST','PUT','PATCH','DELETE'].includes(req.method)&&p!=='/api/mcp-generation'&&!desktopGenerationRoute&&!assetGenerationRoute&&!scopedRead&&!parallelPlay&&!parallelProfile)throw fail('An approved image generation is running. Retry shortly.',409);
       if(await permanentDelete.handle({p,body,req,json}))return;
       if(await worldReview.handle({p,body,req,url,json}))return;
       if(await quickTag.handle({p,body,req,url,json}))return;
@@ -423,6 +448,7 @@ export async function createApp(options={}) {
       if(await rewinds.handle({p,body,req,json}))return;
       if(await playMode.handle({p,body,req,res,json}))return;
       if(await backgrounds.handle({p,body,req,json}))return;
+      if(await playImageWorker.handle({p,req,body,url,json}))return;
       if(await playAssets.handle({p,body,req,json}))return;
       if(await ideaBox.handle({p,req,url,body,json}))return;
       if(await imageWorkshop.handle({p,req,url,body,json}))return;
@@ -436,7 +462,9 @@ export async function createApp(options={}) {
       if(await devTools.handle({p,req,url,body,json}))return;
       if(await sprites.handle({p,req,res,json}))return;
       if(await locationCanvas.handle({p,body,req,json}))return;
+      if(p==='/api/location-hub'&&req.method==='GET')return json(await locationHub.snapshot());
       if(await desktopGeneration.handle({p,body,req,json}))return;
+      if(await assetGeneration.handle({p,body,req,url,json,res}))return;
       if(livingWorld&&await livingWorld.service({p,body,req,json,authenticate:h=>mcpChanges.authenticate(h)}))return;
       if(p==='/api/mcp-generation'){
         try{
@@ -495,8 +523,10 @@ export async function createApp(options={}) {
           return json(characterOrders.afterProposal(character_id,proposal)||proposal);
         }catch(e){return json({code:e.code||'GHOST_CHANGE_REJECTED',error:e.status?e.message:'The ghost-profile operation could not be completed.'},e.status||500);}
       }
+      if(p==='/api/characters/readiness'&&req.method==='GET'){const tree=await locationTree.load();return json(ghostProfiles.readiness({palorId:worldEngine.internals.palor()?.id||null,placedLocationIds:new Set(tree.nodes.filter(node=>node.placed!==false&&node.location_id).map(node=>node.location_id))}));}
       if(ghostProfiles.handle({p,body,req,json}))return;
       if(storyEvents.handle({p,body,req,url,json}))return;
+      if(firstMeetings.handle({p,body,req,json}))return;
       if(await reconciliation.handle({p,body,req,url,json}))return;
       if(await duplicates.handle({p,body,req,url,json}))return;
       if(await taxonomy.handle({p,body,req,url,json}))return;
@@ -665,11 +695,11 @@ export async function createApp(options={}) {
         const headers={'Content-Type':types[path.extname(full).toLowerCase()]||'application/octet-stream','Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':m.kind==='image'?'private, no-cache':'private, max-age=60','ETag':etag,'X-Content-Type-Options':'nosniff'};if(status===206)headers['Content-Range']=`bytes ${start}-${end}/${s.size}`;
         res.writeHead(status,headers);if(req.method==='HEAD')return res.end();const stream=createReadStream(full,{start,end});stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);return;
       }
-      if(req.method==='GET'&&['/world-review.js','/world-review.css','/character-rename.html','/character-rename.js','/character-rename.css','/','/style.css','/theme.css','/i18n.js','/quick-tag.js','/media-signals.js','/media-review.js','/image-workshop.js','/world-engine.js','/play.js','/play-map.js','/play-story.js','/place-tools.js','/play-town-map.js','/play-icons.js','/character-factory.js','/debug-trail.js','/layout-check.js','/play-debug.js','/sprite-cutout.js','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/client.js','/character-options.js','/enhancements.js','/picture-crop.js','/character-reference-crops.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/location-editor.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-canvas-model.js','/location-canvas.css','/permanent-media-delete.js','/dev-tools.js','/identity.js'].includes(p)){
+      if(req.method==='GET'&&['/dev-tasks.js','/generation-jobs.js','/interactions.js','/interactions.css','/manifest.webmanifest','/play.webmanifest','/app-icon.svg','/app-icon-192.png','/app-icon-512.png','/app-install.js','/service-worker.js','/app-routes.js','/world-review.js','/world-review.css','/character-rename.html','/character-rename.js','/character-rename.css','/','/style.css','/theme.css','/i18n.js','/quick-tag.js','/media-signals.js','/media-review.js','/image-workshop.js','/world-engine.js','/play.js','/command-palette.js','/upload-image.js','/asset-generation.js','/picture-order.js','/play-scene.js','/play-dialog.js','/play-travel.js','/play-map.js','/play-map-layout.js','/play-story.js','/place-tools.js','/play-town-map.js','/play-icons.js','/character-factory.js','/debug-trail.js','/layout-check.js','/play-debug.js','/sprite-cutout.js','/sprite-cutout-worker.js','/sprite-cutout-pixels.js','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/profile-autosave.js','/client.js','/api-json.js','/system-error-summary.js','/character-options.js','/character-readiness.js','/enhancements.js','/picture-crop.js','/character-reference-crops.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/name-picker.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/location-editor.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-hub.js','/location-canvas-model.js','/location-canvas.css','/permanent-media-delete.js','/dev-tools.js','/identity.js'].includes(p)){
         const file=path.join(appDir,'public',p==='/'?'index.html':p.slice(1));const s=await staticFile(file),enc=pickEncoding(req.headers['accept-encoding']);
         // Compressed once per file version; the browser keeps it and only asks "changed?" (304).
         if(req.headers['if-none-match']===s.etag){res.writeHead(304,{'ETag':s.etag,'Cache-Control':'no-cache','Vary':'Accept-Encoding'});return res.end();}
-        const data=enc?s[enc]:s.raw;res.writeHead(200,{...(enc?{'Content-Encoding':enc}:{}),'Content-Length':data.length,'ETag':s.etag,'Cache-Control':'no-cache','Vary':'Accept-Encoding','Content-Type':p.endsWith('.css')?'text/css':p.endsWith('.js')?'text/javascript':'text/html; charset=utf-8','Content-Security-Policy':`default-src 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' ${characterCrops.adminOrigin()||''}; frame-ancestors 'none'`,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Permissions-Policy':'camera=(), microphone=(), geolocation=(), payment=()','Cross-Origin-Opener-Policy':'same-origin'});return res.end(data);
+        const data=enc?s[enc]:s.raw;res.writeHead(200,{...(enc?{'Content-Encoding':enc}:{}),'Content-Length':data.length,'ETag':s.etag,'Cache-Control':'no-cache','Vary':'Accept-Encoding','Content-Type':p.endsWith('.webmanifest')?'application/manifest+json':p.endsWith('.svg')?'image/svg+xml':p.endsWith('.png')?'image/png':p.endsWith('.css')?'text/css':p.endsWith('.js')?'text/javascript':'text/html; charset=utf-8','Content-Security-Policy':`default-src 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' ${characterCrops.adminOrigin()||''}; frame-ancestors 'none'`,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Permissions-Policy':'camera=(), microphone=(), geolocation=(), payment=()','Cross-Origin-Opener-Policy':'same-origin'});return res.end(data);
       }
       throw fail('Not found',404);
     }catch(e){if(!e.status){errorLog.write(e,{method:req.method,route:String(req.url||'').split('?')[0],requestId});if(process.env.LU_DEBUG)console.error(e);}if(!res.headersSent)json({error:e.status?e.message:'The operation could not be completed. Your original media has not been changed.',...(e.status?{}:{request_id:requestId})},e.status||500);else res.destroy();}
@@ -689,7 +719,7 @@ export async function createApp(options={}) {
   }catch(e){console.error('Mobile access disabled: '+e.message);}
   if(mobileServer&&mcpWriteConfig?.enabled===true&&mobileConfig.login.toLowerCase()===mcpWriteConfig.login&&mobileConfig.origin===mcpWriteConfig.origin)characterCrops.setAdminOrigin(mobileConfig.origin);
   const closeServer=s=>new Promise(resolve=>{if(!s?.listening)return resolve();s.close(()=>resolve());s.closeIdleConnections();});
-  return {devTools,enableRestart:()=>{restartLauncher??=windowsRestartLauncher({projectRoot:path.resolve(appDir,'..'),dataDir});sandboxLauncher??=processSandboxLauncher({projectRoot,dir:bugReports.dir});},bugReports,worldReview,worldReviewMigrationBackup,autoSnapshots,server,mobileServer,characterRename,characterCropMigrationBackup,storyMigrationBackup,imageMigrationBackup,mediaUploadMigrationBackup,mobilePort:mobileConfig?.port??4318,db,root,dataDir,folderSync,imageGeneration,worldEngine,backgrounds,sprites,thumbnails,identity,jobs,close:async()=>{devTools.close();jobs.close();thumbnails.close();identity.close();worldEngine.stopScheduler();autoSnapshots.stop();backgrounds.stopWatcher();sprites.stopWatcher();await imageGeneration.settle();await Promise.all([closeServer(server),closeServer(mobileServer)]);db.close();}};
+  return {devTools,enableRestart:()=>{restartLauncher??=windowsRestartLauncher({projectRoot:path.resolve(appDir,'..'),dataDir});sandboxLauncher??=processSandboxLauncher({projectRoot,dir:bugReports.dir});},bugReports,worldReview,worldReviewMigrationBackup,autoSnapshots,server,mobileServer,characterRename,characterCropMigrationBackup,storyMigrationBackup,imageMigrationBackup,mediaUploadMigrationBackup,mobilePort:mobileConfig?.port??4318,db,root,dataDir,folderSync,imageGeneration,generationSessions,playImageWorker,assetGeneration,worldEngine,backgrounds,sprites,thumbnails,identity,jobs,close:async()=>{devTools.close();jobs.close();thumbnails.close();identity.close();worldEngine.stopScheduler();autoSnapshots.stop();backgrounds.stopWatcher();sprites.stopWatcher();await playImageWorker.settle();await imageGeneration.settle();await assetGeneration.settle();await Promise.all([closeServer(server),closeServer(mobileServer)]);db.close();}};
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

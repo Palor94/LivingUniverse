@@ -12,7 +12,9 @@ How pictures are made, inserted, placed and gated in Play mode. All routes are f
 | Shared scene | `…/Közös jelenetek/<character>/<place> - <n>.png` | photo scenes and "Közös fotók" with Palor | no |
 | Own catalogue photos | wherever they are | photo scenes, shared photos | unchanged |
 
-Prompts: Élő világ → readiness → "📋 Alak-prompt"; place screen → "📋 Háttér-prompt";
+Prompts: Élő világ → readiness → "📋 Alak-prompt" (since 2026-11-15 a ChatGPT order: ChatGPT makes the
+figures through the connector with start_generation_job/finish_generation_job; the old manual prompt is
+folded under "Kézi prompt"); place screen → "📋 Háttér-prompt";
 conversation → "📋 Jelenet-prompt"; Grok MCP: `list_character_figures`, `get_scene_prompts`,
 `list_locations`, `import_location_background`. Prompts use only approved appearance and
 approved references; never invent a look; everyone is an adult male (a non-human or fantasy male is shown as what he is).

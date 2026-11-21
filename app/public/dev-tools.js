@@ -1,3 +1,4 @@
+import {confirmBox} from './interactions.js';
 // Rendszerállapot (developer tools, 2026-11-12): checks, recent errors with details, the last
 // API requests and the explicit "restart everything" action. Server side: app/dev-tools.mjs.
 import {t} from './i18n.js';
@@ -78,7 +79,7 @@ export function installDevToolsUI({$,$$,esc,api,toast,heading}){
       <h3>${t('dev.jobsRunning',{count:j.running.length})}</h3>${j.running.length?`<ul class="dev-log">${j.running.map(r=>`<li>${esc(t('dev.job.'+r.kind))} ${r.detail?`<small class="muted">${esc(r.detail)}</small>`:''} · ${esc(t('dev.since',{at:time(r.started_at)}))}</li>`).join('')}</ul>`:`<p class="muted">${t('dev.none')}</p>`}
       <h3>${t('dev.jobsRecent')}</h3>${j.recent.length?`<table class="dev-table"><thead><tr><th>${t('dev.col.time')}</th><th>${t('dev.col.job')}</th><th>${t('dev.col.ms')}</th><th>${t('dev.col.result')}</th></tr></thead><tbody>${j.recent.map(r=>`<tr class="${r.outcome==='done'?'':'dev-bad'}"><td>${esc(when(r.started_at))}</td><td>${esc(t('dev.job.'+r.kind))} <small class="muted">${esc(r.detail||'')}</small></td><td>${r.ms??'–'}</td><td>${esc(t('dev.outcome.'+r.outcome))}${r.error?': '+esc(r.error.message):''}</td></tr>`).join('')}</tbody></table>`:`<p class="muted">${t('dev.none')}</p>`}
       <h3>${t('dev.outages')}</h3>${j.connectivity.outages.length?`<ul class="dev-log">${j.connectivity.outages.map(o=>`<li class="${o.to?'':'dev-bad'}">${esc(t('dev.net.'+o.what))}: ${esc(o.state)} · ${esc(when(o.from))}${o.to?' – '+esc(time(o.to)):' – '+esc(t('dev.now'))} (${o.minutes} ${t('dev.minutes')})</li>`).join('')}</ul>`:`<p class="muted">${t('dev.noOutages')}</p>`}`;
-    for(const b of $$('[data-unstick]',box))b.onclick=async()=>{if(!confirm(t('dev.unstickConfirm')))return;try{await api('/api/dev/jobs/unstick',{kind:b.dataset.unstick,confirm:true});toast(t('dev.unstuck'));paint();}catch(e){toast(e.message,true);}};
+    for(const b of $$('[data-unstick]',box))b.onclick=async()=>{if(!await confirmBox(t('dev.unstickConfirm')))return;try{await api('/api/dev/jobs/unstick',{kind:b.dataset.unstick,confirm:true});toast(t('dev.unstuck'));paint();}catch(e){toast(e.message,true);}};
   }
 
   async function paintAudit(box){
@@ -88,7 +89,7 @@ export function installDevToolsUI({$,$$,esc,api,toast,heading}){
     box.innerHTML=`<p class="dev-summary ${a.problems?'dev-warn':'dev-ok'}">${esc(a.problems?t('dev.auditProblems',{count:a.problems}):t('dev.auditOk'))} <small class="muted">${esc(t('dev.checkedAt',{at:when(a.checked_at)}))} · ${a.ms} ms</small></p><p class="muted"><small>${t('dev.auditLead')}</small></p>
       ${groups.map(g=>`<h3>${t('dev.auditGroup.'+g)}</h3><ul class="dev-checks">${a.checks.filter(c=>c.group===g).map(c=>`<li class="dev-check dev-${c.error?'bad':c.count?'warn':'ok'}"><span class="dev-mark" aria-hidden="true">${c.error?'✕':c.count?'!':'✓'}</span><div><b>${esc(t('dev.audit.'+c.id))}</b> <small class="muted">${c.error?esc(c.error):c.count?esc(t('dev.auditCount',{count:c.count})):''}</small>
         ${c.count?`<br><small>${esc(t('dev.auditFix.'+c.id))}</small><details class="dev-more"><summary>${t('dev.auditExamples')}</summary><ul>${c.sample.map(s=>`<li><code>${esc(s.text)}</code></li>`).join('')}</ul></details>${c.repairable?`<button class="subtle" data-repair="${esc(c.id)}">${t('dev.repair')}</button>`:''}`:''}</div></li>`).join('')}</ul>`).join('')}`;
-    for(const b of $$('[data-repair]',box))b.onclick=async()=>{const c=a.checks.find(x=>x.id===b.dataset.repair);if(!confirm(t('dev.repairConfirm',{what:t('dev.audit.'+c.id),count:c.count})))return;
+    for(const b of $$('[data-repair]',box))b.onclick=async()=>{const c=a.checks.find(x=>x.id===b.dataset.repair);if(!await confirmBox(t('dev.repairConfirm',{what:t('dev.audit.'+c.id),count:c.count})))return;
       try{const r=await api('/api/dev/audit/repair',{check:c.id,confirm:true});toast(t('dev.repaired',{count:r.changed}));paint();}catch(e){toast(e.message,true);}};
   }
 
@@ -108,6 +109,7 @@ export function installDevToolsUI({$,$$,esc,api,toast,heading}){
     const r=await api('/api/dev/weekly');
     const li=(cls,text)=>`<li class="${cls}">${esc(text)}</li>`;
     box.innerHTML=`<p class="muted">${esc(t('dev.weekRange',{from:r.from.slice(0,10),to:r.to.slice(0,10)}))}</p>
+        <h3>${t('ux.weekTitle')}</h3><ul class="dev-log">${(r.ux||[]).map(m=>li('',t('ux.weekLine',{task:t('ux.task.'+m.task),surface:t('ux.surface.'+m.surface),runs:m.runs,clicks:m.avg_clicks,seconds:(m.avg_ms/1000).toFixed(1)}))).join('')||`<li class="muted">${t('ux.noMeasurements')}</li>`}</ul>
       <h3>${t('dev.weekErrors',{total:r.errors.total,server:r.errors.server,client:r.errors.client})}</h3><ul class="dev-log">${r.errors.top.map(e=>li(e.source==='client'?'dev-warn':'dev-bad',`${e.count}× ${e.route||''}: ${e.message}`)).join('')||`<li class="muted">${t('dev.none')}</li>`}</ul>
       <h3>${t('dev.weekSlow')}</h3><ul class="dev-log">${r.slow_requests.map(s=>li('dev-warn',t('dev.weekSlowLine',{route:s.route,slow:s.slow,failed:s.failed,ms:s.max_ms}))).join('')||`<li class="muted">${t('dev.none')}</li>`}</ul>
       <h3>${t('dev.weekAi')}</h3><p>${esc(t('dev.weekAiLine',{calls:r.ai.calls,errors:r.ai.errors,truncated:r.ai.truncated,cache:r.ai.cache_share===null?'–':Math.round(r.ai.cache_share*100)+'%',cost:r.cost.total_usd.toFixed(2)}))}</p>
@@ -123,7 +125,7 @@ export function installDevToolsUI({$,$$,esc,api,toast,heading}){
       ${r.reports.length?`<table class="dev-table"><thead><tr><th>${t('dev.col.report')}</th><th>${t('dev.col.note')}</th><th></th></tr></thead><tbody>${r.reports.map(x=>`<tr><td><code>${esc(x.name)}</code></td><td>${esc(x.note||'')}</td><td>${x.snapshot?`<button class="subtle" data-replay="${esc(x.name)}">${t('dev.replay')}</button>`:`<small class="muted">${t('dev.noSnapshot')}</small>`}</td></tr>`).join('')}</tbody></table>`:`<p class="muted">${t('dev.noReports')}</p>`}`;
     $('#dev-report-new').onclick=async()=>{const {reportBug}=await import('./play-debug.js');const trail=window.__luTrail;
       reportBug({api,toast,esc,state:{at:new Date().toISOString(),window:[innerWidth,innerHeight],screen:'Rendszerállapot',steps:trail?.steps(40)||[],requests:trail?.api(40)||[],errors:trail?.errors(20)||[]}});};
-    for(const b of $$('[data-replay]',box))b.onclick=async()=>{if(!confirm(t('dev.replayConfirm')))return;
+    for(const b of $$('[data-replay]',box))b.onclick=async()=>{if(!await confirmBox(t('dev.replayConfirm')))return;
       try{const s=await api('/api/dev/bug-reports/'+encodeURIComponent(b.dataset.replay)+'/sandbox',{confirm:true});toast(t('dev.replayStarted',{url:s.url}));setTimeout(()=>window.open(s.url,'_blank','noopener'),4000);}catch(e){toast(e.message,true);}};
   }
   async function paintQueries(box){
@@ -131,7 +133,7 @@ export function installDevToolsUI({$,$$,esc,api,toast,heading}){
     box.innerHTML=entries.length?`<p class="muted"><small>${t('dev.queriesNote',{ms:threshold_ms})}</small></p><table class="dev-table"><thead><tr><th>${t('dev.col.time')}</th><th>${t('dev.col.ms')}</th><th>SQL</th></tr></thead><tbody>${entries.map(e=>`<tr><td>${esc(new Date(e.at).toLocaleTimeString('hu-HU'))}</td><td>${e.ms}</td><td><code>${esc(e.sql)}</code></td></tr>`).join('')}</tbody></table>`:`<p class="muted">${t('dev.noQueries',{ms:threshold_ms})}</p>`;
   }
 
-  async function restart(){    if(!confirm(t('dev.restartConfirm')))return;
+  async function restart(){    if(!await confirmBox(t('dev.restartConfirm')))return;
     try{await api('/api/dev/restart',{confirm:true});}catch(e){toast(e.message,true);return;}
     toast(t('dev.restarting'));
     // The program goes away and comes back; reload when it answers again (at most 3 minutes).

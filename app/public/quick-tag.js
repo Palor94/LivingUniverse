@@ -1,3 +1,4 @@
+import {sortNames,searchableSelect} from './name-picker.js';
 // Quick tagging screen: confirm who is who (p1, p2…) in AI-analysed pictures, a page at a time.
 // Suggestions come only from characters already linked to each picture; nothing is saved
 // until you press confirm, and only the ticked cards are saved.
@@ -6,10 +7,11 @@ import {t} from './i18n.js';
 const SPECIAL=['unknown','not_character','ignore'];
 
 export function installQuickTag({$,$$,esc,api,toast,mediaDialog,getState}){
+  let initialized=false;const namedCharacters=()=>sortNames(getState().characters);
   let group='single',offset=0,data=null,choices=[],busy=false,counts=null;
   // "Egyéb" filters and the brush (a character applied by clicking person rows).
   let fChar='',fPeople='',fUnlinked=false,brush='';
-  const palorCharacter=()=>getState().characters.find(c=>c.name.trim().toLocaleLowerCase('hu')==='palor');
+  const palorCharacter=()=>namedCharacters().find(c=>c.name.trim().toLocaleLowerCase('hu')==='palor');
   // Single place that changes a person's choice and keeps select, chips and tick box in sync.
   function setChoice(index,person,choice){
     if(choice)choices[index][person]=choice;else delete choices[index][person];
@@ -21,7 +23,7 @@ export function installQuickTag({$,$$,esc,api,toast,mediaDialog,getState}){
   let locQuery='',locUntagged=true,locNoAi=false,locNeutral=false,locSuggested=false,locOffset=0,locData=null,locPlace='';
   const heading=()=>`<div class="heading"><div><div class="eyebrow">${t('qt.kicker')}</div><h1>${t('qt.title')}</h1><p>${t('qt.lead')}</p></div></div>`;
   const tabs=()=>`<div class="tabs">${['single','pair','other'].map(key=>`<button type="button" data-qt-group="${key}" class="${group===key?'active':''}">${t('qt.group.'+key)}${counts?' · '+counts[key]:''}</button>`).join('')}<button type="button" data-qt-group="locations" class="${group==='locations'?'active':''}">${t('qt.group.locations')}</button></div>`;
-  function bindTabs(host){for(const b of $$('[data-qt-group]'))b.onclick=()=>{group=b.dataset.qtGroup;offset=0;render(host).catch(e=>toast(e.message,true));};}
+  function bindTabs(host){for(const button of $$('[data-qt-group]'))button.classList.toggle('qt-empty',button.dataset.qtGroup!=='locations'&&counts&&counts[button.dataset.qtGroup]===0);for(const b of $$('[data-qt-group]'))b.onclick=()=>{group=b.dataset.qtGroup;offset=0;render(host).catch(e=>toast(e.message,true));};}
 
   // Encodes a choice as a <select> value: 'c:<id>' for a character, or a special state.
   const encode=choice=>!choice?'':choice.state==='character'?'c:'+choice.character_id:choice.state;
@@ -31,13 +33,13 @@ export function installQuickTag({$,$$,esc,api,toast,mediaDialog,getState}){
 
   function options(item,selected){
     const linked=new Set(item.linked.map(c=>c.id));
-    const others=getState().characters.filter(c=>!linked.has(c.id));
+    const others=namedCharacters().filter(c=>!linked.has(c.id));
     const option=(value,label)=>`<option value="${esc(value)}" ${value===selected?'selected':''}>${esc(label)}</option>`;
     // Groups stand for several people and may be chosen for more than one person.
     const name=c=>c.is_group?t('qt.groupName',{name:c.name}):c.name;
     return option('',t('qt.choose'))
-      +(item.linked.length?`<optgroup label="${esc(t('qt.linkedGroup'))}">${item.linked.map(c=>option('c:'+c.id,name(c))).join('')}</optgroup>`:'')
-      +`<optgroup label="${esc(t('qt.allGroup'))}">${others.map(c=>option('c:'+c.id,name(c))).join('')}</optgroup>`
+      +(item.linked.length?`<optgroup label="${esc(t('qt.linkedGroup'))}">${sortNames(item.linked).map(c=>option('c:'+c.id,name(c))).join('')}</optgroup>`:'')
+      +`<optgroup label="${esc(t('qt.allGroup'))}">${sortNames(others).map(c=>option('c:'+c.id,name(c))).join('')}</optgroup>`
       +`<optgroup label="${esc(t('qt.otherGroup'))}">${SPECIAL.map(s=>option(s,t('qt.special.'+s))).join('')}</optgroup>`;
   }
 
@@ -53,6 +55,7 @@ export function installQuickTag({$,$$,esc,api,toast,mediaDialog,getState}){
   function updateToolbar(){const n=selected().length;$('#qt-count').textContent=t('sort.selectedOnPage',{count:n});$('#qt-confirm').disabled=!n||busy;$('#qt-confirm').textContent=t('qt.confirm',{count:n});}
 
   async function render(host){
+    if(!initialized){const summary=await api('/api/quick-tag/summary');counts=summary.identity;group=['single','pair','other'].find(key=>counts[key]>0)||(summary.locations?.untagged?'locations':'single');initialized=true;}
     if(group==='locations')return renderLocations(host);
     const params=new URLSearchParams({group,offset});if(group==='other'){if(fChar)params.set('character_id',fChar);if(fPeople)params.set('people',fPeople);if(fUnlinked)params.set('unlinked','1');}
     data=await api('/api/quick-tag?'+params);counts=data.counts;
@@ -61,7 +64,7 @@ export function installQuickTag({$,$$,esc,api,toast,mediaDialog,getState}){
     host.innerHTML=heading()+tabs()
       +`<div class="note">${t('qt.hint.'+group)}</div>`
       +(group==='other'?`<div class="toolbar qt-filters"><label class="qt-place">${t('qt.filterCharacter')}<select id="qt-f-char"><option value="">${t('qt.filterAll')}</option>${data.characters.map(c=>`<option value="${esc(c.id)}" ${c.id===fChar?'selected':''}>${esc(c.name)} (${c.count})</option>`).join('')}</select></label><label class="qt-place">${t('qt.filterPeople')}<select id="qt-f-people">${['','3','4','5+'].map(v=>`<option value="${v}" ${v===fPeople?'selected':''}>${v||t('qt.filterAll')}</option>`).join('')}</select></label><label class="qt-check"><input type="checkbox" id="qt-f-unlinked" ${fUnlinked?'checked':''}> ${t('qt.filterUnlinked',{count:data.unlinked_count})}</label><span class="count">${t('library.matching',{count:data.total})}</span></div>`:'')
-      +`<div class="toolbar qt-brushbar"><label class="qt-place"><i class="qt-brush-icon">🖌</i> ${t('qt.brush')}<select id="qt-brush"><option value="">${t('qt.brushOff')}</option>${getState().characters.map(c=>`<option value="${esc(c.id)}" ${c.id===brush?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label><small class="muted">${t('qt.brushHint')}</small></div>`
+      +`<div class="toolbar qt-brushbar"><label class="qt-place"><i class="qt-brush-icon">🖌</i> ${t('qt.brush')}<select id="qt-brush"><option value="">${t('qt.brushOff')}</option>${namedCharacters().map(c=>`<option value="${esc(c.id)}" ${c.id===brush?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label><small class="muted">${t('qt.brushHint')}</small></div>`
       +`<div class="bulk-toolbar qt-toolbar"><strong id="qt-count" aria-live="polite"></strong><button type="button" id="qt-all">${t('sort.selectVisible')}</button><button type="button" id="qt-none">${t('sort.clearSelection')}</button><button type="button" id="qt-confirm" class="primary"></button><small>${t('qt.keyboard')}</small></div>`
       +(data.items.length?`<div class="qt-grid">${data.items.map(card).join('')}</div>`:`<div class="empty"><div class="symbol">✓</div><h2>${t('qt.emptyTitle')}</h2><p>${t('qt.emptyText')}</p></div>`)
       +(data.total>48?`<div class="pager"><button id="qt-prev" ${offset?'':'disabled'}>${t('common.previous')}</button><span>${t('common.pageRange',{from:offset+1,to:Math.min(offset+48,data.total),total:data.total})}</span><button id="qt-next" ${offset+48>=data.total?'disabled':''}>${t('common.next')}</button></div>`:'');
@@ -97,7 +100,7 @@ export function installQuickTag({$,$$,esc,api,toast,mediaDialog,getState}){
     $('#ql-all').onclick=()=>{for(const box of $$('[data-ql-select]'))box.checked=true;updateLocToolbar();};
     $('#ql-none').onclick=()=>{for(const box of $$('[data-ql-select]'))box.checked=false;updateLocToolbar();};
     for(const box of $$('[data-ql-select]'))box.onchange=updateLocToolbar;
-    $('#ql-place').onchange=e=>{locPlace=e.target.value;updateLocToolbar();};
+    $('#ql-place').onchange=e=>{locPlace=e.target.value;updateLocToolbar();};searchableSelect($('#ql-place'));
     for(const b of $$('[data-qt-open]'))b.onclick=()=>mediaDialog(b.dataset.qtOpen).catch(e=>toast(e.message,true));
     $('#ql-apply').onclick=()=>applyLocation(host).catch(e=>toast(e.message,true));
     // One click, no confirmation (owner request): the file moves to the recoverable
@@ -153,7 +156,7 @@ export function installQuickTag({$,$$,esc,api,toast,mediaDialog,getState}){
     for(const chip of $$('[data-qt-chip]'))chip.onclick=e=>{e.stopPropagation();const index=Number(chip.dataset.qtChip),person=chip.dataset.person,current=choices[index][person];setChoice(index,person,current?.character_id===chip.dataset.cid?null:{state:'character',character_id:chip.dataset.cid});};
     // Brush: while a character is chosen, clicking a person row assigns it.
     for(const row of $$('[data-qt-row]'))row.onclick=e=>{if(!brush||e.target.closest('select,button'))return;setChoice(Number(row.dataset.qtRow),row.dataset.person,{state:'character',character_id:brush});};
-    $('#qt-brush').onchange=e=>{brush=e.target.value;host.classList.toggle('qt-brushing',!!brush);};host.classList.toggle('qt-brushing',!!brush);
+    $('#qt-brush').onchange=e=>{brush=e.target.value;host.classList.toggle('qt-brushing',!!brush);};host.classList.toggle('qt-brushing',!!brush);searchableSelect($('#qt-brush'));
     if($('#qt-f-char'))$('#qt-f-char').onchange=e=>{fChar=e.target.value;offset=0;render(host).catch(err=>toast(err.message,true));};
     if($('#qt-f-people'))$('#qt-f-people').onchange=e=>{fPeople=e.target.value;offset=0;render(host).catch(err=>toast(err.message,true));};
     if($('#qt-f-unlinked'))$('#qt-f-unlinked').onchange=e=>{fUnlinked=e.target.checked;offset=0;render(host).catch(err=>toast(err.message,true));};
@@ -187,5 +190,5 @@ export function installQuickTag({$,$$,esc,api,toast,mediaDialog,getState}){
   }
 
   function controls(){document.addEventListener('keydown',e=>{if(e.key==='Escape'&&brush&&$('#qt-brush')&&!$('#dialog').open){brush='';$('#qt-brush').value='';$('#content').classList.remove('qt-brushing');return;}if(!(e.ctrlKey||e.metaKey)||e.key!=='Enter'||$('#dialog').open)return;const target=$('#qt-confirm')||$('#ql-apply');if(target&&!target.disabled){e.preventDefault();target.click();}});}
-  return {render,controls,reset:()=>{offset=0;},open:(nextGroup,query='')=>{group=nextGroup;offset=0;if(nextGroup==='locations'){locQuery=query;locOffset=0;}}};
+  return {render,controls,reset:()=>{offset=0;},open:(nextGroup,query='')=>{initialized=true;group=nextGroup;offset=0;if(nextGroup==='locations'){locQuery=query;locOffset=0;}}};
 }

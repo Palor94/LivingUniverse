@@ -1,6 +1,18 @@
 // Shared, dependency-free layout model. Hierarchy is never a travel connection.
 export const WORLD_ROOT='world:living-universe';
 export const copy=value=>structuredClone(value);
+export function fitCanvasCamera(positions,width,height){
+  const rects=[...positions.values()];if(!rects.length||width<=0||height<=0)return {x:0,y:0,z:1};
+  const minX=Math.min(...rects.map(p=>p.x)),minY=Math.min(...rects.map(p=>p.y)),spanX=Math.max(...rects.map(p=>p.x+p.width))-minX,spanY=Math.max(...rects.map(p=>p.y+p.height))-minY,padding=Math.min(24,width/10,height/10),z=Math.min(1.05,(width-padding*2)/Math.max(1,spanX),(height-padding*2)/Math.max(1,spanY));
+  return {x:(width-spanX*z)/2-minX*z,y:(height-spanY*z)/2-minY*z,z};
+}
+export function groupCanvasSources(choices,state){
+  const nodes=new Map(state.nodes.map(node=>[node.id,node])),groups=new Map();
+  for(const item of choices){let node=nodes.get(item.id),group;if(!node?.placed||node.archived)group={key:node?.kind==='type-source'?'types':'unplaced',label:null};else{while(node.parent_id&&node.parent_id!==WORLD_ROOT)node=nodes.get(node.parent_id);group={key:node.id,label:node.name};}
+    if(!groups.has(group.key))groups.set(group.key,{...group,items:[]});groups.get(group.key).items.push(item);
+  }
+  return [...groups.values()].sort((a,b)=>Number(a.label===null)-Number(b.label===null)||String(a.label).localeCompare(String(b.label),'hu'));
+}
 const bad=message=>{throw Object.assign(new Error(message),{status:400});};
 const identifier=value=>{if(typeof value!=='string'||!/^[A-Za-z0-9_:-]{1,160}$/.test(value))bad('Érvénytelen helyazonosító.');return value;};
 const text=(value,max,required=false)=>{if(typeof value!=='string'||value.length>max||/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value)||required&&!value.trim())bad('Hiányzó vagy túl hosszú helyszínadat.');return value.normalize('NFC');};

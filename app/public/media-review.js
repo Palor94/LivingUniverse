@@ -1,3 +1,4 @@
+import {confirmBox} from './interactions.js';
 // "Tartalom és hasonlók": two quick review screens for the creator's own collection.
 //  1. Content labelling: one picture/video at a time whose content level is unknown;
 //     keys 1 / 2 / 3 (everyday / nudity / explicit), S = skip, Backspace = undo the last.
@@ -77,7 +78,7 @@ export function installMediaReviewUI({$,$$,esc,api,toast}){
       const sec=b.closest('[data-group]'),items=groupItems(sec.dataset.group),keep=b.dataset.keep;
       const drop=items.filter(i=>i.media_id!==keep&&!i.protected);
       if(!drop.length)return toast(t('mr.nothingToRemove'));
-      if(!confirm(t('mr.confirmRemove',{count:drop.length})))return;
+      if(!await confirmBox(t('mr.confirmRemove',{count:drop.length})))return;
       let done=0;for(const i of drop){try{const res=await api('/api/media/'+encodeURIComponent(i.media_id)+'/remove',{mode:'catalogue'});if(res.ok===true)done++;}catch(e){toast(e.message,true);break;}}
       toast(t('mr.removed',{count:done}));await paintDuplicates();
     };

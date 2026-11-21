@@ -59,7 +59,7 @@ export function installPermanentMediaDelete({db,root,dataDir,one,all,run,transac
       if(!uuid.test(edit.id))throw error('INVALID_STORAGE','Érvénytelen képszerkesztési azonosító.');
       add('data','image-originals/'+edit.id+'.original');add('data','image-edit-staging/'+edit.id+'.image');add('data','image-edit-staging/'+edit.id+'-restore.image');
     }
-    for(const output of all('SELECT run_id FROM image_generation_outputs WHERE media_id=?',m.id)){if(!uuid.test(output.run_id))throw error('INVALID_STORAGE','Érvénytelen generálási azonosító.');add('data','generation-results/'+output.run_id+'.json');}
+    for(const table of ['image_generation_outputs','image_generation_output_items'])if(hasTable(table))for(const output of all('SELECT run_id FROM '+table+' WHERE media_id=?',m.id)){if(!uuid.test(output.run_id))throw error('INVALID_STORAGE','Érvénytelen generálási azonosító.');add('data','generation-results/'+output.run_id+'.json');}
     for(const upload of all('SELECT u.id FROM media_uploads u JOIN media_import_items i ON i.import_id=u.import_id AND i.slot_key=u.slot_key WHERE i.media_id=?',m.id)){
       if(!uuid.test(upload.id))throw error('INVALID_STORAGE','Érvénytelen feltöltési azonosító.');
       for(const chunk of all('SELECT offset FROM media_upload_chunks WHERE upload_id=?',upload.id)){if(!Number.isSafeInteger(chunk.offset)||chunk.offset<0)throw error('INVALID_STORAGE','Érvénytelen feltöltési részlet.');add('data','upload-staging/'+upload.id+'/'+chunk.offset+'.part');}
@@ -97,11 +97,13 @@ export function installPermanentMediaDelete({db,root,dataDir,one,all,run,transac
     for(const row of all('SELECT relative_path,candidate_ids FROM scan_candidates')){const ids=JSON.parse(row.candidate_ids).filter(v=>v!==id);if(ids.length)run('UPDATE scan_candidates SET candidate_ids=? WHERE relative_path=?',JSON.stringify(ids),row.relative_path);else run('DELETE FROM scan_candidates WHERE relative_path=?',row.relative_path);}
     for(const row of all('SELECT id FROM media_uploads WHERE EXISTS(SELECT 1 FROM media_import_items i WHERE i.import_id=media_uploads.import_id AND i.slot_key=media_uploads.slot_key AND i.media_id=?)',id)){run('DELETE FROM media_upload_chunks WHERE upload_id=?',row.id);run("UPDATE media_uploads SET status='erased',error_code='MEDIA_ERASED' WHERE id=?",row.id);}
     run("UPDATE media_import_items SET media_id=NULL,status='erased',error_code='MEDIA_ERASED' WHERE media_id=?",id);
-    for(const row of all('SELECT run_id FROM image_generation_outputs WHERE media_id=?',id)){
-      run("UPDATE image_generation_runs SET status='withdrawn' WHERE id=?",row.run_id);
-      run('INSERT INTO image_generation_events VALUES(?,?,?,?,?,?)',randomUUID(),row.run_id,'output_permanently_deleted','creator',JSON.stringify({media_id:id}),new Date().toISOString());
+    const generationRuns=new Set();for(const table of ['image_generation_outputs','image_generation_output_items'])if(hasTable(table))for(const row of all('SELECT run_id FROM '+table+' WHERE media_id=?',id))generationRuns.add(row.run_id);
+    for(const runId of generationRuns){
+      run("UPDATE image_generation_runs SET status='withdrawn' WHERE id=?",runId);
+      run('INSERT INTO image_generation_events VALUES(?,?,?,?,?,?)',randomUUID(),runId,'output_permanently_deleted','creator',JSON.stringify({media_id:id}),new Date().toISOString());
     }
     run('DELETE FROM image_generation_outputs WHERE media_id=?',id);
+    if(hasTable('image_generation_output_items'))run('DELETE FROM image_generation_output_items WHERE media_id=?',id);
     for(const row of all("SELECT id,payload_json FROM mcp_reference_changes WHERE status IN ('pending','approved')")){const p=JSON.parse(row.payload_json);if([...(p.before||[]),...(p.after||[])].some(r=>r.media_id===id))run("UPDATE mcp_reference_changes SET status='conflict' WHERE id=?",row.id);}
     run('DELETE FROM application_settings WHERE key=?','erased_media:'+id);
     run('DELETE FROM media WHERE id=?',id);

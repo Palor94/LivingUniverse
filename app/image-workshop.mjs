@@ -1,3 +1,4 @@
+import {cloudAvailabilityMany} from './duplicates.mjs';
 // Képműhely (image workshop): one desktop place for getting pictures ready for use.
 //  1. inbox       – every active picture/video with its preparation steps (local signals,
 //                   duplicate check, who is on it, content level, AI tags) and the next one.
@@ -40,7 +41,7 @@ export function installImageWorkshop({db,root,one,all,run,fail,dataDir,playAsset
   // ---- 1. inbox ------------------------------------------------------------------------
   // One row per active media item (Play display copies and their sources excluded) with a
   // flag per step. Ready for use = local signals, no open duplicate, people known, level known.
-  const stepSql=`SELECT m.id,m.kind,m.relative_path,m.created_at,
+  const stepSql=`SELECT m.id,m.kind,m.relative_path,m.created_at,m.size,m.modified_at,
       EXISTS(SELECT 1 FROM media_signals s WHERE s.media_id=m.id AND s.error IS NULL AND (s.dhash IS NOT NULL OR m.kind='video')) sig,
       EXISTS(SELECT 1 FROM media_signals s JOIN media_signals s2 ON s2.group_id=s.group_id AND s2.media_id<>s.media_id JOIN active_media m2 ON m2.id=s2.media_id
         WHERE s.media_id=m.id AND s.group_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM media_signal_distinct x WHERE x.media_id IN (m.id,s2.media_id))) dup,
@@ -52,7 +53,7 @@ export function installImageWorkshop({db,root,one,all,run,fail,dataDir,playAsset
     FROM active_media m WHERE NOT EXISTS(SELECT 1 FROM play_asset_sources a WHERE a.media_id=m.id) AND NOT (${planningSQL})`; // Ötletláda pictures are ideas, not sorting work
   const stateOf=r=>({signals:!!r.sig,duplicate:!r.dup,people:!!r.people,content:!!r.content,tagged:!!r.tagged});
   const nextOf=s=>STEPS.find(k=>!s[k])||null;
-  function inbox({missing='any',character_id=null,limit=30,offset=0}={}){
+  async function inbox({missing='any',character_id=null,limit=30,offset=0}={}){
     if(!['any','ready',...STEPS].includes(missing))throw fail('Unknown step.');
     if(character_id!==null&&!/^[0-9a-f-]{36}$/i.test(String(character_id)))throw fail('Unknown character.');
     const lim=Math.max(1,Math.min(100,Number(limit)||30)),skip=Math.max(0,Number(offset)||0);
@@ -65,7 +66,8 @@ export function installImageWorkshop({db,root,one,all,run,fail,dataDir,playAsset
     const cast=new Map();for(const p of page)cast.set(p.r.id,[]);
     if(page.length)for(const d of all(`SELECT media_id,character_id FROM depictions WHERE media_id IN (${page.map(()=>'?').join(',')})`,...page.map(p=>p.r.id)))cast.get(d.media_id)?.push({id:d.character_id,name:n.get(d.character_id)||'?'});
     const levels=new Map(page.length?all(`SELECT m.id,${level} level FROM active_media m WHERE m.id IN (${page.map(()=>'?').join(',')})`,...page.map(p=>p.r.id)).map(x=>[x.id,x.level]):[]);
-    return {counts,total:pick.length,offset:skip,items:page.map(({r,s,ready})=>({media_id:r.id,kind:r.kind,file:path.basename(r.relative_path),folder:path.dirname(r.relative_path),created_at:r.created_at,
+    const availability=await cloudAvailabilityMany(page.map(({r})=>path.resolve(root,r.relative_path)));
+    return {counts,total:pick.length,offset:skip,items:page.map(({r,s,ready})=>({media_id:r.id,kind:r.kind,file:path.basename(r.relative_path),folder:path.dirname(r.relative_path),created_at:r.created_at,size:r.size,availability:availability.get(path.resolve(root,r.relative_path))||'unknown',
       steps:s,ready,next:ready?(s.tagged?null:'tagged'):nextOf(s),people:cast.get(r.id),level:levels.get(r.id)||null}))};
   }
   function flagNoCharacters(mediaId,value){
@@ -98,7 +100,7 @@ export function installImageWorkshop({db,root,one,all,run,fail,dataDir,playAsset
       if(out.length>=Math.max(1,Math.min(100,Number(limit)||40)))break;
     }
     // Paid-API outputs (image generation runs) that are not placed in Play.
-    if(hasTable('image_generation_outputs'))for(const o of all(`SELECT o.media_id,o.created_at,o.run_id FROM image_generation_outputs o JOIN active_media m ON m.id=o.media_id ORDER BY o.created_at DESC LIMIT 100`)){
+    if(hasTable('image_generation_outputs'))for(const o of all(`SELECT o.media_id,o.created_at,o.run_id FROM (SELECT run_id,media_id,created_at FROM image_generation_outputs UNION SELECT run_id,media_id,created_at FROM image_generation_output_items) o JOIN active_media m ON m.id=o.media_id ORDER BY o.created_at DESC LIMIT 100`)){
       if(seen.has(o.media_id))continue;const v=verdicts.get(o.media_id);if(status==='open'&&v||status==='done'&&!v)continue;
       const cid=one('SELECT character_id FROM depictions WHERE media_id=? LIMIT 1',o.media_id)?.character_id||null,s=one('SELECT width,height FROM media_signals WHERE media_id=?',o.media_id);
       out.push({item_key:o.media_id,target:'generated',source:'API',image:'/media/'+encodeURIComponent(o.media_id),character_id:cid,name:cid?n.get(cid)||'?':null,location_id:null,location:null,created_at:o.created_at,
@@ -255,7 +257,12 @@ export function installImageWorkshop({db,root,one,all,run,fail,dataDir,playAsset
   async function handle({p,req,url,body,json}){
     if(!p.startsWith('/api/workshop/'))return false;
     const q=url?.searchParams;
-    if(p==='/api/workshop/inbox'&&req.method==='GET')return json(inbox({missing:q?.get('missing')||'any',character_id:q?.get('character')||null,limit:q?.get('limit'),offset:q?.get('offset')})),true;
+    if(p==='/api/workshop/inbox'&&req.method==='GET')return json(await inbox({missing:q?.get('missing')||'any',character_id:q?.get('character')||null,limit:q?.get('limit'),offset:q?.get('offset')})),true;
+    if(p==='/api/workshop/hydrate'&&req.method==='POST'){
+      const ids=body?.media_ids;if(!Array.isArray(ids)||!ids.length||ids.length>10||ids.some(id=>typeof id!=='string'||!/^[a-f0-9-]{36}$/i.test(id)))throw fail('Válassz legfeljebb tíz letöltendő képet.');const done=[];
+      for(const id of new Set(ids)){const media=one('SELECT * FROM active_media WHERE id=?',id);if(!media||media.size>100*1024*1024)throw fail('A fájl nem érhető el vagy túl nagy.');const parts=media.relative_path.split(/[\\/]/);if(parts.some(part=>!part||part==='.'||part==='..'||part.includes(':')))throw fail('Érvénytelen fájlútvonal.');let file=root;for(const part of parts){file=path.join(file,part);if((await fs.lstat(file)).isSymbolicLink())throw fail('A fájlútvonal hivatkozást tartalmaz.');}const relative=path.relative(await fs.realpath(root),await fs.realpath(file));if(!relative||relative.startsWith('..')||path.isAbsolute(relative))throw fail('A fájl a médiamappán kívül van.');const handle=await fs.open(file,'r');try{const buffer=Buffer.alloc(262144);let total=0;for(;;){const {bytesRead}=await handle.read(buffer);if(!bytesRead)break;total+=bytesRead;if(total>100*1024*1024)throw fail('A fájl túl nagy.');}}finally{await handle.close();}done.push(id);}
+      return json({downloaded:done}),true;
+    }
     if(p==='/api/workshop/inbox/no-characters'&&req.method==='POST')return json(flagNoCharacters(body?.media_id,body?.value)),true;
     if(p==='/api/workshop/generation'&&req.method==='GET'){const needs=await playAssets.needs({limit:60});return json({...needs,jobs:playAssets.jobs({limit:40}).jobs}),true;}
     if(p==='/api/workshop/generation/brief'&&req.method==='GET'){const a={};for(const k of ['target','character_id','location_id','expression','outfit','time_of_day'])if(q?.get(k))a[k]=q.get(k);return json(await playAssets.brief(a)),true;}

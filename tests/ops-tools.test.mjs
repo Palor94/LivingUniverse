@@ -1,18 +1,36 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {readOnlyGuard} from '../ops/sandbox.mjs';
+import {readOnlyGuard,sandboxStatusGuard} from '../ops/sandbox.mjs';
+import {allowedShotRequest} from '../ops/ui-shots.mjs';
 import {relatedTests} from '../ops/test.mjs';
 import {describe} from '../ops/doctor.mjs';
+
+test('T0 accepts only loopback sandbox reads, never time, travel, AI or outside requests',()=>{
+  assert.equal(allowedShotRequest('http://127.0.0.1:4327/api/state','GET'),true);
+  for(const route of ['/api/play/wait','/api/play/travel','/api/play/talk','/api/quick-tag/sync'])
+    assert.equal(allowedShotRequest('http://127.0.0.1:4327'+route,'POST'),false);
+  for(const url of ['http://127.0.0.1:4317/api/state','https://example.com/a','http://127.0.0.1:4327.example.com/a'])
+    assert.equal(allowedShotRequest(url,'GET'),false);
+});
+
+test('sandbox marker identifies only the sandbox wrapper and preserves other routes',()=>{
+  let passed=0,status,body;
+  const handler=sandboxStatusGuard(()=>passed++);
+  const res={writeHead(value){status=value;},end(value){body=JSON.parse(value);}};
+  handler({method:'GET',url:'/api/dev/sandbox-status'},res);
+  assert.equal(status,200);assert.deepEqual(body,{sandbox:true,ai:'mock'});assert.equal(passed,0);
+  handler({method:'GET',url:'/api/state'},res);assert.equal(passed,1);
+});
 
 test('sandbox read-only guard lets reads and database-only writes through',()=>{
   const seen=[];const handler=(req)=>seen.push(req.method+' '+req.url);
   const guard=readOnlyGuard(handler);
   const res=()=>({status:0,body:'',writeHead(s){this.status=s;},end(b){this.body=b;}});
-  for(const [method,url,passes] of [['GET','/api/state',true],['POST','/api/play/talk',true],['POST','/api/dev/restart',true],['POST','/api/characters',false],['POST','/api/media/placement/apply',false],['DELETE','/api/characters/x',false],['POST','/api/workshop/ideas',false]]){
+  for(const [method,url,passes] of [['GET','/api/state',true],['POST','/api/play/talk',true],['POST','/api/dev/restart',true],['POST','/api/dev-tasks',true],['POST','/api/dev-tasks/unrelated',false],['POST','/api/characters',false],['POST','/api/media/placement/apply',false],['DELETE','/api/characters/x',false],['POST','/api/workshop/ideas',false]]){
     const r=res();guard({method,url,resume(){}},r);
     assert.equal(r.status===403,!passes,method+' '+url);
   }
-  assert.deepEqual(seen,['GET /api/state','POST /api/play/talk','POST /api/dev/restart']);
+  assert.deepEqual(seen,['GET /api/state','POST /api/play/talk','POST /api/dev/restart','POST /api/dev-tasks']);
 });
 
 test('changed files pick their tests',()=>{

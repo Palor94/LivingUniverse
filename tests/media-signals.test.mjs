@@ -41,15 +41,15 @@ test('signals: browser results are stored, near-duplicates grouped per cast, sti
   const transaction=fn=>{db.exec('BEGIN');try{const r=fn();db.exec('COMMIT');return r;}catch(e){db.exec('ROLLBACK');throw e;}};
   const fail=(m,s=400)=>Object.assign(Error(m),{status:s});
   for(const [id,kind,cast] of [['p1','image','A'],['p2','image','A'],['p3','image','B'],['v1','video','A']]){run('INSERT INTO media VALUES(?,?,?)',id,id+(kind==='video'?'.mp4':'.jpg'),kind);run('INSERT INTO depictions VALUES(?,?)',id,cast);}
-  const s=installMediaSignals({db,one,all,run,transaction,fail,root,dataDir});
-  assert.deepEqual(s.queue(10).items.map(i=>i.id),['p1','p2','p3','v1']);
+  const s=installMediaSignals({db,one,all,run,transaction,fail,root,dataDir,availability:async files=>new Map(files.map(file=>[file,'local']))});
+  assert.deepEqual((await s.queue(10)).items.map(i=>i.id),['p1','p2','p3','v1']);
   const jpeg=Buffer.from([0xff,0xd8,0xff,0xd9]).toString('base64');
   await s.ingest([{media_id:'p1',dhash:'0000000000000000'},{media_id:'p2',dhash:'0000000000000003'},{media_id:'p3',dhash:'0000000000000000'},
     {media_id:'v1',duration:15,frames:[{t:0,data_url:'data:image/jpeg;base64,'+jpeg,dhash:'0000000000000000'},{t:4,data_url:'data:image/jpeg;base64,'+jpeg}]}]);
   s.flush();// grouping is debounced after ingest; run it now
   const g=id=>one('SELECT group_id FROM media_signals WHERE media_id=?',id).group_id;
   assert.ok(g('p1')&&g('p1')===g('p2'),'2 bits apart, same people → one group');assert.equal(g('p3'),null,'same picture hash but other people → not grouped');
-  assert.equal(s.queue(10).items.length,0);
+  assert.equal((await s.queue(10)).items.length,0);
   const frames=all('SELECT t,file FROM media_video_frames ORDER BY t');assert.deepEqual(frames.map(f=>f.t),[0,4]);
   assert.ok((await fs.stat(path.join(dataDir,'video-frames',frames[0].file))).isFile());
   await assert.rejects(s.ingest([{media_id:'v1',frames:[{t:8,data_url:'data:image/png;base64,AAAA'}]}]),/JPEG/);
