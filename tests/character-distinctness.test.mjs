@@ -9,6 +9,7 @@ import {createApp} from '../app/server.mjs';
 import {createMockProvider} from '../app/world-ai.mjs';
 import {defaultTemplate} from '../app/ghost-profile.mjs';
 import {innerCoverage,characterOnly,distinctness,similarity} from '../app/character-distinctness.mjs';
+import {appraisalLines,appraiseEvent} from '../app/appraisal.mjs';
 import {castProfileTexts,GROUP_LEVELS,profileText,CARD_HEAD,SECRET_HEAD,GROUP_SECRET_HEAD} from '../app/profile-prompt.mjs';
 
 const entry=value=>({value,interpretation:'',kind:'hypothesis',source:'teszt',visibility:'creator'});
@@ -77,6 +78,8 @@ test('same situation, five people: inner life reaches the 1:1 prompt and the gro
   assert.ok(bela.includes(SECRET_HEAD)&&bela.includes('TITOK-BELA'));
   for(const [i,u] of talk.entries())if(people[i].name!=='Teszt Béla')assert.ok(!u.includes('TITOK-BELA'),'nobody else gets his secret in a 1:1');
   for(const c of inGroup)if(CAST[c.name].secrets)assert.ok(blocks[c.name].includes(GROUP_SECRET_HEAD)&&blocks[c.name].includes(CAST[c.name].secrets));
+  // E3: the appraisal block is in his own prompt.
+  assert.ok(talk.every(u=>u.includes('ÍGY HAT RÁD, AMI TÖRTÉNIK')));
   // E11: the whole inner life is there in company too.
   for(const c of groupCoverage)assert.equal(c.ratio,1,c.name+' misses in group: '+c.missing.join(', '));
 });
@@ -125,4 +128,17 @@ test('E10 template: a saved template from before the card gets the card fields o
   assert.equal(read('ghost:template-history:8').actor,'code:E10-character-card');
   assert.equal(read('ghost:character:x').values.goals.value,'Megtartani.');
   await app.close();app=await createApp(opts);assert.equal(read('ghost:template').version,8,'only once');await app.close();
+});
+
+test('E3 appraisal: the same missed date hits five people five ways; unknown scales say nothing',()=>{
+  const read=name=>appraiseEvent(profileOf(CAST[name]),'missed_date');
+  assert.match(read('Teszt Aladár'),/elutasításként/);
+  assert.match(read('Teszt Béla'),/sértésként/);assert.doesNotMatch(read('Teszt Béla'),/elutasításként/);
+  assert.match(read('Teszt Csaba'),/megkönnyebbültél/);
+  assert.match(read('Teszt Dénes'),/elutasításként.*bizalmadat.*hamar kibillen/);
+  assert.equal(read('Teszt Ernő'),'','no motive that a missed date touches');
+  assert.deepEqual(appraisalLines(profileOf({goals:'x'})),[]);
+  const blocks=Object.values(CAST).map(v=>appraisalLines(profileOf(v)).join('\n'));
+  const d=distinctness(blocks);assert.ok(d.mean>0.5,'appraisal blocks differ: '+d.mean.toFixed(2));
+  assert.match(appraisalLines(profileOf(CAST['Teszt Csaba'])).join('\n'),/tolakodásnak.*\n[^]*nem mutatja ki/);
 });

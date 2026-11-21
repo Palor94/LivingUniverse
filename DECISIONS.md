@@ -1542,3 +1542,10 @@ Before: "HANGULATOD MA" came from a word test over the day's event titles (same 
 
 Patterns: Generative Agents scratch "currently" / revise_identity (Apache-2.0), AI Town perspective summaries (MIT), Covel memory blocks vs facts (MIT); rewritten.
 Not yet: group-scene save points do not write inner states; no nightly update (both later). Validation: tests/inner-state.test.mjs; 65 related test files: no new failures against the baseline. Rollback: revert the commit; the table may stay (unused) or be dropped with 033-inner-state.down.sql.
+
+
+2026-11-21: E3 – motive-based appraisal (the same event hits people differently)
+
+New app/appraisal.mjs, deterministic and offline, from the Szellemprofil scales only (unknown scales say nothing): appraisalLines() gives up to three motive lines, strongest first (attachment, recognition, autonomy, security, reward; high ≥7 or low ≤3 of 10), and one line on how it shows (emotional stability, expressiveness, directness, bluntness, sarcasm, agreeableness). appraiseEvent() gives a person-specific reading of a missed date or a broken promise (rejection / insult / shaken trust / relief / does not mind). His 1:1 prompt gets "ÍGY HAT RÁD, AMI TÖRTÉNIK" (adjust your reaction, do not say it); the missed-date and lapsed-promise notes get his reading; group blocks get it in the third person. No model call, no data change. The poignancy idea of Generative Agents (Apache-2.0) made person-specific; the chain is this project's own.
+
+Validation: five synthetic profiles read the same missed date five ways; appraisal blocks differ (mean distinctness > 0.5); related tests: no new failures against the baseline. Rollback: revert the commit.

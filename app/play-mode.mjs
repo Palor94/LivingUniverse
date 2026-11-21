@@ -19,6 +19,7 @@ import {createPlayScenes} from './play/scenes.mjs';
 import {palorVoice,speechOf,PALOR_VOICE_HEAD,CHOICE_RULES} from './play/palor-voice.mjs';
 import {castProfileTexts} from './profile-prompt.mjs';
 import {innerInstruction} from './inner-state.mjs';
+import {appraisalLines,appraiseEvent} from './appraisal.mjs';
 import {createPlayRecords} from './play/records.mjs';
 import {TALK_MINUTES} from './game-clock.mjs';
 import {kindOf,KIND_LABEL,chains,anchorOf as siteOf,townOf,travelMinutes,vehicleOwner,rollEncounter,isSettlement,isRegion,isPassage,isOriginName,originChild,originIndex,arrivalOf,passagesOf,travelOptions,trainBetween,TRAVEL_MODES,walkOnly,bikeAllowed,trainRunsAt,ridesWith,transportPlace,tripScenePlaces,rollRoadside} from './place-network.mjs';
@@ -1160,13 +1161,13 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     // Promises and plans between them; a lapsed one is brought up once.
     const threads=w.openThreadsFor(cid,k.day);
     const threadText=[...threads.open.map(t=>`- ${t.promised_by==='palor'?'Palor ígérte':'Te ígérted'}: ${clip(t.text,200)}${t.due_day?' (esedékes: '+t.due_day+')':''}`),
-      ...threads.lapsed.map(t=>`- ELMARADT: ${t.promised_by==='palor'?'Palor nem tartotta meg':'te nem tartottad meg'}: ${clip(t.text,200)} (szóvá teheted, a természeted szerint)`)].join('\n');
+      ...threads.lapsed.map(t=>`- ELMARADT: ${t.promised_by==='palor'?'Palor nem tartotta meg':'te nem tartottad meg'}: ${clip(t.text,200)} (szóvá teheted, a természeted szerint)`),...(threads.lapsed.length&&appraiseEvent(c.profile,'broken_promise')?['  '+appraiseEvent(c.profile,'broken_promise')]:[])].join('\n');
     const paceNote=body.pace==='slower'?'Palor lassítani szeretne: maradjatok a mostani ponton, gyengédebben, ne lépj tovább a jelenetben.':body.pace==='continue'?'Palor szeretné folytatni: ha te is akarod, mehettek tovább.':stopping?'Palor megállt. Az intim jelenet itt véget ér: tiszteld, reagálj kedvesen, és ne folytasd.':'';
     // Dates (2026-11-11): Palor arriving for a date they arranged, or having missed one.
     const date=channel==='in_person'&&here?.location_id?one("SELECT d.appointment_id,d.met_at FROM play_dates d JOIN play_appointments a ON a.id=d.appointment_id WHERE a.character_id=? AND a.world_day=? AND a.slot=? AND a.location_id=? AND a.status='accepted'",cid,k.day,SLOTS[k.slot_index].id,here.location_id):null;
     const missed=all("SELECT d.appointment_id,a.world_day,a.slot,l.name place FROM play_dates d JOIN play_appointments a ON a.id=d.appointment_id LEFT JOIN locations l ON l.id=a.location_id WHERE a.character_id=? AND a.status='accepted' AND d.met_at IS NULL AND d.missed_noted_at IS NULL",cid)
       .filter(x=>x.world_day<k.day||(x.world_day===k.day&&SLOTS.findIndex(s=>s.id===x.slot)<k.slot_index))[0]||null;
-    const dateNote=[date?`RANDEVÚ: ezt a találkozót Palorral beszéltétek meg ide, erre a napszakra${date.met_at?', és már itt vagytok együtt':', és Palor most megérkezett'}.`:'',missed?`ELMARADT RANDEVÚ: Palor nem jött el a megbeszélt találkozóra (${missed.world_day}, ${SLOTS.find(s=>s.id===missed.slot)?.label||''}${missed.place?', '+missed.place:''}). Ezt szóvá teheted; csalódott vagy sértett is lehetsz, a természeted szerint.`:''].filter(Boolean).join('\n');
+    const dateNote=[date?`RANDEVÚ: ezt a találkozót Palorral beszéltétek meg ide, erre a napszakra${date.met_at?', és már itt vagytok együtt':', és Palor most megérkezett'}.`:'',missed?`ELMARADT RANDEVÚ: Palor nem jött el a megbeszélt találkozóra (${missed.world_day}, ${SLOTS.find(s=>s.id===missed.slot)?.label||''}${missed.place?', '+missed.place:''}). Ezt szóvá teheted; csalódott vagy sértett is lehetsz, a természeted szerint.${appraiseEvent(c.profile,'missed_date')?' '+appraiseEvent(c.profile,'missed_date'):''}`:''].filter(Boolean).join('\n');
     const longTalk=history.length>=14?'A beszélgetés már hosszú: ha természetes, kezdd el lezárni (búcsú, teendő, más elfoglaltság).':'';
     const corrections=directorText(cid);
     const user=['PROFILOD:\n'+w.profileText(c.profile,{explicit:intimate||(stage==='intimate'&&channel!=='phone'),secrets:true}),
@@ -1180,6 +1181,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       'LEGUTÓBB PALORRAL: '+(lastTalk?lastTalk+sinceText:'még nem beszélgettetek'),
       // E2 (2026-11-21): his carried inner state; the day's events stay as background.
       ...(innerLines.length?['A MAI NAPOD: '+mood.text+(placeRole&&ROLE_CONTEXT[placeRole]?' '+ROLE_CONTEXT[placeRole]:''),...innerLines]:['HANGULATOD MA: '+mood.text+(placeRole&&ROLE_CONTEXT[placeRole]?' '+ROLE_CONTEXT[placeRole]:'')]),
+      // E3 (2026-11-21): how things hit him, from his motives and temperament.
+      ...(()=>{const ap=appraisalLines(c.profile);return ap.length?[ap.join('\n')]:[];})(),
       'EMLÉKEID:\n'+(memories.map(m=>'- '+clip(m,300)).join('\n')||'nincs'),
       'MA VELED TÖRTÉNT:\n'+(today.map(e=>`- ${e.title}: ${clip(e.summary,200)}`).join('\n')||'semmi különös'),
       ...(gossip.length?['MA HALLOTTAD AZ ISMERŐSEIDRŐL (szóba hozhatod, ha illik):\n'+gossip.map(e=>`- ${e.title}: ${clip(e.summary,160)}`).join('\n')]:[]),
@@ -1301,7 +1304,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const block=c=>{const level=w.levelOf(c.id,pid);const note=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,pid)?.description||'';
       const others=people.filter(o=>o.id!==c.id).map(o=>{const r=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,o.id)?.description;return r?`${o.name}: ${clip(r,200)}`:'';}).filter(Boolean);
       const fix=directorText(c.id);
-      return `## ${c.name}\nPROFIL:\n${castText.texts[people.indexOf(c)]}${fix?'\n'+fix:''}${w.inner?w.inner.promptLines(c.id,k.day,c.profile,{person:'ő'}).map(x=>'\n'+x).join(''):''}\nKAPCSOLATA PALORRAL [${LEVELS[level??0]}]: ${clip(note,600)||'nincs megadva'}\nMOST ÉPPEN: ${activityOf(c.id,here.location_id)}${others.length?'\nA TÖBBIEKHEZ: '+others.join('; '):''}`;};
+      return `## ${c.name}\nPROFIL:\n${castText.texts[people.indexOf(c)]}${fix?'\n'+fix:''}${w.inner?w.inner.promptLines(c.id,k.day,c.profile,{person:'ő'}).map(x=>'\n'+x).join(''):''}${appraisalLines(c.profile,{person:'ő'}).map(x=>'\n'+x).join('')}\nKAPCSOLATA PALORRAL [${LEVELS[level??0]}]: ${clip(note,600)||'nincs megadva'}\nMOST ÉPPEN: ${activityOf(c.id,here.location_id)}${others.length?'\nA TÖBBIEKHEZ: '+others.join('; '):''}`;};
     // Same anti-repeat and suggestion inputs as a one-on-one talk (2026-11-15).
     const ownLast=history.filter(l=>l.speaker!=='palor').slice(-4).map(l=>'- '+(l.speaker_name?l.speaker_name+': ':'')+clip(l.text,300));
     const palorLast=history.filter(l=>l.speaker==='palor').slice(-3).map(l=>clip(l.text,200));
