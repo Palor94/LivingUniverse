@@ -14,6 +14,10 @@ import {readFileSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 
 export const MAX_TOLD=4,REFLECT_AFTER=8,REFLECT_PER_ROUND=2,BELIEFS_PER_REFLECTION=3;
+// E8 (2026-11-21): reflection is due when the new memories weigh enough (importance 1–5, 3 when
+// unknown), not by count: the same as 8 ordinary memories, sooner after turning points, later
+// after small talk. After Generative Agents importance_trigger (Apache-2.0) and AI Town (MIT).
+export const REFLECT_IMPORTANCE=REFLECT_AFTER*3;
 const FRESH_DAYS=14;
 const clip=(s,n)=>{s=String(s??'').replace(/\s+/g,' ').trim();return s.length>n?s.slice(0,n-1)+'…':s;};
 const addDays=(day,n)=>{const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
@@ -59,10 +63,14 @@ export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()})
   // Opinions from conversations (E12) do not count as a reflection.
   const lastBeliefAt=cid=>one("SELECT max(created_at) t FROM world_beliefs WHERE character_id=? AND rewound_at IS NULL AND model<>'play-opinion'",cid)?.t||'';
   const newMemories=cid=>all("SELECT id,text FROM character_memories WHERE character_id=? AND status='approved' AND created_at>? ORDER BY rowid DESC LIMIT 20",cid,lastBeliefAt(cid)).reverse();
-  const due=cast=>cast.filter(c=>newMemories(c.id).length>=REFLECT_AFTER).slice(0,REFLECT_PER_ROUND);
+  const hasSalience=()=>!!one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_salience'");
+  const weight=cid=>{const ms=newMemories(cid);if(!ms.length)return 0;if(!hasSalience())return ms.length*3;
+    const imp=new Map(all(`SELECT memory_id,importance FROM memory_salience WHERE memory_id IN (${ms.map(()=>'?').join(',')})`,...ms.map(m=>m.id)).map(r=>[r.memory_id,r.importance]));
+    return ms.reduce((n,m)=>n+(imp.get(m.id)??3),0);};
+  const due=cast=>cast.filter(c=>weight(c.id)>=REFLECT_IMPORTANCE).slice(0,REFLECT_PER_ROUND);
 
   function reflectionPrompt(c,memories,people){
-    const system=`${c.name} belső hangja vagy egy élő világban. A friss emlékei alapján fogalmazz meg legfeljebb ${BELIEFS_PER_REFLECTION} rövid, szubjektív véleményt emberekről, ahogy ő látja őket (tévedhet, lehet elfogult). Csak az emlékekben szereplő emberekről, csak abból, ami az emlékekben van; ne találj ki új tényt. Minden véleményhez add meg, mely emlékekre épül (sorszám). Csak JSON, magyarul: {"beliefs":[{"about":"név","text":"egy mondat","memories":[1,2]}]}`;
+    const system=`${c.name} belső hangja vagy egy élő világban. A friss emlékei alapján fogalmazz meg legfeljebb ${BELIEFS_PER_REFLECTION} rövid, szubjektív véleményt emberekről, ahogy ő látja őket (tévedhet, lehet elfogult). Csak az emlékekben szereplő emberekről, csak abból, ami az emlékekben van; ne találj ki új tényt. Minden véleményhez add meg, mely emlékekre épül (sorszám). Csak JSON, magyarul: {"beliefs":[{"about":"név","text":"egy mondat","memories":[1,2]}]} Mielőtt válaszolsz, gondold végig (nem kell leírnod), mi most a legfontosabb kérdés az életében, és ebből indulj ki. Ha az emlékei alapján változott, ahogyan önmagát látja, add meg ezt is egy mondatban: "self":{"text":"...","memories":[sorszámok]} (különben hagyd el).`;
     const user='FRISS EMLÉKEID:\n'+memories.map((m,i)=>`${i+1}. ${clip(m.text,300)}`).join('\n')+'\n\nISMERT EMBEREK: '+people.join(', ');
     return {system,user,maxTokens:500};
   }
@@ -86,6 +94,11 @@ export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()})
         run('INSERT INTO world_beliefs(id,character_id,about_id,about_name,text,memory_ids_json,world_day,model,created_at,rewound_at) VALUES(?,?,?,?,?,?,?,?,?,NULL)',id,c.id,about.id,about.name,clip(b.text,300),JSON.stringify([...new Set(refs)]),day,model,iso());
         written.push({id,character_id:c.id,about:about.name});
       }
+      // E8: how he sees himself now, resting on his memories like any belief.
+      const self=out?.self,selfRefs=(Array.isArray(self?.memories)?self.memories:[]).map(Number).filter(i=>Number.isInteger(i)&&memories[i-1]).map(i=>memories[i-1].id);
+      if(typeof self?.text==='string'&&self.text.trim()&&selfRefs.length){const id=randomUUID();
+        run('INSERT INTO world_beliefs(id,character_id,about_id,about_name,text,memory_ids_json,world_day,model,created_at,rewound_at) VALUES(?,?,?,?,?,?,?,?,?,NULL)',id,c.id,c.id,'önmaga',clip(self.text,300),JSON.stringify([...new Set(selfRefs)]),day,model,iso());
+        written.push({id,character_id:c.id,about:'önmaga'});}
       // Nothing usable still counts as a reflection (an empty marker row), so a broken answer is
       // not paid for again on every round; it waits for the next batch of new memories.
       if(!written.some(w=>w.character_id===c.id))run("INSERT INTO world_beliefs(id,character_id,about_id,about_name,text,memory_ids_json,world_day,model,created_at,rewound_at) VALUES(?,?,NULL,'','','[]',?,?,?,NULL)",randomUUID(),c.id,day,model,iso());
@@ -97,9 +110,11 @@ export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()})
     const rows=all("SELECT about_id,about_name,text FROM world_beliefs WHERE character_id=? AND rewound_at IS NULL AND text<>'' ORDER BY created_at DESC LIMIT 40",cid);
     const seen=new Set(),out=[];
     // A topic opinion (E12) has no person id: it is kept apart by its name.
-    for(const r of rows){const key=r.about_id||'topic:'+r.about_name.toLocaleLowerCase('hu');if(seen.has(key)||(aboutIds.length&&!aboutIds.includes(r.about_id)))continue;seen.add(key);out.push(r);if(out.length>=4)break;}
+    for(const r of rows){if(r.about_id===cid)continue;const key=r.about_id||'topic:'+r.about_name.toLocaleLowerCase('hu');if(seen.has(key)||(aboutIds.length&&!aboutIds.includes(r.about_id)))continue;seen.add(key);out.push(r);if(out.length>=4)break;}
     return out;
   }
+  // How he sees himself now (E8): the newest self-belief, or null.
+  const selfView=cid=>one("SELECT text,world_day FROM world_beliefs WHERE character_id=? AND about_id=? AND rewound_at IS NULL AND text<>'' ORDER BY created_at DESC LIMIT 1",cid,cid)||null;
   // Opinions from a conversation (E12, 2026-11-21): what he thought of someone he talked about, or
   // of a recurring topic, from his side. After Generative Agents convo_to_thoughts /
   // keyword_to_thoughts (Apache-2.0). Stored beside reflection beliefs (model 'play-opinion'),
@@ -135,5 +150,5 @@ export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()})
     for(const id of beliefs)run('UPDATE world_beliefs SET rewound_at=NULL WHERE id=?',id);
     for(const k of knowledge)run('UPDATE world_knowledge SET rewound_at=NULL WHERE event_id=? AND character_id=?',k.event_id,k.character_id);
   }
-  return {spread,reflect,due,beliefsFor,addOpinions,overview,rewindAfter,undoRewind,knownEvents};
+  return {spread,reflect,due,beliefsFor,selfView,addOpinions,overview,rewindAfter,undoRewind,knownEvents};
 }

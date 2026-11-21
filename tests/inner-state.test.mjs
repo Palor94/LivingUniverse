@@ -53,11 +53,14 @@ test('inner state: written at the save point from his side, in his next prompt, 
   const st=app.worldEngine.internals.inner.current(a.id);
   assert.deepEqual([st.mood,st.intensity,st.concerns.length,st.wants_from_palor],['megbántott',3,2,'egy őszinte bocsánatkérést']);
 
+  // E8: a self-view from an earlier reflection reaches his prompt.
+  app.db.prepare("INSERT INTO world_beliefs(id,character_id,about_id,about_name,text,memory_ids_json,world_day,model,created_at,rewound_at) VALUES('sv',?,?,'önmaga','Túl sokat vállalok magamra.','[\"m\"]','2026-11-09','mock','2026-11-09T10:00:00Z',NULL)").run(a.id,a.id);
   // Second talk: his state is in his own prompt; the day's events are only background.
   talk=(await call('/api/play/talk',{character_id:a.id,text:'Szia megint!'})).data;let u=requests.at(-1).user;
   assert.match(u,/HANGULATOD: nagyon megbántott \(Palor elfelejtette a születésnapját\.\)/);
   assert.match(u,/AMI MOST FOGLALKOZTAT[^\n]*\n- a lakbér miatt aggódik\n- ki akar békülni az öccsével/);
   assert.match(u,/AMIT PALORTÓL SZERETNÉL: egy őszinte bocsánatkérést/);assert.match(u,/A MAI NAPOD: /);
+  assert.match(u,/AHOGY MOSTANÁBAN MAGADAT LÁTOD[^:]*: Túl sokat vállalok magamra\./);
   // E12: his opinions from the last talk – about Béla (matched by first name) and about money.
   assert.match(u,/A VÉLEMÉNYED[^\n]*\n(- [^\n]*\n)*- Teszt Béla: Béla irigy rá/);assert.match(u,/- pénz: A pénz miatt örökké aggódni kell\./);
   assert.doesNotMatch(u,/NEM-IDE/,'no opinion about Palor here (his view of Palor is palor_view)');

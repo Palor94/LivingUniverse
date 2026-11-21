@@ -79,3 +79,27 @@ test('reflection: only after enough new memories, beliefs about known people res
   for(let i=0;i<REFLECT_AFTER;i++)w.remember(w.ids.Béla,'Új emlék '+i,'c'+i);
   await assert.rejects(w.social.reflect(cast,'2026-11-12',{ask:async()=>{throw Object.assign(Error('cap'),{code:'CAP_REACHED'});},model:'mock',people}),/cap/);
 });
+
+test('E8 reflection: due by weight of the new memories; how he sees himself is kept apart from opinions',async()=>{
+  const w=world();
+  w.db.exec('CREATE TABLE memory_salience(memory_id TEXT PRIMARY KEY,importance INTEGER NOT NULL DEFAULT 3,recall_count INTEGER NOT NULL DEFAULT 0,last_recalled_day TEXT)');
+  const cast=[{id:w.ids.Ádám,name:'Ádám'},{id:w.ids.Béla,name:'Béla'}],people=()=>w.all('SELECT id,name FROM characters');
+  const weighted=(cid,text,imp)=>{w.remember(cid,text,'x');const id=w.one('SELECT id FROM character_memories ORDER BY rowid DESC LIMIT 1').id;w.run('INSERT INTO memory_salience(memory_id,importance) VALUES(?,?)',id,imp);};
+  // Five turning points are enough; ten small things are not.
+  for(let i=0;i<5;i++)weighted(w.ids.Ádám,`Fordulópont ${i}: Palor cserben hagyta.`,5);
+  for(let i=0;i<10;i++)weighted(w.ids.Béla,`Apróság ${i}.`,1);
+  assert.deepEqual(w.social.due(cast).map(c=>c.name),['Ádám']);
+  const calls=[];
+  const ask=async(system,user)=>{calls.push({system,user});return {beliefs:[{about:'Palor',text:'Palorra nem lehet számítani.',memories:[1,2]}],self:{text:'Túl naiv voltam, óvatosabb leszek.',memories:[3,4]}};};
+  await w.social.reflect(cast,'2026-11-12',{ask,model:'mock',people});
+  assert.match(calls[0].system,/legfontosabb kérdés az életében/);assert.match(calls[0].system,/"self"/);
+  assert.deepEqual(w.social.beliefsFor(w.ids.Ádám).map(b=>b.text),['Palorra nem lehet számítani.'],'his self-view is not an opinion about someone');
+  assert.equal(w.social.selfView(w.ids.Ádám).text,'Túl naiv voltam, óvatosabb leszek.');
+  // A self-view without memories behind it is dropped.
+  for(let i=0;i<5;i++)weighted(w.ids.Ádám,`Újabb fordulópont ${i}.`,5);
+  await w.social.reflect(cast,'2026-11-13',{ask:async()=>({beliefs:[],self:{text:'Alaptalan.',memories:[]}}),model:'mock',people});
+  assert.equal(w.social.selfView(w.ids.Ádám).text,'Túl naiv voltam, óvatosabb leszek.');
+  // Rewind takes it back with the other beliefs.
+  const r=w.social.rewindAfter('2026-11-12T00:00:00Z','2026-11-14T00:00:00Z');assert.equal(w.social.selfView(w.ids.Ádám),null);
+  w.social.undoRewind(r);assert.ok(w.social.selfView(w.ids.Ádám));
+});

@@ -1199,6 +1199,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       ...(()=>{const st=w.inner?.current(cid);return [stanceLines(c.profile,{inner:st,effective:effectiveIntensity(st,k.day,c.profile),level:level??0}).join('\n')];})(),
       // E4 (2026-11-21): his own aim in this talk.
       ...(()=>{const a=agendaFor({lapsed:threads.lapsed,inner:w.inner?.current(cid),profile:c.profile,early:history.length<6});return a?[a]:[];})(),
+      // E8: how he sees himself lately (from his reflections).
+      ...(()=>{const v=w.social?.selfView?.(cid);return v?['AHOGY MOSTANÁBAN MAGADAT LÁTOD (saját benyomás, változhat; ne mondd ki szó szerint): '+clip(v.text,300)]:[];})(),
       ...(beliefs.length?['A VÉLEMÉNYED (saját benyomás, tévedhetsz; ne mondd ki szó szerint):\n'+beliefs.map(b=>`- ${b.about_name}: ${clip(b.text,200)}`).join('\n')]:[]),
       ...(longTalk?[longTalk]:[]),...(paceNote?['RENDEZŐI JELZÉS: '+paceNote]:[]),...(dateNote?[dateNote]:[]),
       `HOL ÉS MIKOR: ${where}, ${k.weekday} ${k.slot}.`,
