@@ -24,6 +24,7 @@ export async function mapLimit(items,limit,fn){
 import {installWorldSocial} from './world-social.mjs';
 import {installInnerState} from './inner-state.mjs';
 import {bm25} from './world-text-rank.mjs';
+import {plan as offscreenPlan,record as offscreenRecord} from './offscreen-life.mjs';
 import {readFileSync as readSql} from 'node:fs';
 export {LEVELS,SLOTS,localDay} from './world-common.mjs';
 
@@ -462,13 +463,22 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     // An event without a place happens where its first character meant to be.
     for(const e of fresh)if(!e.payload.location_id){const i=intentions.find(x=>e.payload.character_ids.includes(x.id)&&x.place);if(i)e.payload.location_id=i.place.id;}
     const dropped=events.length-fresh.length;
-    let told=[];
+    let told=[],offscreen=0;
     transaction(()=>{
       const meetings=[];
       for(const e of fresh){
         const id=randomUUID();
         run('INSERT INTO world_events(id,world_day,kind,status,title,summary,payload_json,model,created_at) VALUES(?,?,?,?,?,?,?,?,?)',id,day,e.kind,e.serious?'proposed':'applied',e.title,e.summary,JSON.stringify(e.payload),model,iso());
         if(!e.serious){applyEffects(id,e.payload,'world_engine');if((e.payload.character_ids||[]).length>=2)meetings.push({id,character_ids:e.payload.character_ids});}
+      }
+      // E9 (2026-11-21): the ones resting this round still live – rule-based run-ins, no AI call.
+      const restingCast=fullCast.filter(c=>!castIds.has(c.id)&&c.id!==pid);
+      const metToday=new Set(all(`SELECT payload_json FROM world_events WHERE ${LIVE} AND world_day=? AND model='rules'`,day).map(e=>{const ids=parse(e.payload_json).character_ids||[];return ids.length===2?pairKey(ids[0],ids[1]):'';}));
+      for(const m of offscreenPlan({resting:restingCast,day,slot:slot.id,placesOf,levelOf,known,pairKey,metToday})){
+        const r=offscreenRecord(m,slot.label),id=randomUUID(),payload={slot:slot.id,character_ids:[m.a.id,m.b.id],location_id:m.location_id,memories:r.memories,level_changes:[],offscreen:true};
+        run('INSERT INTO world_events(id,world_day,kind,status,title,summary,payload_json,model,created_at) VALUES(?,?,?,?,?,?,?,?,?)',id,day,'everyday','applied',r.title,r.summary,JSON.stringify(payload),'rules',iso());
+        for(const mem of r.memories)remember(mem.character_id,mem.text,id,{importance:2});
+        meetings.push({id,character_ids:payload.character_ids});offscreen++;
       }
       // News travels only through these meetings (plan step 2.5).
       told=social.spread(meetings,day,{palorId:pid});
@@ -482,7 +492,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     progress.step('reflection',{events:fresh.length,messages});
     try{beliefs=await social.reflect(cast,day,{ask:(s,u,m,o={})=>ask(s,u,m,{...o,purpose:'world'}),model,people:()=>everyone.map(c=>({id:c.id,name:c.name}))});}catch(e){if(e.code!=='CAP_REACHED')console.error('Reflection skipped: '+e.message);}
     progress.done({beliefs:beliefs.length});
-    return {day,slot:slot.id,events:fresh.length,messages,dropped,acting:cast.length,resting,told:told.length,beliefs:beliefs.length};
+    return {day,slot:slot.id,events:fresh.length,messages,dropped,acting:cast.length,resting,offscreen,told:told.length,beliefs:beliefs.length};
   }
 
   // ---- runs ---------------------------------------------------------------------------------
