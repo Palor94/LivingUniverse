@@ -1518,3 +1518,10 @@ Owner priority 2026-11-21: complex, different, living characters come first (doc
 Baseline (mock provider, same opening line "Szia! Mi újság veled mostanában?"): 1:1 talk prompt inner-life coverage 100% for all five; person-specific 1:1 material distinctness 0.83. Group scene: coverage only 38–56% per person – goals, conflicts, fears and the dominant motive (attachment / recognition / autonomy / security) are left out by profile-prompt.mjs OMIT.group. This is the E11 target.
 
 Test environment note: on the Linux test VM (Node 22) 52 tests fail before these changes, all image/import/generation/startup tests that depend on Windows or native image tools; none touch conversation or world-engine code. The list is kept with the session and is the comparison baseline; npm test on Windows (Node 24) remains the reference run.
+
+
+2026-11-21: E11 – inner life stays in group scenes
+
+Group scenes used profile-prompt.mjs OMIT.group, which left out goals, conflicts, fears, coping and all five motives (E1 baseline 38–56 % inner-life coverage). New castProfileTexts(): everyone in the company gets one shared detail level, the richest that fits the scene budget (1800 characters per person, at most 7200). Levels drop background first (habits, coping, relationship speech → biography, occupation, emotional traits, short appearance, minor scales → conflicts and remaining communication scales → personality, and middle-value scales); speech, goals, fears and the five motives are never dropped. Attraction/sexuality only in an intimate group scene, as before; explicit fields only when explicit. Pattern after Covel plugins/character-blueprint/lib/roleplay-notes.js DETAIL_LEVELS (MIT, Covel Contributors), rewritten. 1:1 talk and the world agent are unchanged.
+
+Result: group inner-life coverage 100 % for all synthetic people (tests/character-distinctness.test.mjs); play/world/profile tests: no new failures against the 2026-11-21 baseline. Rollback: revert the commit (no data or schema change).

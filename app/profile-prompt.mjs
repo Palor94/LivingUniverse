@@ -68,5 +68,47 @@ export function profileText(p,{explicit=false,use='talk'}={}){
   return lines.join('\n');
 }
 
+// Group scenes (E11, 2026-11-21): the inner life stays in. Before, a group prompt left out each
+// person's goals, conflicts, fears, coping and all five motives, so in company only the
+// surface of a person remained (E1 baseline: 38–56 % of the inner-life fields). Now every
+// person in the scene gets the same detail level, the richest that fits the scene budget; the
+// level drops background first and never drops the voice, the goals, the fears or the motives.
+// Pattern after Covel plugins/character-blueprint/lib/roleplay-notes.js DETAIL_LEVELS (MIT,
+// Covel Contributors): one level for every card, so no card's text depends on which one is
+// the longest; examples and background go first, the voice line never.
+const GROUP_BASE=new Set(['birth_date','residence','weekly_routine','memory_traits',...MEMORY_SCALES]);
+const GROUP_INTIMATE_ONLY=['attraction','sexuality'];
+export const GROUP_LEVELS=[
+  {clip:300,drop:[]},
+  {clip:240,drop:['habits','coping','relationship_speech']},
+  {clip:180,drop:['identity','occupation','emotional_traits','appearance_summary','conscientiousness','openness','attentiveness','mood_reactivity']},
+  {clip:130,drop:['conflicts','directness','expressiveness','presented_sexuality','orientation']},
+  // Last level: personality, goals, fears, voice, and only the scales that are clearly high or low.
+  {clip:100,drop:['personality'],extremesOnly:true}
+];
+const GROUP_KEEP=new Set(['speech','goals','fears','security','attachment','reward','autonomy','recognition']);
+export const GROUP_BUDGET_PER_PERSON=1800,GROUP_BUDGET_MAX=7200;
+function groupText(p,{explicit,intimate,level}){
+  const L=GROUP_LEVELS[level],dropped=new Set(GROUP_LEVELS.slice(0,level+1).flatMap(x=>x.drop));const lines=[];
+  for(const f of p?.template?.fields||[]){const id=f.id;
+    if(META.has(id)||GROUP_BASE.has(id)||(!explicit&&EXPLICIT.has(id))||(!intimate&&GROUP_INTIMATE_ONLY.includes(id)))continue;
+    if(dropped.has(id)&&!GROUP_KEEP.has(id))continue;
+    if(filled(p,id)){const v=p.values[id].value;
+      if(f.type==='scale'){const r=v/f.max;if(L.extremesOnly&&!GROUP_KEEP.has(id)&&r>0.3&&r<0.7)continue;lines.push(scaleLine(f,v));}
+      else lines.push(`${f.label}: ${clip(v,L.clip)}`);continue;}
+    const legacy=f.type==='text'&&f.source&&!has(p,id)?String(p.legacy?.[f.source]||'').trim():'';
+    if(legacy)lines.push(`${f.label}: ${clip(legacy,L.clip)}`);
+  }
+  return lines.join('\n');
+}
+// Profiles of everyone in one group scene, at one shared level.
+export function castProfileTexts(profiles,{explicit=false,intimate=false,budget}={}){
+  const max=budget??Math.min(GROUP_BUDGET_MAX,GROUP_BUDGET_PER_PERSON*Math.max(1,profiles.length));
+  for(let level=0;level<GROUP_LEVELS.length;level++){
+    const texts=profiles.map(p=>groupText(p,{explicit,intimate,level}));
+    if(level===GROUP_LEVELS.length-1||texts.reduce((n,t)=>n+t.length,0)<=max)return {level,texts};
+  }
+}
+
 // Numbers that steer mechanics (null = unknown → the engine's defaults).
 export function profileScale(p,id){const v=p?.values?.[id]?.value;return Number.isFinite(v)?v:null;}

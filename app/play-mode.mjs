@@ -17,6 +17,7 @@ import {partialJsonString} from './world-ai.mjs';
 import {ROLE_TEXT,describeActivity,moodOf,LEVEL_STYLE,CLOSENESS_RULES,TIME_MOOD,STAGE_ALLOW,BEATS,BEAT_WANT,MAX_DAILY_RISES,PACES,PACE_TEXT,PHONE_MOODS,cleanChoices} from './play/rules.mjs';
 import {createPlayScenes} from './play/scenes.mjs';
 import {palorVoice,speechOf,PALOR_VOICE_HEAD,CHOICE_RULES} from './play/palor-voice.mjs';
+import {castProfileTexts} from './profile-prompt.mjs';
 import {createPlayRecords} from './play/records.mjs';
 import {TALK_MINUTES} from './game-clock.mjs';
 import {kindOf,KIND_LABEL,chains,anchorOf as siteOf,townOf,travelMinutes,vehicleOwner,rollEncounter,isSettlement,isRegion,isPassage,isOriginName,originChild,originIndex,arrivalOf,passagesOf,travelOptions,trainBetween,TRAVEL_MODES,walkOnly,bikeAllowed,trainRunsAt,ridesWith,transportPlace,tripScenePlaces,rollRoadside} from './place-network.mjs';
@@ -1292,10 +1293,12 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const gStage=people.map(c=>intimacyStage(c.id)).reduce((m,s)=>STAGE_ORDER[s]<STAGE_ORDER[m]?s:m,'intimate');
     const gIntimate=gStage==='intimate',gBeats=gIntimate?BEATS:['talk','flirt'];
     const system=`Egy élő világ társas jelenetét írod: Palor ${names.join(', ')} társaságában van itt: ${here.path||here.name}, ${k.weekday} ${k.slot}. Mindenki a saját hangján, magyarul, röviden (1-2 mondat) szól; nem kell mindenkinek megszólalnia, és reagálhatnak egymásra is. Minden kör vigye előre a jelenetet valami újjal; senki ne ismételje a saját vagy a többiek korábbi mondatait, fordulatait, és ne kezdje ugyanúgy. Csak a profiljukból, a Palorhoz fűződő kapcsolatukból és a mai napjukból dolgozz; ne találj ki új tényt a múltról. Palor titkos érzéseit senki nem ismeri. Mindenki felnőtt. ${gIntimate?'Ez a társaság közel áll Palorhoz: a jelenet szexuálissá is válhat, ha a résztvevők tényleg odáig jutnak és akarják. Akkor írd nyíltan, kendőzetlenül, mindenki a saját hangján, a vágyai és a profiljában leírt szexuális preferenciái szerint; bárki kezdeményezhet, és bárki nemet mondhat vagy kiszállhat.':'Ez társas jelenet: nincs benne intim vagy szexuális tartalom.'} "beat": hol tart most a jelenet (${gBeats.join(' / ')}); csak akkor lépj tovább, ha tényleg odáig jutottak. ${CHOICE_RULES(gIntimate,{group:true})} Csak JSON: {"replies":[{"name":"${names[0]}","text":"..."}],"beat":"${gBeats.join('|')}","choices":["...","...","..."]} – 1-3 válasz, csak ezektől: ${names.join(', ')}.`;
+    // E11 (2026-11-21): one shared detail level for the whole company, inner life kept.
+    const castText=castProfileTexts(people.map(c=>c.profile),{explicit:gIntimate,intimate:gIntimate});
     const block=c=>{const level=w.levelOf(c.id,pid);const note=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,pid)?.description||'';
       const others=people.filter(o=>o.id!==c.id).map(o=>{const r=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,o.id)?.description;return r?`${o.name}: ${clip(r,200)}`:'';}).filter(Boolean);
       const fix=directorText(c.id);
-      return `## ${c.name}\nPROFIL:\n${w.profileText(c.profile,{explicit:gIntimate,use:gIntimate?'group_intimate':'group'})}${fix?'\n'+fix:''}\nKAPCSOLATA PALORRAL [${LEVELS[level??0]}]: ${clip(note,600)||'nincs megadva'}\nMOST ÉPPEN: ${activityOf(c.id,here.location_id)}${others.length?'\nA TÖBBIEKHEZ: '+others.join('; '):''}`;};
+      return `## ${c.name}\nPROFIL:\n${castText.texts[people.indexOf(c)]}${fix?'\n'+fix:''}\nKAPCSOLATA PALORRAL [${LEVELS[level??0]}]: ${clip(note,600)||'nincs megadva'}\nMOST ÉPPEN: ${activityOf(c.id,here.location_id)}${others.length?'\nA TÖBBIEKHEZ: '+others.join('; '):''}`;};
     // Same anti-repeat and suggestion inputs as a one-on-one talk (2026-11-15).
     const ownLast=history.filter(l=>l.speaker!=='palor').slice(-4).map(l=>'- '+(l.speaker_name?l.speaker_name+': ':'')+clip(l.text,300));
     const palorLast=history.filter(l=>l.speaker==='palor').slice(-3).map(l=>clip(l.text,200));

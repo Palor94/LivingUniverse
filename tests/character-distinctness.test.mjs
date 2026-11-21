@@ -9,6 +9,7 @@ import {createApp} from '../app/server.mjs';
 import {createMockProvider} from '../app/world-ai.mjs';
 import {defaultTemplate} from '../app/ghost-profile.mjs';
 import {innerCoverage,characterOnly,distinctness,similarity} from '../app/character-distinctness.mjs';
+import {castProfileTexts,GROUP_LEVELS} from '../app/profile-prompt.mjs';
 
 const entry=value=>({value,interpretation:'',kind:'hypothesis',source:'teszt',visibility:'creator'});
 // Five synthetic men, deliberately unlike each other in goals, fears, motives and voice.
@@ -70,5 +71,24 @@ test('same situation, five people: inner life reaches the 1:1 prompt and the gro
   const groupCoverage=inGroup.map(c=>({name:c.name,...innerCoverage(blocks[c.name],profileOf(c.values))}));
   t.diagnostic('group inner-life coverage: '+groupCoverage.map(c=>`${c.name} ${(c.ratio*100).toFixed(0)}% (missing: ${c.missing.join(', ')||'–'})`).join('; '));
   t.diagnostic('1:1 distinctness '+talkDistinct.mean.toFixed(2));
-  globalThis.__groupCoverage=groupCoverage;
+  // E11: the whole inner life is there in company too.
+  for(const c of groupCoverage)assert.equal(c.ratio,1,c.name+' misses in group: '+c.missing.join(', '));
+});
+
+test('E11 group detail levels: one level for everyone, background goes first, voice/goals/fears/motives never',()=>{
+  const long='x'.repeat(290)+' ';
+  const fat=v=>profileOf({...v,identity:'Életrajz '+long,habits:'Szokás '+long,coping:'Megküzdés '+long,emotional_traits:'Érzelmi '+long,conflicts:v.conflicts+' '+long,personality:v.personality+' '+long});
+  const profiles=Object.values(CAST).map(fat);
+  const roomy=castProfileTexts(profiles,{budget:1e9});assert.equal(roomy.level,0);
+  const tight=castProfileTexts(profiles,{budget:1500});
+  assert.equal(tight.level,GROUP_LEVELS.length-1,'a tiny budget ends on the last level');
+  for(const [i,t] of tight.texts.entries()){const v=Object.values(CAST)[i];
+    assert.ok(t.includes(v.goals)&&t.includes(String(v.speech).slice(0,40))&&t.includes(v.fears),'core kept: '+t);
+    assert.ok(!t.includes('Életrajz')&&!t.includes('Szokás'),'background dropped first');}
+  const mid=castProfileTexts(profiles,{budget:roomy.texts.join('').length-1});
+  assert.ok(mid.level>=1&&mid.texts.every(t=>!t.includes('Szokás ')),'the same level for every person');
+  // Intimate-only fields stay out of an ordinary group scene.
+  const p=profileOf({...CAST['Teszt Aladár'],attraction:'VONZALOM'});
+  assert.ok(!castProfileTexts([p]).texts[0].includes('VONZALOM'));
+  assert.ok(castProfileTexts([p],{explicit:true,intimate:true}).texts[0].includes('VONZALOM'));
 });
