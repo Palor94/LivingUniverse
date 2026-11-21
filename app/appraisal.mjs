@@ -34,7 +34,7 @@ export function appraisalLines(p,{person='te'}={}){
   const lines=ranked.map(x=>MOTIVES[x.id][x.v>=7?'high':'low']),how=expression(p);
   if(!lines.length&&!how.length)return [];
   const you=person==='te';
-  return [(you?'ÍGY HAT RÁD, AMI TÖRTÉNIK (ehhez igazítsd a reakciódat, ne mondd ki):':'ÍGY HAT RÁ, AMI TÖRTÉNIK:'),...lines.map(l=>'- '+l),...(how.length?[`- Ahogy kimutatja: ${how.join(', ')}.`]:[])];
+  return [(you?'ÍGY HAT RÁD, AMI TÖRTÉNIK (ehhez igazítsd a reakciódat, ne mondd ki):':'ÍGY HAT RÁ, AMI TÖRTÉNIK:'),...lines.map(l=>'- '+l),...(how.length?[`- ${you?'Ahogy nálad ez látszik':'Ahogy kimutatja'}: ${how.join(', ')}.`]:[])];
 }
 
 // One person-specific reading of a concrete event (missed date, broken promise).

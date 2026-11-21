@@ -32,30 +32,32 @@ export function cleanInner(x){
   const mood=clip(String(x.mood||'').replace(/\s+/g,' ').trim(),60),reason=clip(String(x.reason||'').trim(),300);
   const intensity=Math.max(0,Math.min(3,Math.round(Number(x.intensity)||0)));
   const concerns=(Array.isArray(x.concerns)?x.concerns:[]).map(c=>clip(String(c||'').trim(),200)).filter(Boolean).slice(0,MAX_CONCERNS);
-  const wants=clip(String(x.wants_from_palor||'').trim(),300);
-  if(!mood&&!concerns.length&&!wants)return null;
-  return {mood:mood||'kiegyensúlyozott',intensity:mood?intensity:0,reason,concerns,wants_from_palor:wants};
+  const wants=clip(String(x.wants_from_palor||'').trim(),300),view=clip(String(x.palor_view||'').trim(),300);
+  if(!mood&&!concerns.length&&!wants&&!view)return null;
+  return {mood:mood||'kiegyensúlyozott',intensity:mood?intensity:0,reason,concerns,wants_from_palor:wants,palor_view:view};
 }
 
 // Instruction for the save-point summary: the field the model fills, from his point of view.
 export function innerInstruction(name){
-  return `"inner": ${name} belső állapota a beszélgetés UTÁN, az ő szemszögéből (a profilja, a korábbi állapota és ez a beszélgetés alapján; ne találj ki új tényt): {"mood":"1-3 szó (pl. megbántott, felvillanyozott, nyugtalan)","intensity":0-3,"reason":"egy mondat: miért","concerns":["ami most foglalkoztatja az életében, legfeljebb 3; a korábbiakat vidd tovább, ha még igazak, ami megoldódott, maradjon el"],"wants_from_palor":"mit szeretne most Palortól (lehet üres)"}.`;
+  return `"inner": ${name} belső állapota a beszélgetés UTÁN, az ő szemszögéből (a profilja, a korábbi állapota és ez a beszélgetés alapján; ne találj ki új tényt): {"mood":"1-3 szó (pl. megbántott, felvillanyozott, nyugtalan)","intensity":0-3,"reason":"egy mondat: miért","concerns":["ami most foglalkoztatja az életében, legfeljebb 3; a korábbiakat vidd tovább, ha még igazak, ami megoldódott, maradjon el"],"wants_from_palor":"mit szeretne most Palortól (lehet üres)","palor_view":"1-2 mondat: ahogy ő látja, hol tartanak most Palorral (pl. haragszik, mert…, bocsánatkérést vár; vagy közelebb kerültek, mert…)"}.`;
 }
 
 export function installInnerState({db,one,all,run,now=()=>new Date()}){
   db.exec(readFileSync(new URL('./migrations/033-inner-state.up.sql',import.meta.url),'utf8'));
+  // E6 (2026-11-21): where things stand with Palor, as he sees it. Additive column, guarded.
+  if(!db.prepare('PRAGMA table_info(character_inner_states)').all().some(c=>c.name==='palor_view'))db.exec("ALTER TABLE character_inner_states ADD COLUMN palor_view TEXT NOT NULL DEFAULT ''");
   const iso=()=>now().toISOString();
   const row2state=r=>r?{...r,concerns:JSON.parse(r.concerns_json||'[]')}:null;
   const current=cid=>row2state(one('SELECT * FROM character_inner_states WHERE character_id=? AND rewound_at IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1',cid));
   function record(cid,inner,{day,eventId=null,conversationId=null}={}){
     const s=cleanInner(inner);if(!s||!day)return null;const id=randomUUID();
-    run('INSERT INTO character_inner_states VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL)',id,cid,s.mood,s.intensity,s.reason,JSON.stringify(s.concerns),s.wants_from_palor,day,eventId,conversationId,iso());
+    run('INSERT INTO character_inner_states(id,character_id,mood,intensity,reason,concerns_json,wants_from_palor,world_day,event_id,conversation_id,created_at,rewound_at,palor_view) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,?)',id,cid,s.mood,s.intensity,s.reason,JSON.stringify(s.concerns),s.wants_from_palor,day,eventId,conversationId,iso(),s.palor_view);
     return {id,...s};
   }
   // For the summary call: his previous state, so concerns carry over.
   function summaryContext(cid){
     const s=current(cid);if(!s)return '';
-    return `KORÁBBI BELSŐ ÁLLAPOTA (${s.world_day}): ${s.mood}${s.reason?' – '+s.reason:''}`+(s.concerns.length?`; foglalkoztatja: ${s.concerns.join('; ')}`:'')+(s.wants_from_palor?`; Palortól: ${s.wants_from_palor}`:'');
+    return `KORÁBBI BELSŐ ÁLLAPOTA (${s.world_day}): ${s.mood}${s.reason?' – '+s.reason:''}`+(s.concerns.length?`; foglalkoztatja: ${s.concerns.join('; ')}`:'')+(s.wants_from_palor?`; Palortól: ${s.wants_from_palor}`:'')+(s.palor_view?`; ahogy Palorral állnak: ${s.palor_view}`:'');
   }
   // Prompt lines for his own conversation (second person). Faded mood is said to be faded.
   function promptLines(cid,today,profile,{person='te'}={}){
@@ -65,6 +67,7 @@ export function installInnerState({db,one,all,run,now=()=>new Date()}){
     else if(s.intensity>0)out.push(`${you?'HANGULATOD':'HANGULATA'}: a korábbi ${s.mood} hangulat${you?'od':'a'} már elmúlt, kiegyensúlyozott${you?' vagy':''}.`);
     const days=dayNumber(today)-dayNumber(s.world_day);
     if(s.concerns.length&&days<=CONCERN_DAYS)out.push(`${you?'AMI MOST FOGLALKOZTAT':'AMI MOST FOGLALKOZTATJA'} (a saját életed${you?'':'ében'}; szóba hozhat${you?'od':'ja'}, ha illik, vagy épp kerül${you?'öd':'i'} – a természete${you?'d':''} szerint):\n`+s.concerns.map(c=>'- '+c).join('\n'));
+    if(s.palor_view&&days<=CONCERN_DAYS)out.push(`${you?'AHOGY TE LÁTOD, HOL TARTOTOK PALORRAL':'AHOGY Ő LÁTJA, HOL TARTANAK'}: ${s.palor_view}`);
     if(s.wants_from_palor&&days<=CONCERN_DAYS)out.push(`${you?'AMIT PALORTÓL SZERETNÉL':'AMIT PALORTÓL SZERETNE'}: ${s.wants_from_palor} (nem biztos, hogy kimond${you?'od':'ja'}; a természete${you?'d':''} dönt).`);
     return out;
   }

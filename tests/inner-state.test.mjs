@@ -24,9 +24,9 @@ test('inner state: cleaning, fade speed by profile',()=>{
 
 test('inner state: written at the save point from his side, in his next prompt, rewound and restored',async t=>{
   const base=await fs.mkdtemp(path.join(os.tmpdir(),'lu-inner-')),root=path.join(base,'media'),dataDir=path.join(base,'data');await fs.mkdir(root,{recursive:true});
-  const requests=[];let inner={mood:'megbántott',intensity:3,reason:'Palor elfelejtette a születésnapját.',concerns:['a lakbér miatt aggódik','ki akar békülni az öccsével'],wants_from_palor:'egy őszinte bocsánatkérést'};
+  const requests=[];let delta=-1,inner={mood:'megbántott',intensity:3,reason:'Palor elfelejtette a születésnapját.',concerns:['a lakbér miatt aggódik','ki akar békülni az öccsével'],wants_from_palor:'egy őszinte bocsánatkérést',palor_view:'Haragszik rá, mert elfelejtette a születésnapját.'};
   const provider=createMockProvider(req=>{requests.push(req);
-    if(req.system.includes('Egy beszélgetést foglalsz össze'))return {title:'Feszült beszélgetés',summary:'Szóba került a születésnap.',character_memory:'Palor elfelejtette.',level_delta:0,inner};
+    if(req.system.includes('Egy beszélgetést foglalsz össze'))return {title:'Feszült beszélgetés',summary:'Szóba került a születésnap.',character_memory:'Palor elfelejtette.',level_delta:delta,reason:'Palor elfelejtette a születésnapját.',inner};
     if(req.user.includes('Palor: Mennem kell?'))return {reply:'Most mennem kell, bocs.',leaving:'dolga van a pékségben'};
     return {reply:'Szia.'};});
   let clock=new Date('2026-11-10T09:00:00');
@@ -47,7 +47,7 @@ test('inner state: written at the save point from his side, in his next prompt, 
   assert.match(requests.at(-1).user,/HANGULATOD MA: /);
   await call(`/api/play/conversations/${talk.id}/end`,{});
   const summaryReq=requests.find(r=>r.system.includes('Egy beszélgetést foglalsz össze'));
-  assert.match(summaryReq.system,/"inner":/);assert.doesNotMatch(summaryReq.user,/KORÁBBI BELSŐ ÁLLAPOTA/);
+  assert.match(summaryReq.system,/"inner":/);assert.match(summaryReq.system,/Ténykezelés: kérés, ígéret/);assert.match(summaryReq.system,/"palor_view"/);assert.doesNotMatch(summaryReq.user,/KORÁBBI BELSŐ ÁLLAPOTA/);
   const st=app.worldEngine.internals.inner.current(a.id);
   assert.deepEqual([st.mood,st.intensity,st.concerns.length,st.wants_from_palor],['megbántott',3,2,'egy őszinte bocsánatkérést']);
 
@@ -56,13 +56,16 @@ test('inner state: written at the save point from his side, in his next prompt, 
   assert.match(u,/HANGULATOD: nagyon megbántott \(Palor elfelejtette a születésnapját\.\)/);
   assert.match(u,/AMI MOST FOGLALKOZTAT[^\n]*\n- a lakbér miatt aggódik\n- ki akar békülni az öccsével/);
   assert.match(u,/AMIT PALORTÓL SZERETNÉL: egy őszinte bocsánatkérést/);assert.match(u,/A MAI NAPOD: /);
+  // E6: where they stand as he sees it, and why the relationship changed.
+  assert.match(u,/AHOGY TE LÁTOD, HOL TARTOTOK PALORRAL: Haragszik rá, mert elfelejtette a születésnapját\./);
+  assert.match(u,/MIÉRT VÁLTOZOTT LEGUTÓBB A VISZONYOTOK[^\n]*\n- távolabb: Palor elfelejtette a születésnapját\./);
   // E4: his own aim, early in the talk he brings it up himself; the reply may say he is leaving.
   assert.match(u,/A SAJÁT CÉLOD EBBEN A BESZÉLGETÉSBEN: egy őszinte bocsánatkérést\. Magadtól hozd szóba/);
   assert.match(requests.at(-1).system,/"leaving":/);assert.equal(talk.leaving,undefined);
   const leave=(await call('/api/play/talk',{conversation_id:talk.id,text:'Mennem kell?'})).data;
   assert.equal(leave.leaving,'dolga van a pékségben');assert.equal(leave.lines.at(-1).text,'Most mennem kell, bocs.');
   // The next summary carries his earlier state so concerns can continue.
-  inner={mood:'megkönnyebbült',intensity:1,reason:'Palor bocsánatot kért.',concerns:['a lakbér miatt aggódik'],wants_from_palor:''};
+  delta=0;inner={mood:'megkönnyebbült',intensity:1,reason:'Palor bocsánatot kért.',concerns:['a lakbér miatt aggódik'],wants_from_palor:''};
   await call(`/api/play/conversations/${talk.id}/end`,{});
   assert.match(requests.filter(r=>r.system.includes('Egy beszélgetést foglalsz össze')).at(-1).user,/KORÁBBI BELSŐ ÁLLAPOTA \([^)]*\): megbántott/);
   assert.equal(app.worldEngine.internals.inner.current(a.id).mood,'megkönnyebbült');
@@ -80,4 +83,17 @@ test('inner state: written at the save point from his side, in his next prompt, 
   const lines=app.worldEngine.internals.inner.promptLines(a.id,'2026-11-10',{values:{}});
   assert.match(lines.join('\n'),/a korábbi megkönnyebbült hangulatod már elmúlt/);
   assert.doesNotMatch(lines.join('\n'),/FOGLALKOZTAT/,'concerns older than three weeks are dropped');
+});
+
+test('inner state: an older table without palor_view gets the column, nothing lost',async()=>{
+  const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE characters(id TEXT PRIMARY KEY)');db.exec("INSERT INTO characters VALUES('c1')");
+  db.exec(`CREATE TABLE character_inner_states(id TEXT PRIMARY KEY,character_id TEXT NOT NULL REFERENCES characters(id),mood TEXT NOT NULL,intensity INTEGER NOT NULL CHECK(intensity BETWEEN 0 AND 3),reason TEXT NOT NULL,concerns_json TEXT NOT NULL,wants_from_palor TEXT NOT NULL,world_day TEXT NOT NULL,event_id TEXT,conversation_id TEXT,created_at TEXT NOT NULL,rewound_at TEXT)`);
+  db.exec("INSERT INTO character_inner_states VALUES('s1','c1','nyugodt',1,'','[]','','2026-11-01',NULL,NULL,'2026-11-01T00:00:00Z',NULL)");
+  const {installInnerState}=await import('../app/inner-state.mjs');
+  const one=(q,...a)=>db.prepare(q).get(...a),all=(q,...a)=>db.prepare(q).all(...a),run=(q,...a)=>db.prepare(q).run(...a);
+  const inner=installInnerState({db,one,all,run});
+  assert.equal(inner.current('c1').mood,'nyugodt');assert.equal(inner.current('c1').palor_view,'');
+  inner.record('c1',{mood:'vidám',intensity:2,palor_view:'Jóban vannak.'},{day:'2026-11-02'});
+  assert.equal(inner.current('c1').palor_view,'Jóban vannak.');
 });
