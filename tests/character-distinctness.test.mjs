@@ -10,6 +10,7 @@ import {createMockProvider} from '../app/world-ai.mjs';
 import {defaultTemplate} from '../app/ghost-profile.mjs';
 import {innerCoverage,characterOnly,distinctness,similarity} from '../app/character-distinctness.mjs';
 import {appraisalLines,appraiseEvent} from '../app/appraisal.mjs';
+import {stanceLines} from '../app/stance.mjs';
 import {castProfileTexts,GROUP_LEVELS,profileText,CARD_HEAD,SECRET_HEAD,GROUP_SECRET_HEAD} from '../app/profile-prompt.mjs';
 
 const entry=value=>({value,interpretation:'',kind:'hypothesis',source:'teszt',visibility:'creator'});
@@ -80,6 +81,9 @@ test('same situation, five people: inner life reaches the 1:1 prompt and the gro
   for(const c of inGroup)if(CAST[c.name].secrets)assert.ok(blocks[c.name].includes(GROUP_SECRET_HEAD)&&blocks[c.name].includes(CAST[c.name].secrets));
   // E4: with no state yet, each one's aim comes from his own goal.
   for(const [i,u] of talk.entries())assert.ok(u.includes('A SAJÁT CÉLOD EBBEN A BESZÉLGETÉSBEN: közelebb jutni a célodhoz: '+people[i].values.goals.replace(/\.$/,'')),people[i].name);
+  // E5: everyone may disagree; the low-agreeableness one is told he contradicts.
+  assert.ok(talk.every(u=>u.includes('NEM KELL EGYETÉRTENED')));
+  assert.ok(talk[people.findIndex(c=>c.name==='Teszt Béla')].includes('Gyakran ellentmondasz'));
   // E3: the appraisal block is in his own prompt.
   assert.ok(talk.every(u=>u.includes('ÍGY HAT RÁD, AMI TÖRTÉNIK')));
   // E11: the whole inner life is there in company too.
@@ -143,4 +147,16 @@ test('E3 appraisal: the same missed date hits five people five ways; unknown sca
   const blocks=Object.values(CAST).map(v=>appraisalLines(profileOf(v)).join('\n'));
   const d=distinctness(blocks);assert.ok(d.mean>0.5,'appraisal blocks differ: '+d.mean.toFixed(2));
   assert.match(appraisalLines(profileOf(CAST['Teszt Csaba'])).join('\n'),/tolakodásnak.*\n[^]*nem mutatja ki/);
+});
+
+test('E5 stance: permission to disagree, his own reasons, grudges and bad days, secrets defended',()=>{
+  const st=name=>stanceLines(profileOf(CAST[name])).join('\n');
+  assert.match(st('Teszt Béla'),/Gyakran ellentmondasz/);assert.match(st('Teszt Béla'),/kertelés nélkül/);assert.match(st('Teszt Béla'),/hazudhatsz is róluk/);
+  assert.match(st('Teszt Aladár'),/határaidat akkor is tartod/);assert.doesNotMatch(st('Teszt Aladár'),/hazudhatsz/);
+  const hurt={mood:'megbántott',intensity:3};
+  const grudge=profileOf({...CAST['Teszt Aladár'],grievances:4});
+  assert.match(stanceLines(grudge,{inner:hurt,effective:2.5}).join('\n'),/napokig hűvös/);
+  assert.match(stanceLines(profileOf(CAST['Teszt Ernő']),{inner:{mood:'ingerült'},effective:2.2}).join('\n'),/Rossz napod van/);
+  assert.doesNotMatch(stanceLines(profileOf(CAST['Teszt Ernő']),{inner:{mood:'felvillanyozott'},effective:3}).join('\n'),/Rossz napod/);
+  assert.match(stanceLines(profileOf({}),{level:-2}).join('\n'),/Rosszban vagytok/);
 });

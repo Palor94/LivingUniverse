@@ -21,6 +21,8 @@ import {castProfileTexts} from './profile-prompt.mjs';
 import {innerInstruction} from './inner-state.mjs';
 import {appraisalLines,appraiseEvent} from './appraisal.mjs';
 import {agendaFor} from './agenda.mjs';
+import {stanceLines} from './stance.mjs';
+import {effectiveIntensity} from './inner-state.mjs';
 import {createPlayRecords} from './play/records.mjs';
 import {TALK_MINUTES} from './game-clock.mjs';
 import {kindOf,KIND_LABEL,chains,anchorOf as siteOf,townOf,travelMinutes,vehicleOwner,rollEncounter,isSettlement,isRegion,isPassage,isOriginName,originChild,originIndex,arrivalOf,passagesOf,travelOptions,trainBetween,TRAVEL_MODES,walkOnly,bikeAllowed,trainRunsAt,ridesWith,transportPlace,tripScenePlaces,rollRoadside} from './place-network.mjs';
@@ -1188,6 +1190,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       'MA VELED TÖRTÉNT:\n'+(today.map(e=>`- ${e.title}: ${clip(e.summary,200)}`).join('\n')||'semmi különös'),
       ...(gossip.length?['MA HALLOTTAD AZ ISMERŐSEIDRŐL (szóba hozhatod, ha illik):\n'+gossip.map(e=>`- ${e.title}: ${clip(e.summary,160)}`).join('\n')]:[]),
       ...(threadText?['TERVEK ÉS ÍGÉRETEK KÖZTETEK:\n'+threadText]:[]),
+      // E5 (2026-11-21): permission and reasons to disagree, by his nature and state.
+      ...(()=>{const st=w.inner?.current(cid);return [stanceLines(c.profile,{inner:st,effective:effectiveIntensity(st,k.day,c.profile),level:level??0}).join('\n')];})(),
       // E4 (2026-11-21): his own aim in this talk.
       ...(()=>{const a=agendaFor({lapsed:threads.lapsed,inner:w.inner?.current(cid),profile:c.profile,early:history.length<6});return a?[a]:[];})(),
       ...(beliefs.length?['A VÉLEMÉNYED (saját benyomás, tévedhetsz; ne mondd ki szó szerint):\n'+beliefs.map(b=>`- ${b.about_name}: ${clip(b.text,200)}`).join('\n')]:[]),
@@ -1309,7 +1313,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const block=c=>{const level=w.levelOf(c.id,pid);const note=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,pid)?.description||'';
       const others=people.filter(o=>o.id!==c.id).map(o=>{const r=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,o.id)?.description;return r?`${o.name}: ${clip(r,200)}`:'';}).filter(Boolean);
       const fix=directorText(c.id);
-      return `## ${c.name}\nPROFIL:\n${castText.texts[people.indexOf(c)]}${fix?'\n'+fix:''}${w.inner?w.inner.promptLines(c.id,k.day,c.profile,{person:'ő'}).map(x=>'\n'+x).join(''):''}${appraisalLines(c.profile,{person:'ő'}).map(x=>'\n'+x).join('')}${(()=>{const a=agendaFor({lapsed:w.openThreadsFor(c.id,k.day).lapsed,inner:w.inner?.current(c.id),profile:c.profile,person:'ő'});return a?'\n'+a:'';})()}\nKAPCSOLATA PALORRAL [${LEVELS[level??0]}]: ${clip(note,600)||'nincs megadva'}\nMOST ÉPPEN: ${activityOf(c.id,here.location_id)}${others.length?'\nA TÖBBIEKHEZ: '+others.join('; '):''}`;};
+      return `## ${c.name}\nPROFIL:\n${castText.texts[people.indexOf(c)]}${fix?'\n'+fix:''}${w.inner?w.inner.promptLines(c.id,k.day,c.profile,{person:'ő'}).map(x=>'\n'+x).join(''):''}${appraisalLines(c.profile,{person:'ő'}).map(x=>'\n'+x).join('')}${(()=>{const st=w.inner?.current(c.id);return '\n'+stanceLines(c.profile,{inner:st,effective:effectiveIntensity(st,k.day,c.profile),level:level??0,person:'ő'}).join(' ');})()}${(()=>{const a=agendaFor({lapsed:w.openThreadsFor(c.id,k.day).lapsed,inner:w.inner?.current(c.id),profile:c.profile,person:'ő'});return a?'\n'+a:'';})()}\nKAPCSOLATA PALORRAL [${LEVELS[level??0]}]: ${clip(note,600)||'nincs megadva'}\nMOST ÉPPEN: ${activityOf(c.id,here.location_id)}${others.length?'\nA TÖBBIEKHEZ: '+others.join('; '):''}`;};
     // Same anti-repeat and suggestion inputs as a one-on-one talk (2026-11-15).
     const ownLast=history.filter(l=>l.speaker!=='palor').slice(-4).map(l=>'- '+(l.speaker_name?l.speaker_name+': ':'')+clip(l.text,300));
     const palorLast=history.filter(l=>l.speaker==='palor').slice(-3).map(l=>clip(l.text,200));
