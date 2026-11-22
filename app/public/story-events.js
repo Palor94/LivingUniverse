@@ -1,4 +1,5 @@
 import {t,locale} from './i18n.js';
+import {transcriptHtml} from './talk-transcript.js';
 export function readEventSources(form,queryAll){
   return queryAll('[data-event-source]',form).map(row=>Object.fromEntries(queryAll('[data-source]',row).map(input=>[input.dataset.source,input.value])));
 }
@@ -46,7 +47,7 @@ export function installEventTimeline({$,$$,esc,api,action,toast,openDialog,getSt
       ${items.length>talkShown?`<button id="talk-more">${t('talklog.more',{count:items.length-talkShown})}</button>`:''}`;
     $('#talk-kind').onchange=action(async e=>{talkKind=e.target.value;talkShown=TALK_PAGE;await talkLog();});
     for(const d of $$('[data-talk]',box))d.ontoggle=action(async()=>{const out=$('.talk-lines',d);if(!d.open||out.dataset.loaded)return;out.dataset.loaded='1';
-      const {lines}=await api('/api/play/talk-log/talk/'+d.dataset.talk);out.innerHTML=lines.map(l=>`<p><b>${esc(l.name)}:</b> ${esc(l.text)}</p>`).join('');});
+      const {lines}=await api('/api/play/talk-log/talk/'+d.dataset.talk);out.innerHTML=transcriptHtml(lines,esc);});
     for(const b of $$('[data-talk-person]',box))b.onclick=action(()=>openCharacter(b.dataset.talkPerson));
     for(const b of $$('[data-talk-event]',box))b.onclick=action(()=>detail(b.dataset.talkEvent));
     for(const b of $$('[data-talk-promote]',box))b.onclick=action(async()=>{const v=data.items.find(x=>x.id===b.dataset.talkPromote);await edit(null,promotion(v));});

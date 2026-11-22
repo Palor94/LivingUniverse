@@ -16,6 +16,7 @@ import {icon} from './play-icons.js';
 import {installPlayDebug} from './play-debug.js';
 import {decodedImage,updateScene,memoizedRead} from './play-scene.js';
 import {bindGrowingInput,openPersonCard,previousConversationHtml} from './play-dialog.js';
+import {transcriptHtml} from './talk-transcript.js';
 import {preferredTravel,rememberedTravel,travelPayload,travelOptionsDialog,tripChoiceNotice} from './play-travel.js';
 
 // Schematic town positions: real north/south/east/west order, close towns spread apart.
@@ -393,11 +394,14 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       ${d.threads?.length?`<p><b>${t('play.threads')}</b> ${d.threads.map(x=>`${t('play.thread.'+x.promised_by)}: ${esc(x.text)}${x.due_day?' ('+esc(x.due_day)+')':''} – ${t('play.thread.'+x.status)}`).join(' · ')}</p>`:''}
       ${d.friends.length?`<p><b>${t('play.friends')}</b> ${d.friends.map(f=>`${esc(f.name)} (${esc(f.label)})`).join(', ')}</p>`:''}
       ${d.memories.length?`<details><summary>${t('play.hisMemories',{count:d.memories.length})}</summary>${d.memories.map(m=>`<p class="muted">– ${esc(m)}</p>`).join('')}</details>`:''}
-      ${d.talks.length?`<details><summary>${t('play.talks',{count:d.talks.length})}</summary>${d.talks.map(x=>`<p><small>${esc(x.world_day)} ${x.channel==='phone'?'✆':''}${x.intimate?' ♥':''}</small> <b>${esc(x.title)}</b> ${esc(x.summary)}</p>`).join('')}</details>`:''}
+      ${d.talks.length?`<details><summary>${t('play.talks',{count:d.talks.length})}</summary>${d.talks.map(x=>`<p><small>${esc(x.world_day)} ${x.channel==='phone'?'✆':''}${x.intimate?' ♥':''}</small> <b>${esc(x.title)}</b> ${esc(x.summary)}</p><details class="rel-talk" data-rel-talk="${esc(x.id)}"><summary>${t('play.readTalk')}</summary><div class="talk-lines"></div></details>`).join('')}</details>`:''}
       ${d.history.length?`<details><summary>${t('play.levelHistory')}</summary>${d.history.map(h=>`<p class="muted"><small>${esc(new Date(h.created_at).toLocaleDateString('hu-HU'))}</small> ${h.direction==='palor'?'Palor → '+esc(person.name):esc(person.name)+' → Palor'}: ${esc(h.label)} – ${esc(h.reason)}</p>`).join('')}</details>`:''}</div>`;
     const fillPlaces=()=>{const sel=$('#ri-place-'+cid),tw=$('#ri-town-'+cid)?.value;if(!sel||!tw)return;const set=new Set(under(tw));
       sel.innerHTML=places.filter(n=>set.has(n.id)).sort((a,b)=>(a.path||label(a)).localeCompare(b.path||label(b),'hu')).map(n=>`<option value="${esc(n.id)}">${esc(label(n))}${n.parent_id&&n.parent_id!==tw&&node(n.parent_id)?` · ${esc(label(node(n.parent_id)))}`:''}</option>`).join('');};
     if($('#ri-town-'+cid)){const mine=townOf(data.node_id)?.id;if(mine&&inviteTowns.some(x=>x.id===mine))$('#ri-town-'+cid).value=mine;$('#ri-town-'+cid).onchange=fillPlaces;fillPlaces();}
+    // Full transcript of a saved talk, loaded the first time it is opened.
+    for(const d of box.querySelectorAll('[data-rel-talk]'))d.ontoggle=wrap(async()=>{const out=d.querySelector('.talk-lines');if(!d.open||out.dataset.loaded)return;out.dataset.loaded='1';
+      const {lines}=await api('/api/play/talk-log/talk/'+d.dataset.relTalk);out.innerHTML=transcriptHtml(lines,esc);});
     $('#rf-'+cid).onchange=wrap(async e=>{await api('/api/world-engine/levels',{source_id:data.palor_id,target_id:cid,level:Number(e.target.value)});toast(t('play.saved'));});
     if($('#ri-go-'+cid))$('#ri-go-'+cid).onclick=wrap(async()=>{const r=await api('/api/play/invite',{character_id:cid,node_id:$('#ri-place-'+cid).value,slot_index:Number($('#ri-slot-'+cid).value)});toast(r.status==='accepted'?t('play.inviteYes',{name:person.name,place:r.place,day:r.day,slot:r.slot}):t('play.inviteNo.'+r.reason,{name:person.name}),r.status!=='accepted');box.innerHTML='';await renderRelDetail(cid,person,labels);});
   }

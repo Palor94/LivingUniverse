@@ -87,8 +87,10 @@ export function createTalkHistory({one,all:rawAll}){
     const map=names(),places=has('locations')?new Map(all('SELECT id,name FROM locations').map(l=>[l.id,l.name])):new Map();
     const view={...presentTalk(r,r.character_id,map,places,promoted()),rewound:!!r.rewound_at,shared_history:str(parse(r.summary_json).shared_history)};
     if(lines){const speaker=has('play_line_speaker');
+      // Scene guests speak as 'guest:<id>' (2026-11-18); their names live in play_guests, not characters.
+      if(has('play_guests'))for(const g of all('SELECT id,name FROM play_guests WHERE conversation_id=?',id))map.set('guest:'+g.id,g.name);
       view.lines=all(`SELECT l.speaker,l.text,l.created_at${speaker?',s.character_id speaker_id':''} FROM play_lines l${speaker?' LEFT JOIN play_line_speaker s ON s.line_id=l.id':''} WHERE l.conversation_id=? ORDER BY l.rowid`,id)
-        .map(l=>({speaker:l.speaker,name:l.speaker==='palor'?'Palor':map.get(l.speaker_id||r.character_id)||'?',text:l.text,created_at:l.created_at}));}
+        .map(l=>({speaker:l.speaker,...(l.speaker_id?{speaker_id:l.speaker_id}:{}),name:l.speaker==='palor'?'Palor':map.get(l.speaker_id||r.character_id)||'?',text:l.text,created_at:l.created_at}));}
     return view;
   }
   return {timeline,talk,sharedHistoryOf,talkRows};

@@ -526,6 +526,7 @@ const hu={
   'play.friends':'Jóban van még:',
   'play.hisMemories':'Mire emlékszik Palorról ({count})',
   'play.talks':'Közös beszélgetések ({count})',
+  'play.readTalk':'Teljes beszélgetés',
   'play.levelHistory':'A kapcsolat alakulása',
   'play.gesture1':'*Megöleli.*',
   'play.gesture2':'*Meghívja egy italra.*',

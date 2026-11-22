@@ -68,6 +68,14 @@ test('play history: shared past grows per save point, reaches the prompt, talk l
     assert.deepEqual(log.items[2].participants.map(p=>p.name),['Palor','Teszt Béla']);assert.equal(log.items[2].role,'participant');
     const lines=(await call('/api/play/talk-log/talk/'+c1.id)).data.lines;
     assert.deepEqual(lines.map(l=>l.name),['Palor','Teszt Béla']);assert.equal(lines[0].text,'Első üzenet');
+    // A scene guest's line carries the guest's own name, not '?' (2026-11-22).
+    const gid='11111111-1111-4111-8111-111111111111',lid='22222222-2222-4222-8222-222222222222';
+    app.db.prepare("INSERT INTO play_guests(id,conversation_id,name,description,image_status,created_at) VALUES(?,?,?,?,'none',?)").run(gid,c1.id,'Teszt Vendég','',new Date().toISOString());
+    app.db.prepare("INSERT INTO play_lines(id,conversation_id,speaker,text,created_at) VALUES(?,?,'character','Vendég szól.',?)").run(lid,c1.id,new Date().toISOString());
+    app.db.prepare('INSERT INTO play_line_speaker(line_id,character_id) VALUES(?,?)').run(lid,'guest:'+gid);
+    const withGuest=(await call('/api/play/talk-log/talk/'+c1.id)).data.lines;
+    assert.equal(withGuest.at(-1).name,'Teszt Vendég');assert.equal(withGuest.at(-1).speaker_id,'guest:'+gid);
+    app.db.prepare('DELETE FROM play_line_speaker WHERE line_id=?').run(lid);app.db.prepare('DELETE FROM play_lines WHERE id=?').run(lid);
     assert.equal((await call('/api/play/talk-log/00000000-0000-4000-8000-000000000000')).status,404);
     // Every participant's profile: Palor sees all talks; a mentioned person sees them marked.
     assert.equal((await call('/api/play/talk-log/'+palor.id)).data.items.length,3);
