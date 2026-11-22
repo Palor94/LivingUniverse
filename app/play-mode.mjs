@@ -85,11 +85,11 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   //             last 14 days: explicit pictures/videos and sex scenes (consenting adults).
   db.exec('CREATE INDEX IF NOT EXISTS play_conversations_character ON play_conversations(character_id,status);CREATE INDEX IF NOT EXISTS world_messages_from ON world_messages(from_character_id,world_day);');
   const PLAY_SETTINGS='play:settings';
-  // The game is adult from the start (owner decision 2026-11-10); the switch can still turn it off.
-  const playSettings=()=>({adult:true,text_speed:'normal',auto_scene:true,story_rate:'normal',quick_send:false,travel_always_ask:false,guest_image_provider:'openai',talk_view:'vn',...(()=>{try{return JSON.parse(one('SELECT value FROM application_settings WHERE key=?',PLAY_SETTINGS)?.value||'{}');}catch{return {};}})()});
+  // The game is adult from the start (owner decision 2026-11-10). Owner 2026-11-22: the on/off switch is
+  // removed (it only censored); what may happen is still decided by the relationship stages below.
+  const playSettings=()=>({adult:true,text_speed:'normal',auto_scene:true,story_rate:'normal',quick_send:false,travel_always_ask:false,guest_image_provider:'openai',talk_view:'vn',...(()=>{try{return JSON.parse(one('SELECT value FROM application_settings WHERE key=?',PLAY_SETTINGS)?.value||'{}');}catch{return {};}})(),adult:true});
   function savePlaySettings(body){
     const s=playSettings();
-    if(body.adult!==undefined){if(typeof body.adult!=='boolean')throw fail('Choose on or off.');s.adult=body.adult;}
     if(body.auto_scene!==undefined){if(typeof body.auto_scene!=='boolean')throw fail('Choose on or off.');s.auto_scene=body.auto_scene;}
     if(body.quick_send!==undefined){if(typeof body.quick_send!=='boolean')throw fail('Choose on or off.');s.quick_send=body.quick_send;}
     if(body.travel_always_ask!==undefined){if(typeof body.travel_always_ask!=='boolean')throw fail('Choose on or off.');s.travel_always_ask=body.travel_always_ask;}
@@ -430,6 +430,18 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   // another connection's). Any write (appointment, invitation, wait, rewind…) recomputes.
   // S2 (2026-11-22): weekly schedule editor and owner-approved proposals.
   const schedules=createSchedules({one,run,fail,w:worldEngine.internals});
+  // Secret and private routines (owner 2026-11-22): Palor can catch a character at one by being
+  // there. The discovery is a memory of his and a record Palor's later talks build on; rewindable.
+  db.exec(readFileSync(new URL('./migrations/038-secret-discoveries.up.sql',import.meta.url),'utf8'));
+  const discoveredOf=cid=>all('SELECT activity,world_day,location_id FROM secret_discoveries WHERE character_id=? AND rewound_at IS NULL ORDER BY created_at',cid);
+  const isDiscovered=(cid,activity)=>discoveredOf(cid).some(d=>d.activity===activity);
+  function discover(cid,r,day,convId){
+    const id=randomUUID();run('INSERT INTO secret_discoveries VALUES(?,?,?,?,?,?,?,NULL)',id,cid,r.activity,r.location_id||null,day,convId||null,new Date().toISOString());
+    worldEngine.internals.remember(cid,'Palor rajtakapott: '+r.activity,'rajtakapás '+id,{importance:4});return id;
+  }
+  worldEngine.internals.secretDiscoveries={
+    rewindAfter(time,at){const ids=all('SELECT id FROM secret_discoveries WHERE rewound_at IS NULL AND created_at>?',time).map(r=>r.id);for(const id of ids)run('UPDATE secret_discoveries SET rewound_at=? WHERE id=?',at,id);return ids;},
+    undoRewind(ids=[]){for(const id of ids)run('UPDATE secret_discoveries SET rewound_at=NULL WHERE id=?',id);}};
   let posCache=null;
   function positions(){
     const c=clock(),cast=w.meetable();
@@ -480,7 +492,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       // Weekly schedule (plan 3.2, 2026-11-15): a fixed place per weekday and day part.
       // Today's plan (S3 morning step) before the weekly routine.
       if(!loc){const dp=w.morning?.planFor(c2.id,c.day,slotId);if(dp&&one('SELECT 1 FROM locations WHERE id=?',dp.location_id)){loc=dp.location_id;why.set(c2.id,{kind:'day_plan',reason:dp.reason});}}
-      if(!loc){loc=scheduled(c2.id,c.day,slotId);if(loc)why.set(c2.id,{kind:'schedule'});}
+      if(!loc){const e=schedules.entryAt(c2.id,c.day,slotId,weekdayOf(c.day),Number(String(c.day).slice(5,7)));
+        if(e&&one('SELECT 1 FROM locations WHERE id=?',e.location_id)){loc=e.location_id;why.set(c2.id,{kind:'schedule',activity:e.activity||'',privacy:e.privacy||'public',location_id:e.location_id});}}
       if(!loc){
         // A street, stairwell or Káloz határa is walked through, never a place to be found in
         // (owner, 2026-11-15): such a link is skipped and his other places are used.
@@ -506,12 +519,17 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   const REASON_LABEL={appointment:'találkozó Palorral',event:'mai esemény',schedule:'heti rutin',day_plan:'napi terv',last_seen:'ma itt látták utoljára',home:'otthon',work:'munkahely',routine:'megszokott hely',other:'kapcsolt hely'};
   const reasonKey=r=>!r?null:r.kind==='place'?r.role:r.kind;
   // Why he is where he is now, in his own words for his prompt (null when unknown).
-  function reasonOf(cid){const r=positions().why?.get(cid);const k=reasonKey(r);if(k==='day_plan'&&r.reason)return 'Mára ezt tervezted: '+r.reason;return k?REASON_TEXT[k]||null:null;}
+  function reasonOf(cid){const r=positions().why?.get(cid);const k=reasonKey(r);if(k==='day_plan'&&r.reason)return 'Mára ezt tervezted: '+r.reason;
+    if(k==='schedule'&&r.privacy==='secret')return REASON_TEXT.schedule+' Ez a titkod: rajtad kívül senki nem tud róla.';
+    if(k==='schedule'&&r.privacy==='private')return REASON_TEXT.schedule+' Erről csak a hozzád legközelebb állók tudnak.';
+    return k?REASON_TEXT[k]||null:null;}
+  // His routine's activity here and now (when the weekly routine put him here and it says one).
+  const routineActivity=(cid,locationId)=>{const r=positions().why?.get(cid);return r?.kind==='schedule'&&r.activity&&(!locationId||r.location_id===locationId)?r:null;};
   // Owner view (S1): every meetable character in each part of today, with the reason, plus the gaps.
   function whereabouts(){
     const k=clock(),cast=w.meetable(),name=id=>one('SELECT name FROM locations WHERE id=?',id)?.name||null;
     const slots=SLOTS.map((s,i)=>{const map=computePositions({...k,slot_index:i},cast);
-      return {slot:s.id,label:s.label,current:i===k.slot_index,people:cast.map(c=>{const loc=map.get(c.id)||null,r=map.why.get(c.id);return {id:c.id,name:c.name,location_id:loc,location:loc?name(loc):null,reason:reasonKey(r),reason_label:REASON_LABEL[reasonKey(r)]||null};})};});
+      return {slot:s.id,label:s.label,current:i===k.slot_index,people:cast.map(c=>{const loc=map.get(c.id)||null,r=map.why.get(c.id);return {id:c.id,name:c.name,location_id:loc,location:loc?name(loc):null,reason:reasonKey(r),...(r?.kind==='schedule'&&r.activity?{activity:r.activity,privacy:r.privacy}:{}),reason_label:REASON_LABEL[reasonKey(r)]||null};})};});
     const gaps=[];
     for(const c of cast){
       if(!w.placesOf(c.id).length)gaps.push({id:c.id,name:c.name,kind:'no_places',text:'Nincs egyetlen kapcsolt helye sem.'});
@@ -673,6 +691,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const k=clock(),slotId=SLOTS[k.slot_index].id;
     const e=one("SELECT title,summary FROM world_events WHERE rewound_at IS NULL AND world_day=? AND status IN ('applied','accepted') AND json_extract(payload_json,'$.slot')=? AND EXISTS(SELECT 1 FROM json_each(payload_json,'$.character_ids') WHERE value=?) ORDER BY rowid DESC LIMIT 1",k.day,slotId,cid);
     if(e)return clip(e.summary||e.title,220);
+    const ra=routineActivity(cid,locationId);if(ra)return ra.activity;
     const role=locationId?one('SELECT role FROM world_places WHERE character_id=? AND location_id=? LIMIT 1',cid,locationId)?.role:null;
     return ROLE_TEXT[role]||ROLE_TEXT.other;
   }
@@ -686,6 +705,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     // Here because of a meeting with Palor: say so, not "Éppen itt van."
     if(locationId&&one("SELECT 1 FROM play_appointments WHERE character_id=? AND world_day=? AND slot=? AND status='accepted' AND location_id=? LIMIT 1",cid,k.day,slotId,locationId))return 'Palorral beszélt meg itt találkozót, rá vár.';
     const link=locationId?one("SELECT wp.role,wp.note,l.name place FROM world_places wp JOIN locations l ON l.id=wp.location_id WHERE wp.character_id=? AND wp.location_id=? ORDER BY CASE wp.role WHEN 'work' THEN 0 WHEN 'routine' THEN 1 WHEN 'home' THEN 2 ELSE 3 END LIMIT 1",cid,locationId):null;
+    {const ra=routineActivity(cid,locationId);if(ra&&(ra.privacy==='public'||isDiscovered(cid,ra.activity)))return ra.activity;}
     let routine='';try{routine=JSON.parse(one('SELECT value FROM application_settings WHERE key=?','ghost:character:'+cid)?.value||'{}').values?.weekly_routine?.value||'';}catch{}
     return describeActivity({role:link?.role||'other',slotIndex:k.slot_index,note:link?.note||'',routine:String(routine),place:link?.place||''});
   }
@@ -1232,6 +1252,12 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       ...(voice?[PALOR_VOICE_HEAD+voice]:[]),
       'ÍGY BESZÉLSZ VELE: '+LEVEL_STYLE[String(level??0)]+'. '+TIME_MOOD[k.slot_index]+'.',
       channel==='in_person'?'MOST ÉPPEN: '+activityOf(cid,here?.location_id)+(reasonOf(cid)?' MIÉRT VAGY ITT: '+reasonOf(cid):''):'MOST ÉPPEN: telefonon írsz Palorral.',
+      // Caught at a secret or private routine (2026-11-22): the first time Palor finds him there.
+      ...(()=>{const ra=channel==='in_person'?routineActivity(cid,here?.location_id):null;
+        if(ra&&ra.privacy!=='public'&&!(ra.privacy==='private'&&(level??0)>=2)){
+          if(!isDiscovered(cid,ra.activity))discover(cid,ra,k.day,conv?.id);
+          if(discoveredOf(cid).find(d=>d.activity===ra.activity)?.world_day===k.day)return ['RAJTAKAPOTT: Palor most itt talált, ennél: „'+ra.activity+'”. Eddig nem tudott róla. A természeted szerint reagálsz rá (tagadhatsz, zavarba jöhetsz, dacos lehetsz, magyarázkodhatsz vagy be is vonhatod) – de nem teszel úgy, mintha semmi nem történt volna.'];}
+        const known=discoveredOf(cid);return known.length?['PALOR TUDJA RÓLAD (korábban rajtakapott): '+known.map(d=>d.activity).join('; ')]:[];})(),
       ...(shared?['KÖZÖS MÚLTATOK PALORRAL (ahogy te emlékszel rá):\n'+clip(shared,1500)]:[]),
       ...(earlier.length?['KORÁBBI BESZÉLGETÉSEITEK:\n'+earlier.join('\n')]:[]),
       'LEGUTÓBB PALORRAL: '+(lastTalk?lastTalk+sinceText:'még nem beszélgettetek'),
@@ -1673,9 +1699,9 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(p==='/api/play/readiness'&&m==='GET')return json(await readiness()),true;
     if(p==='/api/play/whereabouts'&&m==='GET')return json(whereabouts()),true;
     {const wm=p.match(/^\/api\/play\/characters\/([a-f0-9-]{36})\/whispers$/i);if(wm){if(m==='GET')return json({whispers:whispers(wm[1])}),true;if(m==='POST')return json(addWhisper(wm[1],body)),true;}}
-    {const sc=p.match(/^\/api\/play\/schedules\/([a-f0-9-]{36})(?:\/(undo|propose|proposal\/accept|proposal\/reject))?$/i);
+    {const sc=p.match(/^\/api\/play\/schedules\/([a-f0-9-]{36})(?:\/(undo|propose|proposal|proposal\/accept|proposal\/reject))?$/i);
       if(sc){const [,cid,act]=sc;if(!act&&m==='GET')return json(schedules.get(cid)),true;if(!act&&m==='POST')return json(schedules.save(cid,body)),true;
-        if(m==='POST'){if(act==='undo')return json(schedules.undo(cid)),true;if(act==='propose')return json(await schedules.propose(cid)),true;return json(schedules.decide(cid,act==='proposal/accept')),true;}}}
+        if(m==='POST'){if(act==='undo')return json(schedules.undo(cid)),true;if(act==='propose')return json(await schedules.propose(cid)),true;if(act==='proposal')return json(schedules.storeProposal(cid,body,{source:body?.source||'external'})),true;return json(schedules.decide(cid,act==='proposal/accept')),true;}}}
     // N1 hidden events (owner-authored; drafts open only after approval).
     if(p==='/api/play/hidden-events'&&w.hiddenEvents){if(m==='GET')return json({events:w.hiddenEvents.list()}),true;
       if(m==='POST'){try{return json(w.hiddenEvents.create(body,{status:body?.approve===true?'approved':'draft'})),true;}catch(e){throw fail(e.message,e.status||400);}}}

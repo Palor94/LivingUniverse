@@ -233,10 +233,6 @@ test('story pictures: saved through the connector or dropped in the folder, show
   const flat=(await call('/api/play/stories/vonat/play',{})).data.story.pictures;assert.deepEqual(Object.keys(flat).sort(),['s2','s5']);
   assert.equal((await fetch(origin+flat.s5.url)).status,200);
   assert.equal((await fetch(origin+'/api/play/story-pictures/kamion/'+encodeURIComponent('vonat - s5.png'))).status,404,'a file of another story is not served under this story');
-  // Adult switch off: no heated picture, not even by its address.
-  await call('/api/play/settings',{adult:false});
-  assert.deepEqual(Object.keys((await call('/api/play/stories/kamion/play',{})).data.story.pictures),['s1']);
-  assert.equal((await fetch(origin+run.story.pictures.s4.url)).status,404);
   assert.equal((await fetch(origin+'/api/play/story-pictures/kamion/..%2F..%2Fforras.png')).status,404,'no path escape');
   assert.equal((await mcp('story_pictures_needs',{limit:10})).data.missing,0);
   // Grok with an old tool list: list_play_stories (no arguments) hands out the stories that still

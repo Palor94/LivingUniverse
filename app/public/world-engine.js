@@ -103,7 +103,7 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
     const box=$('#we-where');if(!box)return;const r=await api('/api/play/whereabouts');
     const gaps=r.gaps.length?`<div class="we-where-gaps"><b>${t('we.whereGaps',{count:r.gaps.length})}</b><ul>${r.gaps.map(g=>`<li><button class="vn-link" data-where-fix="${esc(g.id)}">${esc(g.name)}</button>: ${esc(g.text)}</li>`).join('')}</ul></div>`:`<p class="muted">${t('we.whereNoGaps')}</p>`;
     const names=r.slots[0]?.people||[];
-    box.innerHTML=gaps+`<table class="we-table we-where"><thead><tr><th>${esc(r.day)} ${esc(r.weekday||'')}</th>${r.slots.map(s=>`<th${s.current?' class="we-now"':''}>${esc(s.label)}</th>`).join('')}</tr></thead><tbody>${names.map((p,i)=>`<tr><td>${esc(p.name)}</td>${r.slots.map(s=>{const x=s.people[i];return `<td${s.current?' class="we-now"':''}>${x.location?esc(x.location):'—'}${x.reason_label?`<br><small class="muted">${esc(x.reason_label)}</small>`:''}</td>`;}).join('')}</tr>`).join('')}</tbody></table>`;
+    box.innerHTML=gaps+`<table class="we-table we-where"><thead><tr><th>${esc(r.day)} ${esc(r.weekday||'')}</th>${r.slots.map(s=>`<th${s.current?' class="we-now"':''}>${esc(s.label)}</th>`).join('')}</tr></thead><tbody>${names.map((p,i)=>`<tr><td>${esc(p.name)}</td>${r.slots.map(s=>{const x=s.people[i];return `<td${s.current?' class="we-now"':''}>${x.location?esc(x.location):'—'}${x.reason_label?`<br><small class="muted">${x.activity?esc(PRIV_ICON[x.privacy]||'')+' '+esc(x.activity)+' · ':''}${esc(x.reason_label)}</small>`:''}</td>`;}).join('')}</tr>`).join('')}</tbody></table>`;
     // Whisper (2026-11-22): plant a thought in a character; it becomes his own thought.
     box.insertAdjacentHTML('beforeend',`<details class="we-whisper"><summary><b>${t('we.whisper')}</b></summary><p class="muted">${t('we.whisperLead')}</p>
       <div class="we-row"><select id="we-whisper-who" aria-label="${esc(t('we.whisperWho'))}">${names.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>
@@ -117,6 +117,7 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
     for(const b of box.querySelectorAll('[data-where-fix]'))b.onclick=()=>{selectedPlaceCharacter=b.dataset.whereFix;worldTab='places';render(root).catch(error=>toast(error.message,true));};
   }
   // S2 (2026-11-22): week × day-part grid per character; proposal from his own routine text, owner accepts.
+  const PRIV_ICON={public:'',private:'🔒',secret:'🤫'};
   async function renderSchedule(){
     const box=$('#we-schedule');if(!box)return;
     const people=(await api('/api/play/whereabouts')).slots[0]?.people||[];if(!people.length){box.innerHTML=`<p class="muted">${t('we.scheduleNobody')}</p>`;return;}
@@ -124,17 +125,19 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
     const r=await api('/api/play/schedules/'+encodeURIComponent(scheduleWho)),days=[1,2,3,4,5,6,0];
     const opts=sel=>`<option value="">—</option>`+r.places.map(p=>`<option value="${esc(p.id)}"${p.id===sel?' selected':''}>${esc(p.name)}</option>`).join('');
     const name=id=>r.places.find(p=>p.id===id)?.name||id;
-    const prop=r.proposal?`<div class="we-where-gaps"><b>${t('we.scheduleProposal')}</b><ul>${Object.entries(r.proposal.grid).map(([k,v])=>{const [d,sl]=k.split('|');return `<li>${esc(t('we.day.'+d))} ${esc(r.slots.find(x=>x.id===sl)?.label||sl)}: ${esc(name(v))}${r.proposal.why?.[k]?` <span class="muted">(${esc(r.proposal.why[k])})</span>`:''}</li>`;}).join('')}</ul>
+    const cellText=c=>c?name(c.location_id)+(c.activity?' – '+c.activity:'')+(c.privacy&&c.privacy!=='public'?' '+PRIV_ICON[c.privacy]:''):'—';
+    const cellEdit=(key,c)=>`<select data-sch-cell="${esc(key)}">${opts(c?.location_id)}</select><input data-sch-act="${esc(key)}" maxlength="200" value="${esc(c?.activity||'')}" placeholder="${esc(t('we.scheduleActivity'))}"><select data-sch-priv="${esc(key)}" aria-label="${esc(t('we.schedulePrivacy'))}">${['public','private','secret'].map(v=>`<option value="${v}"${(c?.privacy||'public')===v?' selected':''}>${esc(t('we.privacy.'+v))}</option>`).join('')}</select>`;
+    const prop=r.proposal?`<div class="we-where-gaps"><b>${t('we.scheduleProposal')}</b><ul>${Object.entries(r.proposal.grid).map(([k,v])=>{const [d,sl]=k.split('|');return `<li>${esc(t('we.day.'+d))} ${esc(r.slots.find(x=>x.id===sl)?.label||sl)}: ${esc(cellText(v))}${r.proposal.why?.[k]?` <span class="muted">(${esc(r.proposal.why[k])})</span>`:''}</li>`;}).join('')}</ul>
       <div class="we-row"><button id="we-sch-accept" class="primary">${t('we.scheduleAccept')}</button><button id="we-sch-reject" class="subtle">${t('we.scheduleReject')}</button></div></div>`:'';
     box.innerHTML=`<div class="we-row"><select id="we-sch-who" aria-label="${esc(t('we.whisperWho'))}">${people.map(p=>`<option value="${esc(p.id)}"${p.id===scheduleWho?' selected':''}>${esc(p.name)}</option>`).join('')}</select></div>`
       +(r.routine?`<p><b>${t('we.scheduleRoutine')}</b> ${esc(r.routine)}</p>`:`<p class="muted">${t('we.scheduleNoRoutine')}</p>`)
       +(r.places.length?'':`<p class="muted">${t('we.scheduleNoPlaces')}</p>`)
-      +`<table class="we-table"><thead><tr><th></th>${r.slots.map(x=>`<th>${esc(x.label)}</th>`).join('')}</tr></thead><tbody>${days.map(d=>`<tr><td>${esc(t('we.day.'+d))}</td>${r.slots.map(x=>`<td><select data-sch-cell="${d}|${esc(x.id)}">${opts(r.grid[d+'|'+x.id])}</select></td>`).join('')}</tr>`).join('')}</tbody></table>`
+      +`<table class="we-table"><thead><tr><th></th>${r.slots.map(x=>`<th>${esc(x.label)}</th>`).join('')}</tr></thead><tbody>${days.map(d=>`<tr><td>${esc(t('we.day.'+d))}</td>${r.slots.map(x=>`<td class="we-sch-cell">${cellEdit(d+'|'+x.id,r.grid[d+'|'+x.id])}</td>`).join('')}</tr>`).join('')}</tbody></table>`
       +(r.seasonal.length?`<p class="muted">${t('we.scheduleSeasonal',{count:r.seasonal.length})}</p>`:'')
       +`<div class="we-row"><button id="we-sch-save" class="primary">${t('we.scheduleSave')}</button><button id="we-sch-propose" class="subtle"${r.routine?'':' disabled'}>${t('we.schedulePropose')}</button>${r.has_previous?`<button id="we-sch-undo" class="subtle">${t('we.scheduleUndo')}</button>`:''}</div>`+prop;
     const base='/api/play/schedules/'+encodeURIComponent(scheduleWho);
     $('#we-sch-who').onchange=wrap(async e=>{scheduleWho=e.target.value;await renderSchedule();});
-    $('#we-sch-save').onclick=wrap(async()=>{const grid={};const cells=box.querySelectorAll('[data-sch-cell]');for(const sel of cells)if(sel.value)grid[sel.dataset.schCell]=sel.value;await api(base,{grid});toast(t('play.saved'));await renderSchedule();});
+    $('#we-sch-save').onclick=wrap(async()=>{const grid={};const cells=box.querySelectorAll('[data-sch-cell]');for(const sel of cells)if(sel.value){const k=sel.dataset.schCell,act=box.querySelector(`[data-sch-act="${CSS.escape(k)}"]`),priv=box.querySelector(`[data-sch-priv="${CSS.escape(k)}"]`);grid[k]={location_id:sel.value,activity:act?.value.trim()||'',privacy:priv?.value||'public'};}await api(base,{grid});toast(t('play.saved'));await renderSchedule();});
     $('#we-sch-propose').onclick=wrap(async()=>{await api(base+'/propose',{});await renderSchedule();});
     if($('#we-sch-undo'))$('#we-sch-undo').onclick=wrap(async()=>{await api(base+'/undo',{});await renderSchedule();});
     if($('#we-sch-accept'))$('#we-sch-accept').onclick=wrap(async()=>{await api(base+'/proposal/accept',{});toast(t('play.saved'));await renderSchedule();});

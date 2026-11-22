@@ -29,16 +29,13 @@ test('intimacy protocol: owner switch + relationship stage gate pictures and int
   await call('/api/play/travel',{node_id:'n-home'});
   const setLevel=l=>call('/api/world-engine/levels',{source_id:a.id,target_id:palor.id,level:l});
 
-  // Adult from the start (owner decision 2026-11-10), but the owner switch still closes everything.
+  // Adult from the start (owner decision 2026-11-10); the switch was removed (2026-11-22): turning it off does nothing.
   assert.equal((await call('/api/play/settings')).data.adult,true);
   await call('/api/play/settings',{adult:false});
-  await setLevel(4);
-  assert.equal((await call('/api/play/talk',{character_id:a.id,intimate:true,text:'*Közelebb lép.*'})).status,409);
-  assert.equal((await call('/api/play/place/n-home')).data.people[0].stage,'none');
+  assert.equal((await call('/api/play/settings')).data.adult,true);
 
-  // Switched on: strangers may flirt, acquaintances anything; phone stays non-intimate.
+  // Strangers may flirt, acquaintances anything; phone stays non-intimate.
   // Open hostility (2026-11-15) opens it too, with an angry, rough tone and consent kept.
-  await call('/api/play/settings',{adult:true});
   await setLevel(-2);assert.equal((await call('/api/play/place/n-home')).data.people[0].stage,'intimate');
   {const c=(await call('/api/play/talk',{character_id:a.id,intimate:true,text:'*Közelebb lép.*'})).data;
     assert.equal(c.mode,'intimate');assert.match(requests.at(-1).system,/dühös, indulattal teli és durva/);assert.match(requests.at(-1).system,/beleegyező felnőtt/);
@@ -66,12 +63,6 @@ test('intimacy protocol: owner switch + relationship stage gate pictures and int
 
   // The recent intimate moment keeps the stage open even if the level drops later.
   await setLevel(-1);assert.equal((await call('/api/play/place/n-home')).data.people[0].stage,'intimate');
-  await call('/api/play/settings',{adult:false});
-  assert.equal((await call('/api/play/place/n-home')).data.people[0].stage,'none','the owner switch always wins');
-  // Privacy: with adult content off the journal and the export keep the moment but hide details.
-  const j=(await call('/api/play/journal')).data.events.find(e=>e.intimate);
-  assert.equal(j.title,'Intim pillanat');assert.ok(!(await call('/api/play/export')).data.markdown.includes('Közel kerültek.'));
-  await call('/api/play/settings',{adult:true});
   assert.ok((await call('/api/play/export')).data.markdown.includes('Közel kerültek.'));
   assert.equal((await call('/api/play/settings',{text_speed:'warp'})).status,400);
 });

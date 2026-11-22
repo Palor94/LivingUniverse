@@ -40,8 +40,6 @@ test('shared scene pictures: folder, upload, content marks, prompts and the inse
   assert.equal(up.duplicate,true,'same bytes as the folder picture');
   assert.equal((await call('/api/play/content',{media_id:m.id,level:'spicy'})).status,400);
   assert.equal((await call('/api/play/content',{media_id:m.id,level:'nudity'})).data.level,'nudity');
-  await call('/api/play/settings',{adult:false});
-  assert.equal((await call('/api/play/shared-photos/'+a.id)).data.photos.length,0,'now behind the intimacy gate (owner switch off)');
 
   // Prompts: background (3 times of day) and a scene for the two of them.
   const pr=(await call(`/api/play/prompts?character_id=${a.id}&location_id=${flat.id}`)).data;

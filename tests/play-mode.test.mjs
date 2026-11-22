@@ -93,10 +93,6 @@ test('play mode: map positions, live talk only where the character is, save poin
     const workTag=app.db.prepare('SELECT tag_id FROM locations WHERE id=?').get(work.id).tag_id;
     await call('/api/taxonomy/apply',{media_ids:both,tag_ids:[workTag],operation:'add'});
     await call('/api/quick-tag/picture-type',{media_ids:[byName['kollazs.png']],type:'collage'});
-    // Not analysed yet → treated as possibly intimate: hidden while the owner switch is off.
-    await call('/api/play/settings',{adult:false});
-    const locked=(await call('/api/play/photos/'+a.id)).data;assert.deepEqual([locked.photos.length,locked.hidden],[0,1]);
-    await call('/api/play/settings',{adult:true});
     await call('/api/world-engine/levels',{source_id:a.id,target_id:palor.id,level:3});
     const shots=(await call('/api/play/photos/'+a.id)).data;
     assert.deepEqual(shots.photos.map(p=>p.media_id),[byName['korhaz.png']]);

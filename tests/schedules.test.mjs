@@ -26,18 +26,18 @@ test('schedules: grid save drives where he is; proposal only from his text and k
   await call('/api/world-engine/places',{character_id:a.id,location_id:home,role:'home'});await call('/api/world-engine/places',{character_id:a.id,location_id:gym,role:'other'});
   assert.equal((await call('/api/play/schedules/'+pal.id)).status,400);
   let g=(await call('/api/play/schedules/'+a.id)).data;
-  assert.equal(g.routine,'Kedd esténként edzeni jár.');assert.deepEqual(g.places.map(p=>p.name),['Aladár háza','Edzőterem']);assert.deepEqual(g.grid,{});
+  assert.equal(g.routine,'Kedd esténként edzeni jár.');assert.deepEqual(g.places.map(p=>p.name),['Aladár háza','Edzőterem']);assert.deepEqual(g.grid,{});const cell=(l,x={})=>({location_id:l,activity:'',privacy:'public',...x});
   assert.equal((await call('/api/play/schedules/'+a.id,{grid:{'8|este':gym}})).status,400);
   // 2026-11-17 is a Tuesday (2): the evening at the pub, from the grid.
-  g=(await call('/api/play/schedules/'+a.id,{grid:{'2|este':pub,'4|este':pub}})).data;assert.deepEqual(g.grid,{'2|este':pub,'4|este':pub});
+  g=(await call('/api/play/schedules/'+a.id,{grid:{'2|este':pub,'4|este':pub}})).data;assert.deepEqual(g.grid,{'2|este':cell(pub),'4|este':cell(pub)});
   assert.deepEqual(JSON.parse(app.db.prepare('SELECT value FROM application_settings WHERE key=?').get('world:schedule:'+a.id).value).entries.map(e=>[e.days,e.slot]),[[[2,4],'este']]);
   let ev=(await call('/api/play/whereabouts')).data.slots[2].people.find(p=>p.id===a.id);assert.deepEqual([ev.location_id,ev.reason],[pub,'schedule']);
   // Proposal: only the known place survives, the invented one and the bad day are dropped; not applied yet.
   g=(await call('/api/play/schedules/'+a.id+'/propose',{})).data;
   assert.match(asked[0].user,/HETI RUTIN:\nKedd esténként edzeni jár\./);assert.match(asked[0].user,/ISMERT HELYEI: Aladár háza, Edzőterem/);
-  assert.deepEqual(g.proposal.grid,{'2|este':gym});assert.deepEqual(g.grid,{'2|este':pub,'4|este':pub});
-  g=(await call('/api/play/schedules/'+a.id+'/proposal/accept',{})).data;assert.deepEqual(g.grid,{'2|este':gym});assert.equal(g.proposal,null);
+  assert.deepEqual(g.proposal.grid,{'2|este':cell(gym)});assert.deepEqual(g.grid,{'2|este':cell(pub),'4|este':cell(pub)});
+  g=(await call('/api/play/schedules/'+a.id+'/proposal/accept',{})).data;assert.deepEqual(g.grid,{'2|este':cell(gym)});assert.equal(g.proposal,null);
   ev=(await call('/api/play/whereabouts')).data.slots[2].people.find(p=>p.id===a.id);assert.equal(ev.location_id,gym);
-  g=(await call('/api/play/schedules/'+a.id+'/undo',{})).data;assert.deepEqual(g.grid,{'2|este':pub,'4|este':pub});
+  g=(await call('/api/play/schedules/'+a.id+'/undo',{})).data;assert.deepEqual(g.grid,{'2|este':cell(pub),'4|este':cell(pub)});
   assert.equal((await call('/api/play/schedules/'+a.id+'/proposal/reject',{})).status,409);
 });

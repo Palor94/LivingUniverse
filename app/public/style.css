@@ -1220,3 +1220,4 @@ p.dev-warn,li.dev-warn{color:#e7c27d}p.dev-bad,li.dev-bad{color:var(--danger)}
   .vn-photo-mode:not(.vn-photo-small) .vn-dialog .vn-say{display:none}
 }
 .vn-leaving{margin:4px 0;padding:4px 10px;border-radius:8px;background:rgba(255,190,80,.18);font-size:14px;font-style:italic}
+.we-sch-cell select,.we-sch-cell input{display:block;width:100%;margin:1px 0;font-size:12px}

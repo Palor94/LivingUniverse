@@ -402,18 +402,16 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     if($('#ri-go-'+cid))$('#ri-go-'+cid).onclick=wrap(async()=>{const r=await api('/api/play/invite',{character_id:cid,node_id:$('#ri-place-'+cid).value,slot_index:Number($('#ri-slot-'+cid).value)});toast(r.status==='accepted'?t('play.inviteYes',{name:person.name,place:r.place,day:r.day,slot:r.slot}):t('play.inviteNo.'+r.reason,{name:person.name}),r.status!=='accepted');box.innerHTML='';await renderRelDetail(cid,person,labels);});
   }
 
-  // ---- settings: adult content switch and dialogue text speed --------------------------------
+  // ---- settings: dialogue text speed and play options (the adult switch was removed 2026-11-22) --------------------------------
   async function renderSettings(){
     settings=await api('/api/play/settings');
     $('#play-body').innerHTML=`<div class="rel play-settings"><h2>${t('play.settings')}</h2>
-      <label class="we-toggle"><input type="checkbox" id="ps-adult"${settings.adult?' checked':''}> ${t('play.adultToggle')}</label>
       <label class="play-check"><input type="checkbox" id="ps-auto-scene"${settings.auto_scene!==false?' checked':''}> ${t('play.autoScene')}</label>
       <label class="play-check"><input type="checkbox" id="ps-quick-send"${settings.quick_send?' checked':''}> ${t('play.quickSendSetting')}</label>
       <label class="play-check"><input type="checkbox" id="ps-travel-ask"${settings.travel_always_ask?' checked':''}> ${t('play.travelAlwaysAsk')}</label>
       <label>${t('play.guestProvider')}<select id="ps-guest-provider">${['openai','sogni'].map(value=>`<option value="${value}"${(settings.guest_image_provider||'openai')===value?' selected':''}>${t('play.guestProvider.'+value)}</option>`).join('')}</select></label>
       <label>${t('play.textSpeed')} <select id="ps-speed">${['slow','normal','fast','instant'].map(s=>`<option value="${s}"${settings.text_speed===s?' selected':''}>${t('play.speed.'+s)}</option>`).join('')}</select></label>
       <section class="ps-stories" id="ps-stories"></section></div>`;
-    $('#ps-adult').onchange=wrap(async e=>{settings=await api('/api/play/settings',{adult:e.target.checked});photoFor=null;toast(t('play.saved'));});
     $('#ps-auto-scene').onchange=wrap(async e=>{settings=await api('/api/play/settings',{auto_scene:e.target.checked});toast(t('play.saved'));});
     $('#ps-quick-send').onchange=wrap(async e=>{settings=await api('/api/play/settings',{quick_send:e.target.checked});toast(t('play.saved'));});
     $('#ps-travel-ask').onchange=wrap(async e=>{settings=await api('/api/play/settings',{travel_always_ask:e.target.checked});toast(t('play.saved'));});

@@ -74,14 +74,8 @@ test('Play picture pipeline over MCP: owner-declared collection origin, approval
   assert.ok(has('background',cafe.id));assert.ok(has('scene',inv.id));assert.ok(has('scene',legacy.id),'legacy origin text no longer vetoes collection fiction');
   assert.equal(needs[0].target,'figure','base figures first');
 
-  // Turning adult content off still keeps scenes everyday despite the origin declaration.
   const legacyBrief=(await mcp('brief',{target:'figure',character_id:legacy.id})).data;
   assert.equal(legacyBrief.reference_policy,'approved_references');assert.deepEqual(legacyBrief.references.map(r=>r.media_id),[refId['cam2.png']]);
-  await call('/api/play/settings',{adult:false});
-  const sceneReal=(await mcp('brief',{target:'scene',character_id:legacy.id,location_id:cafe.id})).data;
-  assert.equal(sceneReal.content_expected,'non_intimate');assert.ok(sceneReal.references.some(r=>r.media_id===refId['cam2.png']),'everyday scene: approved photo allowed');
-  // Turning it back on uses the same approved collection references, never the unapproved candidate.
-  await call('/api/play/settings',{adult:true});
   const sceneInv=(await mcp('brief',{target:'scene',character_id:inv.id,location_id:cafe.id})).data;
   assert.ok(sceneInv.references.some(r=>r.media_id===refId['cam1.png']),'camera-like metadata does not override the declaration');
   assert.ok(sceneInv.references.every(r=>r.proof==='owner_declared_fictional_ai'&&r.media_id!==gen2));
