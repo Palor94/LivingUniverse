@@ -4,6 +4,10 @@
 // so one step back is always possible. After Generative Agents daily planning (Apache-2.0), cut down
 // to "where is he usually" – the world never invents a routine on its own.
 import {SLOTS} from '../world-common.mjs';
+import {readFileSync} from 'node:fs';
+import {randomUUID} from 'node:crypto';
+// Routine batches written outside the app (2026-11-22) live in <project>/30_IMPORTS/rutin-*/.
+const IMPORTS=new URL('../../30_IMPORTS/',import.meta.url);
 const KEY='world:schedule:',PREV='world:schedule-prev:',PROP='world:schedule-proposal:';
 // Owner 2026-11-22: a cell may also say what he does there (activity) and who may know about it
 // (privacy): public – anyone; private – only those close to him (level ≥ 2 with Palor); secret –
@@ -70,7 +74,22 @@ export function createSchedules({one,run,fail,w,iso=()=>new Date().toISOString()
     if(!Object.keys(grid).length)throw fail('A javaslatból nem maradt használható cella.',400);
     write(PROP+cid,{grid,why,source:cleanText(source,60),created_at:iso()});return get(cid);
   }
+  // A batch file: {links:[{character_id,location_id,role,note}], people:[{character_id,grid,why}]}.
+  // Links are added as suggested place links first (so the places become his), then every grid is
+  // stored as a proposal for the owner – nothing goes live here.
+  function importFile(file){
+    if(typeof file!=='string'||!/^rutin-[\w-]+\/javaslat-[\w-]+\.json$/.test(file))throw fail('Csak 30_IMPORTS/rutin-…/javaslat-….json tölthető be.',400);
+    let data;try{data=JSON.parse(readFileSync(new URL(file,IMPORTS),'utf8'));}catch(e){throw fail('A fájl nem olvasható vagy nem érvényes JSON: '+e.message,400);}
+    const result={links:0,stored:[],failed:[]};
+    for(const l of Array.isArray(data?.links)?data.links:[]){
+      if(!one('SELECT 1 FROM characters WHERE id=?',l?.character_id)||!one('SELECT 1 FROM locations WHERE id=?',l?.location_id)||!['routine','other','work','home'].includes(l?.role)){result.failed.push({link:l,error:'hibás helykapcsolat'});continue;}
+      result.links+=Number(run('INSERT OR IGNORE INTO world_places VALUES(?,?,?,?,?,?,?)',randomUUID(),l.character_id,l.location_id,l.role,cleanText(l.note,300),'suggested',iso()).changes);}
+    for(const p of Array.isArray(data?.people)?data.people:[]){
+      try{const r=storeProposal(p.character_id,p,{source:'rutin-import '+file});result.stored.push({id:p.character_id,name:r.character.name,cells:Object.keys(r.proposal.grid).length,given:Object.keys(p.grid||{}).length});}
+      catch(e){result.failed.push({id:p?.character_id,name:p?.name,error:e.message});}}
+    return result;
+  }
   function decide(cid,accept){person(cid);const p=read(PROP+cid);if(!p)throw fail('Nincs függő javaslat.',409);drop(PROP+cid);
     return accept?save(cid,{grid:p.grid},{actor:'proposal-accepted'}):get(cid);}
-  return {get,save,undo,propose,storeProposal,decide,toEntries,toGrid,entryAt};
+  return {get,save,undo,propose,storeProposal,importFile,decide,toEntries,toGrid,entryAt};
 }

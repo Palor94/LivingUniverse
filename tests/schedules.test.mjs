@@ -40,4 +40,8 @@ test('schedules: grid save drives where he is; proposal only from his text and k
   ev=(await call('/api/play/whereabouts')).data.slots[2].people.find(p=>p.id===a.id);assert.equal(ev.location_id,gym);
   g=(await call('/api/play/schedules/'+a.id+'/undo',{})).data;assert.deepEqual(g.grid,{'2|este':cell(pub),'4|este':cell(pub)});
   assert.equal((await call('/api/play/schedules/'+a.id+'/proposal/reject',{})).status,409);
+  // A proposal written outside the app: unknown places and bad cells are dropped, the rest waits for the owner.
+  g=(await call('/api/play/schedules/'+a.id+'/proposal',{grid:{'5|este':{location_id:gym,activity:'edz, aztán a szaunában marad',privacy:'secret'},'5|reggel':{location_id:(await call('/api/locations',{name:'Idegen hely',kind:'tag'})).data.id},'9|este':{location_id:gym}},why:{'5|este':'heti rutin'},source:'teszt'})).data;
+  assert.deepEqual(g.proposal.grid,{'5|este':cell(gym,{activity:'edz, aztán a szaunában marad',privacy:'secret'})});assert.equal(g.proposal.source,'teszt');
+  assert.equal((await call('/api/play/schedules/import',{file:'../secret.json'})).status,400,'only the routine import folder');
 });

@@ -1699,6 +1699,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(p==='/api/play/readiness'&&m==='GET')return json(await readiness()),true;
     if(p==='/api/play/whereabouts'&&m==='GET')return json(whereabouts()),true;
     {const wm=p.match(/^\/api\/play\/characters\/([a-f0-9-]{36})\/whispers$/i);if(wm){if(m==='GET')return json({whispers:whispers(wm[1])}),true;if(m==='POST')return json(addWhisper(wm[1],body)),true;}}
+    if(p==='/api/play/schedules/import'&&m==='POST')return json(schedules.importFile(body?.file)),true;
     {const sc=p.match(/^\/api\/play\/schedules\/([a-f0-9-]{36})(?:\/(undo|propose|proposal|proposal\/accept|proposal\/reject))?$/i);
       if(sc){const [,cid,act]=sc;if(!act&&m==='GET')return json(schedules.get(cid)),true;if(!act&&m==='POST')return json(schedules.save(cid,body)),true;
         if(m==='POST'){if(act==='undo')return json(schedules.undo(cid)),true;if(act==='propose')return json(await schedules.propose(cid)),true;if(act==='proposal')return json(schedules.storeProposal(cid,body,{source:body?.source||'external'})),true;return json(schedules.decide(cid,act==='proposal/accept')),true;}}}
