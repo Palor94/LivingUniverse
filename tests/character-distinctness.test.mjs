@@ -87,6 +87,8 @@ test('same situation, five people: inner life reaches the 1:1 prompt and the gro
   // E5: everyone may disagree; the low-agreeableness one is told he contradicts.
   assert.ok(talk.every(u=>u.includes('NEM KELL EGYETÉRTENED')));
   assert.ok(talk[people.findIndex(c=>c.name==='Teszt Béla')].includes('Gyakran ellentmondasz'));
+  // S1: he knows why he is here (the café is his workplace, a weekday morning).
+  assert.ok(talk.every(u=>/MOST ÉPPEN: [^\n]*MIÉRT VAGY ITT: Itt dolgozol/.test(u)),talk[0].match(/MOST ÉPPEN[^\n]*/)?.[0]);
   // E3: the appraisal block is in his own prompt.
   assert.ok(talk.every(u=>u.includes('ÍGY HAT RÁD, AMI TÖRTÉNIK')));
   // E11: the whole inner life is there in company too.

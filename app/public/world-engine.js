@@ -6,7 +6,7 @@ import {sortNames} from './name-picker.js';
 import {t} from './i18n.js';
 
 export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{},openProfile=()=>{}}){
-  let levelsOpen=false,worldTab='today',selectedPlaceCharacter=null,onlyMissing=true;const tabs=['today','readiness','places','relations','settings'];
+  let levelsOpen=false,worldTab='today',selectedPlaceCharacter=null,onlyMissing=true;const tabs=['today','readiness','where','places','relations','settings'];
   const missing=c=>[!c.figures,!c.has_home,!c.places,!c.references].filter(Boolean).length;
   const usd=v=>Number(v||0).toFixed(v<0.1?4:2);
   // The last world round, step by step (2026-11-13): finished, still running, or stopped half-way
@@ -86,11 +86,21 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
       `<section class="we-section" data-we-section="places"><h2>${t('we.places')}</h2><p class="muted">${t('we.placesLead')}</p><button id="we-suggest" class="subtle">${t('we.suggestPlaces')}</button>
         ${s.characters.length?s.characters.map(c=>`<details class="we-character" data-world-character="${esc(c.id)}" ${selectedPlaceCharacter===c.id?'open':''}><summary>${esc(c.name)}</summary><div class="we-chips">${c.places.length?c.places.map(p=>`<span class="we-chip">${esc(p.location_name)} <select class="we-role" aria-label="${esc(t('we.roleLabel'))}" data-we-role-of="${p.id}">${['home','work','routine','other'].map(r=>`<option value="${r}"${r===p.role?' selected':''}>${t('we.role.'+r)}</option>`).join('')}</select><button class="subtle" data-we-remove="${p.id}" aria-label="✕">✕</button></span>`).join(''):`<small class="muted">${t('we.noPlaces')}</small>`}</div>
           <div class="we-row"><select data-we-loc="${c.id}" aria-label="${esc(t('we.placeLabel'))}">${s.locations.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('')}</select><select data-we-role="${c.id}" aria-label="${esc(t('we.roleLabel'))}">${roleOptions('routine')}</select><button class="subtle" data-we-add="${c.id}">${t('we.addPlace')}</button></div></details>`).join(''):`<p class="muted">${t('we.noCast')}</p>`}</section>`+
+      `<section class="we-section" data-we-section="where"><h2>${t('we.where')}</h2><p class="muted">${t('we.whereLead')}</p><div id="we-where"><p class="muted">${t('we.whereLoading')}</p></div></section>`+
       socialHtml+`<section class="we-section" data-we-section="relations"><h2>${t('we.levels')}</h2><p class="muted">${t('we.levelsLead')}</p><div class="we-row"><button id="we-propose-levels" class="subtle"${s.provider?'':' disabled'}>${t('we.proposeLevels')}</button><button id="we-show-levels" class="subtle">${t('we.showLevels')}</button></div><div id="we-levels"></div></section>`;
     for(const section of root.querySelectorAll('[data-we-section]'))if(section.dataset.weSection!==worldTab&&!(section.dataset.weSection==='status'&&['today','settings'].includes(worldTab)))section.remove();
     for(const button of root.querySelectorAll('[data-world-tab]'))button.onclick=()=>{worldTab=button.dataset.worldTab;levelsOpen=false;render(root).catch(error=>toast(error.message,true));};
     bind(root,s);bindLab();
+    if(worldTab==='where')await renderWhere(root);
     if(levelsOpen&&worldTab==='relations')await renderLevels(s.level_labels);
+  }
+  // Who is where today, in each part of the day, and why (S1, 2026-11-21); gaps open the person's places.
+  async function renderWhere(root){
+    const box=$('#we-where');if(!box)return;const r=await api('/api/play/whereabouts');
+    const gaps=r.gaps.length?`<div class="we-where-gaps"><b>${t('we.whereGaps',{count:r.gaps.length})}</b><ul>${r.gaps.map(g=>`<li><button class="vn-link" data-where-fix="${esc(g.id)}">${esc(g.name)}</button>: ${esc(g.text)}</li>`).join('')}</ul></div>`:`<p class="muted">${t('we.whereNoGaps')}</p>`;
+    const names=r.slots[0]?.people||[];
+    box.innerHTML=gaps+`<table class="we-table we-where"><thead><tr><th>${esc(r.day)} ${esc(r.weekday||'')}</th>${r.slots.map(s=>`<th${s.current?' class="we-now"':''}>${esc(s.label)}</th>`).join('')}</tr></thead><tbody>${names.map((p,i)=>`<tr><td>${esc(p.name)}</td>${r.slots.map(s=>{const x=s.people[i];return `<td${s.current?' class="we-now"':''}>${x.location?esc(x.location):'—'}${x.reason_label?`<br><small class="muted">${esc(x.reason_label)}</small>`:''}</td>`;}).join('')}</tr>`).join('')}</tbody></table>`;
+    for(const b of box.querySelectorAll('[data-where-fix]'))b.onclick=()=>{selectedPlaceCharacter=b.dataset.whereFix;worldTab='places';render(root).catch(error=>toast(error.message,true));};
   }
   function bindLab(){
     const box=$('#ml-box');if(!box)return;let loaded=false;

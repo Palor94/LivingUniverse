@@ -444,16 +444,19 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const own=w.placesOf(person.id).filter(p=>inWardrobe(p.location_id));
     return (own.find(p=>p.role==='home')||own[0])?.location_id||null;
   }
+  // S1 (2026-11-21): where everyone is AND why – appointment / event / schedule / place role /
+  // last seen – so the character knows why he is there and the owner can check it.
   function computePositions(c,cast){
-    const out=new Map(),slotId=SLOTS[c.slot_index].id;
+    const out=new Map(),why=new Map(),slotId=SLOTS[c.slot_index].id;out.why=why;
     const events=all("SELECT payload_json FROM world_events WHERE rewound_at IS NULL AND world_day=? AND status IN ('applied','accepted') AND json_extract(payload_json,'$.slot')=? ORDER BY rowid",c.day,slotId).map(e=>{try{return JSON.parse(e.payload_json);}catch{return null;}}).filter(p=>p&&Array.isArray(p.character_ids));
     for(const c2 of cast){
       // An accepted meeting with Palor wins over everything else at that time.
       let loc=one("SELECT location_id FROM play_appointments WHERE character_id=? AND world_day=? AND slot=? AND status='accepted' ORDER BY created_at DESC LIMIT 1",c2.id,c.day,slotId)?.location_id||null;
-      if(loc){out.set(c2.id,keepInWardrobe(c2,loc));continue;}
+      if(loc){out.set(c2.id,keepInWardrobe(c2,loc));why.set(c2.id,{kind:'appointment'});continue;}
       for(const p of events)if(p.location_id&&p.character_ids.includes(c2.id))loc=p.location_id;
+      if(loc)why.set(c2.id,{kind:'event'});
       // Weekly schedule (plan 3.2, 2026-11-15): a fixed place per weekday and day part.
-      if(!loc)loc=scheduled(c2.id,c.day,slotId);
+      if(!loc){loc=scheduled(c2.id,c.day,slotId);if(loc)why.set(c2.id,{kind:'schedule'});}
       if(!loc){
         // A street, stairwell or Káloz határa is walked through, never a place to be found in
         // (owner, 2026-11-15): such a link is skipped and his other places are used.
@@ -465,12 +468,34 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
         // Daytime may fall back to any linked place; at night only a real home counts,
         // otherwise the character is simply not on the map (never a guessed place).
         loc=c.slot_index===3?pick('home')||null:(c.slot_index<=1&&c.workday?pick('work')||pick('routine'):c.slot_index===2?pick('routine')||pick('home'):pick('home'))||pick('home')||places[0]?.location_id||null;
+        if(loc)why.set(c2.id,{kind:'place',role:places.find(p=>p.location_id===loc)?.role||'other'});
       }
       // No linked place at all: where today's world last saw him (any day part).
       if(!loc&&!w.placesOf(c2.id).length)loc=one("SELECT json_extract(payload_json,'$.location_id') l FROM world_events WHERE rewound_at IS NULL AND world_day=? AND json_extract(payload_json,'$.location_id') IS NOT NULL AND EXISTS(SELECT 1 FROM json_each(payload_json,'$.character_ids') WHERE value=?) ORDER BY rowid DESC LIMIT 1",c.day,c2.id)?.l||null;
+      if(loc&&!why.has(c2.id))why.set(c2.id,{kind:'last_seen'});
       out.set(c2.id,indoor(keepInWardrobe(c2,loc),c2,c.slot_index));
     }
     return out;
+  }
+  const REASON_TEXT={appointment:'Palorral beszéltétek meg, hogy most itt találkoztok.',event:'Ma ide hozott a nap egy eseménye.',schedule:'A heti rutinod szerint ilyenkor itt szoktál lenni.',
+    day_plan:'Mára ezt tervezted.',last_seen:'Ma itt voltál utoljára.',home:'Otthon vagy.',work:'Itt dolgozol, most munkaidő van.',routine:'Ez az egyik megszokott helyed ilyenkor.',other:'Ez az egyik helyed.'};
+  const REASON_LABEL={appointment:'találkozó Palorral',event:'mai esemény',schedule:'heti rutin',day_plan:'napi terv',last_seen:'ma itt látták utoljára',home:'otthon',work:'munkahely',routine:'megszokott hely',other:'kapcsolt hely'};
+  const reasonKey=r=>!r?null:r.kind==='place'?r.role:r.kind;
+  // Why he is where he is now, in his own words for his prompt (null when unknown).
+  function reasonOf(cid){const r=positions().why?.get(cid);const k=reasonKey(r);return k?REASON_TEXT[k]||null:null;}
+  // Owner view (S1): every meetable character in each part of today, with the reason, plus the gaps.
+  function whereabouts(){
+    const k=clock(),cast=w.meetable(),name=id=>one('SELECT name FROM locations WHERE id=?',id)?.name||null;
+    const slots=SLOTS.map((s,i)=>{const map=computePositions({...k,slot_index:i},cast);
+      return {slot:s.id,label:s.label,current:i===k.slot_index,people:cast.map(c=>{const loc=map.get(c.id)||null,r=map.why.get(c.id);return {id:c.id,name:c.name,location_id:loc,location:loc?name(loc):null,reason:reasonKey(r),reason_label:REASON_LABEL[reasonKey(r)]||null};})};});
+    const gaps=[];
+    for(const c of cast){
+      if(!w.placesOf(c.id).length)gaps.push({id:c.id,name:c.name,kind:'no_places',text:'Nincs egyetlen kapcsolt helye sem.'});
+      else if(!slots[3].people.find(p=>p.id===c.id)?.location_id)gaps.push({id:c.id,name:c.name,kind:'no_home_at_night',text:'Éjjel nincs hol lennie (nincs otthona).'});
+      let sched=null;try{sched=JSON.parse(one('SELECT value FROM application_settings WHERE key=?','world:schedule:'+c.id)?.value||'null');}catch{}
+      for(const e of Array.isArray(sched?.entries)?sched.entries:[])if(!one('SELECT 1 FROM locations WHERE id=?',e.location_id)){gaps.push({id:c.id,name:c.name,kind:'schedule_missing_place',text:'A heti rutinja nem létező helyre mutat.'});break;}
+    }
+    return {day:k.day,weekday:k.weekday,slots,gaps};
   }
   // A building with an entry room (a home's living room) is never a room Palor stands in: he is
   // always set down in the entry room. Someone placed at the building itself would be invisible in
@@ -1181,7 +1206,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       `KAPCSOLATOD PALORRAL [${LEVELS[level??0]}]:\n`+(clip(note,1500)||'nincs megadva'),
       ...(voice?[PALOR_VOICE_HEAD+voice]:[]),
       'ÍGY BESZÉLSZ VELE: '+LEVEL_STYLE[String(level??0)]+'. '+TIME_MOOD[k.slot_index]+'.',
-      channel==='in_person'?'MOST ÉPPEN: '+activityOf(cid,here?.location_id):'MOST ÉPPEN: telefonon írsz Palorral.',
+      channel==='in_person'?'MOST ÉPPEN: '+activityOf(cid,here?.location_id)+(reasonOf(cid)?' MIÉRT VAGY ITT: '+reasonOf(cid):''):'MOST ÉPPEN: telefonon írsz Palorral.',
       ...(shared?['KÖZÖS MÚLTATOK PALORRAL (ahogy te emlékszel rá):\n'+clip(shared,1500)]:[]),
       ...(earlier.length?['KORÁBBI BESZÉLGETÉSEITEK:\n'+earlier.join('\n')]:[]),
       'LEGUTÓBB PALORRAL: '+(lastTalk?lastTalk+sinceText:'még nem beszélgettetek'),
@@ -1599,6 +1624,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       if(body.verdict===-1||body.verdict===1){const pl=JSON.parse(row.payload_json),ids=[...(pl.character_ids||[])];if(pl.with_palor&&w.palor())ids.push(w.palor().id);const cur=one('SELECT media_id FROM play_event_media WHERE event_id=?',row.id)?.media_id;if(cur)director.feedback({media_id:cur,panel:'journal',characters:ids,verdict:body.verdict});}
       return json({media:await director.forEvent(row,{repick:body.verdict!==1})}),true;}
     if(p==='/api/play/readiness'&&m==='GET')return json(await readiness()),true;
+    if(p==='/api/play/whereabouts'&&m==='GET')return json(whereabouts()),true;
     if(p==='/api/play/export'&&m==='GET'){
       // The story so far as a Markdown file (journal + Palor's conversations), newest last.
       const ev=journal().events.slice().reverse();let md='# Élő világ – a történet eddig\n';let day='';
