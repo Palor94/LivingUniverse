@@ -25,6 +25,7 @@ import {installWorldSocial} from './world-social.mjs';
 import {installInnerState,effectiveIntensity} from './inner-state.mjs';
 import {installKnownPlaces} from './known-places.mjs';
 import {installMorning} from './morning.mjs';
+import {installHiddenEvents} from './hidden-events.mjs';
 import {bm25} from './world-text-rank.mjs';
 import {plan as offscreenPlan,record as offscreenRecord} from './offscreen-life.mjs';
 import {readFileSync as readSql} from 'node:fs';
@@ -267,7 +268,15 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   // Local and free (no embedding, no AI call); the newest three always stay in, so nothing that
   // just happened is forgotten. Returned oldest first, like recentMemories.
   const stem=w=>{w=w.toLocaleLowerCase('hu');return w.length>4&&/[aeáé]$/.test(w)?w.slice(0,-1):w;};
-  const wordsOf=s=>[...new Set((String(s).toLocaleLowerCase('hu').match(/\p{L}{5,}/gu)||[]).map(x=>x.slice(0,5)))];
+  // Recall words (benchmark 2026-11-22): a crude Hungarian stem = the first 5 letters, with the
+  // lengthened a/e folded (kutya → kutyámat), 4-letter words too (names: Kata → Katával) except
+  // a few function words; compoundOf finds a stem inside a longer word (verseny → horgászversenyt)
+  // and a short word inflected (Kata → Katával).
+  const FOLD=x=>x.replace(/á/g,'a').replace(/é/g,'e');
+  const STOP4=new Set(['hogy','volt','csak','mert','vagy','amit','akik','majd','nagy','kell','lesz','lett','neki','most','itt','ahol','amik','azok','ezek','olyan','mint','meg','nem','igen','vele','volt','lehet','minden','nekem','neked','akkor','aztan','mikor','talan','persze']);
+  const tokensOf=s=>(FOLD(String(s).toLocaleLowerCase('hu')).match(/\p{L}{4,}/gu)||[]).filter(x=>!STOP4.has(x));
+  const wordsOf=s=>[...new Set(tokensOf(s).map(x=>x.slice(0,5)))];
+  const compoundOf=(s,stems)=>{const all=tokensOf(s),long=all.filter(x=>x.length>=8);return stems.filter(q=>q.length===4?all.some(x=>x.length>4&&x.startsWith(q)):q.length===5&&long.some(x=>x.indexOf(q)>=3));};
   // Limited attention (2026-11-22): how much of what he is told he takes in. Upset (a strong
   // negative mood that has not faded) or inattentive (Figyelmesség ≤3/10): may miss a story;
   // attentive (≥7/10) and not upset: may take in a second one.
@@ -294,7 +303,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     // neutral, ±1.5) and reinforcement (a memory that keeps coming back, up to +1). Weights after
     // Generative Agents retrieve.py (relevance > importance > recency, Apache-2.0) and AI Town
     // memory.ts (MIT), kept on this engine's scale so earlier behaviour holds when nothing is known.
-    const terms=rows.map(wordsOf),rel=bm25(moment,terms),top=Math.max(0,...rel);
+    const terms=rows.map(m=>{const own=wordsOf(m);return [...own,...compoundOf(m,moment).filter(q=>!own.includes(q))];}),rel=bm25(moment,terms),top=Math.max(0,...rel);
     const scored=rows.map((m,i)=>{const low=m.toLocaleLowerCase('hu'),own=terms[i],r=rowsFull[i];
       let s=2*Math.exp(-i/fade);
       if(hurt&&HURT.test(m))s+=hurt;
@@ -642,7 +651,9 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     return false;
   }
   // Shared with Play mode and rewind (same cost cap, same memories and levels).
-  const internals={inner,knownPlaces,morning,attention:cid=>attentionOf(cid),ask,people,palor,profile,profileText,autonomous,meetable,placesOf,levelOf,setLevel,remember,recentMemories,recallMemories,groupIds,openThreadsFor,addThreads,resolveThreads,noteLapsed,threadsOf,social,beliefsFor:social.beliefsFor};
+  // N1 (2026-11-22): owner-authored hidden events opened by conditions.
+  const hiddenEvents=installHiddenEvents({db,one,all,run,now,slots:SLOTS,levelOf,palorId:()=>palor()?.id});
+  const internals={inner,knownPlaces,morning,hiddenEvents,attention:cid=>attentionOf(cid),ask,people,palor,profile,profileText,autonomous,meetable,placesOf,levelOf,setLevel,remember,recentMemories,recallMemories,groupIds,openThreadsFor,addThreads,resolveThreads,noteLapsed,threadsOf,social,beliefsFor:social.beliefsFor};
   // Job ledger (2026-11-13): a round whose status says "running" while no round runs in this
   // process was cut off (crash, restart). It is shown as stuck and can be marked interrupted.
   function roundState(){return {running,last:lastRound(),spent_today:spentToday(),cap:settings().daily_cap_usd};}

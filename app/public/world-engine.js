@@ -6,7 +6,7 @@ import {sortNames} from './name-picker.js';
 import {t} from './i18n.js';
 
 export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{},openProfile=()=>{}}){
-  let levelsOpen=false,worldTab='today',selectedPlaceCharacter=null,onlyMissing=true;const tabs=['today','readiness','where','places','relations','settings'];
+  let levelsOpen=false,worldTab='today',selectedPlaceCharacter=null,onlyMissing=true;const tabs=['today','readiness','where','schedule','hidden','places','relations','settings'];let scheduleWho=null;
   const missing=c=>[!c.figures,!c.has_home,!c.places,!c.references].filter(Boolean).length;
   const usd=v=>Number(v||0).toFixed(v<0.1?4:2);
   // The last world round, step by step (2026-11-13): finished, still running, or stopped half-way
@@ -86,12 +86,16 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
       `<section class="we-section" data-we-section="places"><h2>${t('we.places')}</h2><p class="muted">${t('we.placesLead')}</p><button id="we-suggest" class="subtle">${t('we.suggestPlaces')}</button>
         ${s.characters.length?s.characters.map(c=>`<details class="we-character" data-world-character="${esc(c.id)}" ${selectedPlaceCharacter===c.id?'open':''}><summary>${esc(c.name)}</summary><div class="we-chips">${c.places.length?c.places.map(p=>`<span class="we-chip">${esc(p.location_name)} <select class="we-role" aria-label="${esc(t('we.roleLabel'))}" data-we-role-of="${p.id}">${['home','work','routine','other'].map(r=>`<option value="${r}"${r===p.role?' selected':''}>${t('we.role.'+r)}</option>`).join('')}</select><button class="subtle" data-we-remove="${p.id}" aria-label="✕">✕</button></span>`).join(''):`<small class="muted">${t('we.noPlaces')}</small>`}</div>
           <div class="we-row"><select data-we-loc="${c.id}" aria-label="${esc(t('we.placeLabel'))}">${s.locations.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('')}</select><select data-we-role="${c.id}" aria-label="${esc(t('we.roleLabel'))}">${roleOptions('routine')}</select><button class="subtle" data-we-add="${c.id}">${t('we.addPlace')}</button></div></details>`).join(''):`<p class="muted">${t('we.noCast')}</p>`}</section>`+
+      `<section class="we-section" data-we-section="schedule"><h2>${t('we.schedule')}</h2><p class="muted">${t('we.scheduleLead')}</p><div id="we-schedule"><p class="muted">${t('we.whereLoading')}</p></div></section>`+
+      `<section class="we-section" data-we-section="hidden"><h2>${t('we.hidden')}</h2><p class="muted">${t('we.hiddenLead')}</p><div id="we-hidden"><p class="muted">${t('we.whereLoading')}</p></div></section>`+
       `<section class="we-section" data-we-section="where"><h2>${t('we.where')}</h2><p class="muted">${t('we.whereLead')}</p><div id="we-where"><p class="muted">${t('we.whereLoading')}</p></div></section>`+
       socialHtml+`<section class="we-section" data-we-section="relations"><h2>${t('we.levels')}</h2><p class="muted">${t('we.levelsLead')}</p><div class="we-row"><button id="we-propose-levels" class="subtle"${s.provider?'':' disabled'}>${t('we.proposeLevels')}</button><button id="we-show-levels" class="subtle">${t('we.showLevels')}</button></div><div id="we-levels"></div></section>`;
     for(const section of root.querySelectorAll('[data-we-section]'))if(section.dataset.weSection!==worldTab&&!(section.dataset.weSection==='status'&&['today','settings'].includes(worldTab)))section.remove();
     for(const button of root.querySelectorAll('[data-world-tab]'))button.onclick=()=>{worldTab=button.dataset.worldTab;levelsOpen=false;render(root).catch(error=>toast(error.message,true));};
     bind(root,s);bindLab();
     if(worldTab==='where')await renderWhere(root);
+    if(worldTab==='schedule')await renderSchedule();
+    if(worldTab==='hidden')await renderHidden();
     if(levelsOpen&&worldTab==='relations')await renderLevels(s.level_labels);
   }
   // Who is where today, in each part of the day, and why (S1, 2026-11-21); gaps open the person's places.
@@ -112,6 +116,51 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
     if(names.length)await listWhispers();
     for(const b of box.querySelectorAll('[data-where-fix]'))b.onclick=()=>{selectedPlaceCharacter=b.dataset.whereFix;worldTab='places';render(root).catch(error=>toast(error.message,true));};
   }
+  // S2 (2026-11-22): week × day-part grid per character; proposal from his own routine text, owner accepts.
+  async function renderSchedule(){
+    const box=$('#we-schedule');if(!box)return;
+    const people=(await api('/api/play/whereabouts')).slots[0]?.people||[];if(!people.length){box.innerHTML=`<p class="muted">${t('we.scheduleNobody')}</p>`;return;}
+    if(!people.some(p=>p.id===scheduleWho))scheduleWho=people[0].id;
+    const r=await api('/api/play/schedules/'+encodeURIComponent(scheduleWho)),days=[1,2,3,4,5,6,0];
+    const opts=sel=>`<option value="">—</option>`+r.places.map(p=>`<option value="${esc(p.id)}"${p.id===sel?' selected':''}>${esc(p.name)}</option>`).join('');
+    const name=id=>r.places.find(p=>p.id===id)?.name||id;
+    const prop=r.proposal?`<div class="we-where-gaps"><b>${t('we.scheduleProposal')}</b><ul>${Object.entries(r.proposal.grid).map(([k,v])=>{const [d,sl]=k.split('|');return `<li>${esc(t('we.day.'+d))} ${esc(r.slots.find(x=>x.id===sl)?.label||sl)}: ${esc(name(v))}${r.proposal.why?.[k]?` <span class="muted">(${esc(r.proposal.why[k])})</span>`:''}</li>`;}).join('')}</ul>
+      <div class="we-row"><button id="we-sch-accept" class="primary">${t('we.scheduleAccept')}</button><button id="we-sch-reject" class="subtle">${t('we.scheduleReject')}</button></div></div>`:'';
+    box.innerHTML=`<div class="we-row"><select id="we-sch-who" aria-label="${esc(t('we.whisperWho'))}">${people.map(p=>`<option value="${esc(p.id)}"${p.id===scheduleWho?' selected':''}>${esc(p.name)}</option>`).join('')}</select></div>`
+      +(r.routine?`<p><b>${t('we.scheduleRoutine')}</b> ${esc(r.routine)}</p>`:`<p class="muted">${t('we.scheduleNoRoutine')}</p>`)
+      +(r.places.length?'':`<p class="muted">${t('we.scheduleNoPlaces')}</p>`)
+      +`<table class="we-table"><thead><tr><th></th>${r.slots.map(x=>`<th>${esc(x.label)}</th>`).join('')}</tr></thead><tbody>${days.map(d=>`<tr><td>${esc(t('we.day.'+d))}</td>${r.slots.map(x=>`<td><select data-sch-cell="${d}|${esc(x.id)}">${opts(r.grid[d+'|'+x.id])}</select></td>`).join('')}</tr>`).join('')}</tbody></table>`
+      +(r.seasonal.length?`<p class="muted">${t('we.scheduleSeasonal',{count:r.seasonal.length})}</p>`:'')
+      +`<div class="we-row"><button id="we-sch-save" class="primary">${t('we.scheduleSave')}</button><button id="we-sch-propose" class="subtle"${r.routine?'':' disabled'}>${t('we.schedulePropose')}</button>${r.has_previous?`<button id="we-sch-undo" class="subtle">${t('we.scheduleUndo')}</button>`:''}</div>`+prop;
+    const base='/api/play/schedules/'+encodeURIComponent(scheduleWho);
+    $('#we-sch-who').onchange=wrap(async e=>{scheduleWho=e.target.value;await renderSchedule();});
+    $('#we-sch-save').onclick=wrap(async()=>{const grid={};const cells=box.querySelectorAll('[data-sch-cell]');for(const sel of cells)if(sel.value)grid[sel.dataset.schCell]=sel.value;await api(base,{grid});toast(t('play.saved'));await renderSchedule();});
+    $('#we-sch-propose').onclick=wrap(async()=>{await api(base+'/propose',{});await renderSchedule();});
+    if($('#we-sch-undo'))$('#we-sch-undo').onclick=wrap(async()=>{await api(base+'/undo',{});await renderSchedule();});
+    if($('#we-sch-accept'))$('#we-sch-accept').onclick=wrap(async()=>{await api(base+'/proposal/accept',{});toast(t('play.saved'));await renderSchedule();});
+    if($('#we-sch-reject'))$('#we-sch-reject').onclick=wrap(async()=>{await api(base+'/proposal/reject',{});await renderSchedule();});
+  }
+  // N1 (2026-11-22): hidden events – owner writes a brief and the conditions; drafts open only once approved.
+  async function renderHidden(){
+    const box=$('#we-hidden');if(!box)return;
+    const [{events},wh]=await Promise.all([api('/api/play/hidden-events'),api('/api/play/whereabouts')]),people=wh.slots[0]?.people||[];
+    const who=ids=>ids.map(id=>people.find(p=>p.id===id)?.name||id).join(', ')||t('we.hiddenAnyone');
+    box.innerHTML=(events.length?`<table class="we-table"><thead><tr><th>${t('we.hiddenTitle')}</th><th>${t('we.hiddenWho')}</th><th>${t('we.hiddenStatus')}</th><th></th></tr></thead><tbody>${events.map(e=>`<tr><td><b>${esc(e.title)}</b><br><small class="muted">${esc(e.brief)}</small><br><code>${esc(JSON.stringify(e.condition))}</code></td><td>${esc(who(e.character_ids))}</td>
+      <td>${esc(t('we.hiddenStatus.'+e.status))}${e.revealed?`<br><small>${esc(t('we.hiddenOpened',{day:e.revealed.world_day,slot:e.revealed.slot}))}</small>`:''}</td>
+      <td>${e.status!=='approved'?`<button class="subtle" data-he="${esc(e.id)}" data-he-act="approve">${t('we.hiddenApprove')}</button>`:''}${e.status!=='archived'?`<button class="subtle" data-he="${esc(e.id)}" data-he-act="archive">${t('we.hiddenArchive')}</button>`:''}</td></tr>`).join('')}</tbody></table>`:`<p class="muted">${t('we.hiddenNone')}</p>`)
+      +`<details class="we-whisper"><summary><b>${t('we.hiddenNew')}</b></summary><form id="we-he-form" class="ml-form">
+        <label class="ml-wide">${t('we.hiddenTitle')}<input name="title" maxlength="120" required></label>
+        <label class="ml-wide">${t('we.hiddenBrief')}<textarea name="brief" maxlength="1200" rows="3" required placeholder="${esc(t('we.hiddenBriefHint'))}"></textarea></label>
+        <label class="ml-wide">${t('we.hiddenWho')}<select name="who" multiple size="5">${people.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
+        <label class="ml-wide">${t('we.hiddenCondition')}<textarea name="condition" rows="3">{"day_gte":"${esc(wh.day)}"}</textarea></label>
+        <small class="muted ml-wide">${t('we.hiddenConditionHelp')}</small>
+        <label>${t('we.hiddenPriority')}<input name="priority" type="number" min="-10" max="10" value="0"></label>
+        <button class="primary">${t('we.hiddenSave')}</button></form></details>`;
+    const actions=box.querySelectorAll('[data-he]');
+    for(const b of actions)b.onclick=wrap(async()=>{await api('/api/play/hidden-events/'+encodeURIComponent(b.dataset.he)+'/'+b.dataset.heAct,{});await renderHidden();});
+    $('#we-he-form').onsubmit=wrap(async e=>{e.preventDefault();const f=e.target;let condition;try{condition=JSON.parse(f.condition.value);}catch{toast(t('we.hiddenBadJson'),true);return;}
+      await api('/api/play/hidden-events',{title:f.title.value,brief:f.brief.value,condition,character_ids:[...f.who.selectedOptions].map(o=>o.value),priority:Number(f.priority.value)||0});toast(t('play.saved'));await renderHidden();});
+  }
   function bindLab(){
     const box=$('#ml-box');if(!box)return;let loaded=false;
     box.addEventListener('toggle',wrap(async()=>{if(!box.open||loaded)return;loaded=true;
@@ -127,7 +176,7 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
       out.innerHTML=`<p class="muted">${t('ml.summary',{total:r.total,level:t('ml.level.'+(r.max_level||'non_intimate'))})}</p>`+(r.items.length?`<div class="ml-grid">${r.items.map((m,i)=>`<article class="ml-card"><div class="ml-thumb${m.level!=='non_intimate'?' ml-blur':''}" data-ml-reveal>${m.kind==='video'?`<video src="/media/${encodeURIComponent(m.media_id)}" muted preload="metadata"></video>`:`<img src="/thumb/${encodeURIComponent(m.media_id)}" alt="" loading="lazy">`}<span class="ml-rank">${i+1}</span></div>
         <small><b>${t('ml.level.'+m.level)}</b> · ${t('ml.score',{score:m.score})}${m.kind==='video'?' · '+t('ml.video'):''}${m.complete?'':' · '+t('ml.partial')} · ${t('ml.confidence.'+m.confidence)}</small><small class="muted">${esc(m.reasons.join(' · '))}</small>
         <div class="we-row"><button class="subtle" data-ml-verdict="1" data-ml-media="${esc(m.media_id)}">👍 ${t('play.mediaFits')}</button><button class="subtle" data-ml-verdict="-1" data-ml-media="${esc(m.media_id)}" aria-label="${esc(t('play.mediaWrong'))}">👎</button></div>
-        <label class="ml-level">${t('ml.setLevel')}<select data-ml-level="${esc(m.media_id)}"><option value="">—</option>${['non_intimate','nudity','sexual_activity'].map(l=>`<option value="${l}">${t('ml.level.'+l)}</option>`).join('')}</select></label></article>`).join('')}</div>`:`<p>${t('ml.nothing')}</p>`);
+        <label class="ml-level">${t('ml.setLevel')}<select data-ml-level="${esc(m.media_id)}"><option value="">—</option>${['non_intimate','shirtless','nudity','sexual_activity'].map(l=>`<option value="${l}">${t('ml.level.'+l)}</option>`).join('')}</select></label></article>`).join('')}</div>`:`<p>${t('ml.nothing')}</p>`);
       // The creator's own label beats the AI analysis (and the "unknown counts as intimate" rule).
       for(const s of out.querySelectorAll('[data-ml-level]'))s.onchange=wrap(async()=>{if(!s.value)return;await api('/api/play/content',{media_id:s.dataset.mlLevel,level:s.value});toast(t('ml.levelSaved'));});
       for(const th of out.querySelectorAll('[data-ml-reveal]'))th.onclick=()=>th.classList.remove('ml-blur');

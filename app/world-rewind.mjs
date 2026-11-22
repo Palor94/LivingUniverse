@@ -63,6 +63,7 @@ export function installWorldRewind({db,one,all,run,transaction,fail,worldEngine,
       payload.inner=w.inner?w.inner.rewindAfter(time,at):[];
       payload.places=w.knownPlaces?w.knownPlaces.rewindAfter(time,at):[];
       payload.day_plans=w.morning?w.morning.rewindAfter(time,at):[];
+      payload.hidden=w.hiddenEvents?w.hiddenEvents.rewindAfter(time,at):[];
       // Each pair changed after the save point goes back to its value at that moment.
       for(const pair of all('SELECT DISTINCT source_id,target_id FROM world_level_revisions WHERE created_at>?',time)){
         const before=one('SELECT level FROM world_relationship_levels WHERE source_id=? AND target_id=?',pair.source_id,pair.target_id)?.level??null;
@@ -107,6 +108,7 @@ export function installWorldRewind({db,one,all,run,transaction,fail,worldEngine,
       if(p.inner&&w.inner)w.inner.undoRewind(p.inner);
       if(p.places&&w.knownPlaces)w.knownPlaces.undoRewind(p.places);
       if(p.day_plans&&w.morning)w.morning.undoRewind(p.day_plans);
+      if(p.hidden&&w.hiddenEvents)w.hiddenEvents.undoRewind(p.hidden);
       for(const id of p.memories){const m=one('SELECT * FROM character_memories WHERE id=?',id);if(!m||m.status!=='rewound')continue;
         run("UPDATE character_memories SET status='approved',version=version+1,updated_at=? WHERE id=?",at,id);
         run('INSERT INTO character_memory_revisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',randomUUID(),id,m.version+1,m.kind,m.text,m.related_event_id,m.visibility,'approved',m.belief_accuracy,'Visszatekerés visszavonva','rewind_undo',at);}

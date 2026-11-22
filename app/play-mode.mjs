@@ -27,6 +27,7 @@ import {stanceLines} from './stance.mjs';
 const FACT_RULES='Ténykezelés: kérés, ígéret, próbálkozás, kérdés, feltételezés vagy idézett beszámoló NEM megtörtént esemény ("megígérte, hogy visszaadja" nem azt jelenti, hogy visszaadta; amit valaki csak hallott, az nem a saját élménye); minden mondat a kimondójáé, az "én" mindig a beszélőt jelenti; Palor döntéseit, érzéseit és beleegyezését ne találd ki, csak azt, amit kimondott vagy tett.';
 import {effectiveIntensity} from './inner-state.mjs';
 import {createPlayRecords} from './play/records.mjs';
+import {createSchedules} from './play/schedules.mjs';
 import {TALK_MINUTES} from './game-clock.mjs';
 import {kindOf,KIND_LABEL,chains,anchorOf as siteOf,townOf,travelMinutes,vehicleOwner,rollEncounter,isSettlement,isRegion,isPassage,isOriginName,originChild,originIndex,arrivalOf,passagesOf,travelOptions,trainBetween,TRAVEL_MODES,walkOnly,bikeAllowed,trainRunsAt,ridesWith,transportPlace,tripScenePlaces,rollRoadside} from './place-network.mjs';
 import {installPlayStories,storyTownOf,STORY_RATES} from './play-stories.mjs';
@@ -427,6 +428,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   // Cached (C3, 2026-11-14) while nothing could have moved anyone: same world day and day part,
   // same cast, and no write since (total_changes() counts this connection's writes, data_version
   // another connection's). Any write (appointment, invitation, wait, rewind…) recomputes.
+  // S2 (2026-11-22): weekly schedule editor and owner-approved proposals.
+  const schedules=createSchedules({one,run,fail,w:worldEngine.internals});
   let posCache=null;
   function positions(){
     const c=clock(),cast=w.meetable();
@@ -946,6 +949,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const user=[`SZEREPLŐ: ${c.name}`,'PROFIL:\n'+w.profileText(c.profile,{explicit}),...(look.length?['JÓVÁHAGYOTT MEGJELENÉS:\n'+look.join('\n')]:[]),...(directorText(cid)?[directorText(cid)]:[]),
       ...(palorProfile||palorLook.length?['PALOR (a játékos szereplője):\n'+[palorProfile,...(palorLook.length?['JÓVÁHAGYOTT MEGJELENÉSE:\n'+palorLook.join('\n')]:[])].filter(Boolean).join('\n')]:[]),
       ...(guests.length?['A JELENETHEZ CSATLAKOZOTT ÚJ SZEREPLŐ(K) (felnőtt férfiak):\n'+guests.map(g=>`- ${g.name}: ${g.description}`).join('\n')]:[]),
+      ...(()=>{const ev=w.hiddenEvents?.currentFor(cid,{day:k.day,slot:SLOTS[k.slot_index].id});return ev?['A JELENETBEN MOST KIBONTAKOZÓ FORDULAT (a szereplő ezt hozza elő; ne fedd fel előre, csak ami már elhangzott):\n'+ev.brief]:[];})(),
       `JELENET: ${channel==='phone'?'telefonos beszélgetés':here?.path||here?.name||'ismeretlen hely'}, ${k.weekday} ${k.slot}.`,...(recent?['A BESZÉLGETÉS VÉGE:\n'+recent]:[]),'A JÁTÉKOS UTASÍTÁSA: '+directive].join('\n\n');
     let out=await w.ask(system,user,900);
     if(out?.__truncated)out={answer:partialJsonString(out.raw,'answer')||''};
@@ -1247,6 +1251,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       ...(()=>{const a=agendaFor({lapsed:threads.lapsed,inner:w.inner?.current(cid),profile:c.profile,early:history.length<6});return a?[a]:[];})(),
       // Whispers: what is on his mind (owner-planted, his own thought now).
       ...(()=>{const x=activeWhispers(cid,k.day);return x.length?['EZ JÁR A FEJEDBEN (a saját gondolatod; hiszed, akkor is, ha tévedsz; a természeted szerint hat rád, ne mondd ki szó szerint):\n'+x.map(v=>'- '+v.text).join('\n')]:[];})(),
+      // N1 hidden events: an owner-approved event whose conditions hold opens in this scene (one per day part).
+      ...(()=>{const ev=w.hiddenEvents?.openFor(cid,{day:k.day,weekday:weekdayOf(k.day),slot:SLOTS[k.slot_index].id});return ev?[w.hiddenEvents.promptLine(ev)]:[];})(),
       // Known places: only these may be described concretely.
       ...(()=>{const x=w.knownPlaces?.promptLine(cid);return x?[x]:[];})(),
       // E8: how he sees himself lately (from his reflections).
@@ -1667,6 +1673,24 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(p==='/api/play/readiness'&&m==='GET')return json(await readiness()),true;
     if(p==='/api/play/whereabouts'&&m==='GET')return json(whereabouts()),true;
     {const wm=p.match(/^\/api\/play\/characters\/([a-f0-9-]{36})\/whispers$/i);if(wm){if(m==='GET')return json({whispers:whispers(wm[1])}),true;if(m==='POST')return json(addWhisper(wm[1],body)),true;}}
+    {const sc=p.match(/^\/api\/play\/schedules\/([a-f0-9-]{36})(?:\/(undo|propose|proposal\/accept|proposal\/reject))?$/i);
+      if(sc){const [,cid,act]=sc;if(!act&&m==='GET')return json(schedules.get(cid)),true;if(!act&&m==='POST')return json(schedules.save(cid,body)),true;
+        if(m==='POST'){if(act==='undo')return json(schedules.undo(cid)),true;if(act==='propose')return json(await schedules.propose(cid)),true;return json(schedules.decide(cid,act==='proposal/accept')),true;}}}
+    // N1 hidden events (owner-authored; drafts open only after approval).
+    if(p==='/api/play/hidden-events'&&w.hiddenEvents){if(m==='GET')return json({events:w.hiddenEvents.list()}),true;
+      if(m==='POST'){try{return json(w.hiddenEvents.create(body,{status:body?.approve===true?'approved':'draft'})),true;}catch(e){throw fail(e.message,e.status||400);}}}
+    // Optional AI planner (off unless the owner sets play:hidden-events:planner = on): only 'proposed' drafts, never live.
+    if(p==='/api/play/hidden-events/propose'&&m==='POST'&&w.hiddenEvents){
+      if(one('SELECT value FROM application_settings WHERE key=?','play:hidden-events:planner')?.value!=='on')throw fail('Az AI-tervező ki van kapcsolva.',409);
+      const pid=w.palor()?.id,cast=w.meetable().filter(c=>c.id!==pid).slice(0,12);if(!cast.length)throw fail('Nincs szereplő, akinek eseményt lehetne javasolni.',409);
+      const sys='Rejtett eseményeket javasolsz egy élő világhoz. Csak a megadott profilokból dolgozz, új életrajzi tényt ne találj ki. Palort a játékos viszi, neki ne adj eseményt. Mindenki felnőtt férfi. '
+        +'Legfeljebb 3 javaslat. Feltétel-levelek: day_gte, day_lte, weekday_in, slot_in (reggel/delutan/este/ejszaka), level (szereplő-azonosító + gte/lte), revealed (+slots_since_gte); kombinálható all/any/not. '
+        +'Csak JSON: {"events":[{"title":"","brief":"rövid vázlat, nem kész próza","character_ids":[""],"condition":{}}]}';
+      const u=cast.map(c=>`## ${c.name} (${c.id})\n`+clip(w.profileText(c.profile,{explicit:false}),900)).join('\n\n');
+      const out=await w.ask(sys,u,1200,{purpose:'world'});const made=[];
+      for(const e of Array.isArray(out?.events)?out.events.slice(0,3):[]){try{made.push(w.hiddenEvents.create(e,{actor:'ai-planner',status:'proposed'}));}catch{}}
+      return json({events:made}),true;}
+    {const he=p.match(/^\/api\/play\/hidden-events\/([a-f0-9-]{36})\/(approve|archive|draft)$/i);if(he&&m==='POST'&&w.hiddenEvents){try{return json(w.hiddenEvents.setStatus(he[1],{approve:'approved',archive:'archived',draft:'draft'}[he[2]])),true;}catch(e){throw fail(e.message,e.status||400);}}}
     {const wd=p.match(/^\/api\/play\/whispers\/([a-f0-9-]{36})\/withdraw$/i);if(wd&&m==='POST')return json(withdrawWhisper(wd[1])),true;}
     if(p==='/api/play/export'&&m==='GET'){
       // The story so far as a Markdown file (journal + Palor's conversations), newest last.
