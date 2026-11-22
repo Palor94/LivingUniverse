@@ -1339,7 +1339,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const STAGE_ORDER={none:0,flirt:1,intimate:2};
     const gStage=people.map(c=>intimacyStage(c.id)).reduce((m,s)=>STAGE_ORDER[s]<STAGE_ORDER[m]?s:m,'intimate');
     const gIntimate=gStage==='intimate',gBeats=gIntimate?BEATS:['talk','flirt'];
-    const system=`Egy élő világ társas jelenetét írod: Palor ${names.join(', ')} társaságában van itt: ${here.path||here.name}, ${k.weekday} ${k.slot}. Mindenki a saját hangján, magyarul, röviden (1-2 mondat) szól; nem kell mindenkinek megszólalnia, és reagálhatnak egymásra is. Minden kör vigye előre a jelenetet valami újjal; senki ne ismételje a saját vagy a többiek korábbi mondatait, fordulatait, és ne kezdje ugyanúgy. Csak a profiljukból, a Palorhoz fűződő kapcsolatukból és a mai napjukból dolgozz; ne találj ki új tényt a múltról. Palor titkos érzéseit senki nem ismeri. Mindenki felnőtt. ${gIntimate?'Ez a társaság közel áll Palorhoz: a jelenet szexuálissá is válhat, ha a résztvevők tényleg odáig jutnak és akarják. Akkor írd nyíltan, kendőzetlenül, mindenki a saját hangján, a vágyai és a profiljában leírt szexuális preferenciái szerint; bárki kezdeményezhet, és bárki nemet mondhat vagy kiszállhat.':'Ez társas jelenet: nincs benne intim vagy szexuális tartalom.'} "beat": hol tart most a jelenet (${gBeats.join(' / ')}); csak akkor lépj tovább, ha tényleg odáig jutottak. ${CHOICE_RULES(gIntimate,{group:true})} Csak JSON: {"replies":[{"name":"${names[0]}","text":"..."}],"beat":"${gBeats.join('|')}","choices":["...","...","..."]} – 1-3 válasz, csak ezektől: ${names.join(', ')}.`;
+    const system=`Egy élő világ társas jelenetét írod: Palor ${names.join(', ')} társaságában van itt: ${here.path||here.name}, ${k.weekday} ${k.slot}. Mindenki a saját hangján, magyarul, röviden (1-2 mondat) szól; nem kell mindenkinek megszólalnia, és reagálhatnak egymásra is. Minden kör vigye előre a jelenetet valami újjal; senki ne ismételje a saját vagy a többiek korábbi mondatait, fordulatait, és ne kezdje ugyanúgy. Mindenki csak a saját szavait és látható tetteit mondja; senki nem dönt egy másik szereplő szavairól, gondolatairól vagy érzéseiről, és Palor helyett soha senki nem beszél. Csak a profiljukból, a Palorhoz fűződő kapcsolatukból és a mai napjukból dolgozz; ne találj ki új tényt a múltról. Palor titkos érzéseit senki nem ismeri. Mindenki felnőtt. ${gIntimate?'Ez a társaság közel áll Palorhoz: a jelenet szexuálissá is válhat, ha a résztvevők tényleg odáig jutnak és akarják. Akkor írd nyíltan, kendőzetlenül, mindenki a saját hangján, a vágyai és a profiljában leírt szexuális preferenciái szerint; bárki kezdeményezhet, és bárki nemet mondhat vagy kiszállhat.':'Ez társas jelenet: nincs benne intim vagy szexuális tartalom.'} "beat": hol tart most a jelenet (${gBeats.join(' / ')}); csak akkor lépj tovább, ha tényleg odáig jutottak. ${CHOICE_RULES(gIntimate,{group:true})} Csak JSON: {"replies":[{"name":"${names[0]}","text":"..."}],"beat":"${gBeats.join('|')}","choices":["...","...","..."]} – 1-3 válasz, csak ezektől: ${names.join(', ')}.`;
     // E11 (2026-11-21): one shared detail level for the whole company, inner life kept.
     const castText=castProfileTexts(people.map(c=>c.profile),{explicit:gIntimate,intimate:gIntimate,secrets:true});
     const block=c=>{const level=w.levelOf(c.id,pid);const note=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,pid)?.description||'';
@@ -1355,6 +1355,13 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       ...(ownLast.length>=2?['AZ UTOLSÓ VÁLASZOK – ezek mondatait, fordulatait és képeit most NE ismételjétek:\n'+ownLast.join('\n')]:[]),
       ...(voice?[PALOR_VOICE_HEAD+voice]:[]),
       ...(prevChoices.length||palorLast.length>=2?['A "choices" NE ismételje ezeket (előző javaslatok és Palor korábbi mondatai):\n'+[...prevChoices,...palorLast].map(x=>'- '+x).join('\n')]:[]),
+      // Who speaks (2026-11-22, after Covel turn-policy "mention", MIT): whoever Palor named answers
+      // first; if he named nobody, the one who has spoken least recently. Deterministic.
+      ...(opener?[]:[(()=>{const named=people.filter(c=>c.name.split(/[\s-]+/).filter(x=>x.length>=3).some(tok=>[tok,tok.replace(/a$/i,'á').replace(/e$/i,'é')].some(v=>new RegExp('(^|[^\\p{L}])'+v.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'iu').test(text))));
+        if(named.length)return `KI SZÓLAL MEG: Palor most ${named.map(c=>c.name).join(' és ')} felé szólt: ${named.length>1?'ők válaszolnak':'ő válaszol'} elsőként, érdemben; a többiek csak akkor szólnak közbe, ha természetes.`;
+        const lastAt=c=>{for(let i=history.length-1;i>=0;i--)if(history[i].speaker_id===c.id||history[i].speaker_name===c.name)return i;return -1;};
+        const next=[...people].sort((x,y)=>lastAt(x)-lastAt(y))[0];
+        return `KI SZÓLAL MEG: Palor senkit nem szólított meg név szerint; elsőként ${next.name} válaszoljon (ő szólalt meg a legrégebben), a többiek csak akkor, ha természetes.`;})()]),
       opener?'Palor most lép oda a társasághoz, még nem szólt. Vegyék észre.':'Palor: '+text].join('\n\n');
     // 650 since 2026-11-15: suggestions may be longer (up to 18 words, actions too).
     const out=await w.ask(system,user,650);
@@ -1404,8 +1411,11 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const people=ids.map(id=>one('SELECT id,name FROM characters WHERE id=?',id)).filter(Boolean);
     // Palor walked up and left without a word: close without a paid summary.
     if(!ls.some(l=>l.speaker==='palor')){closeOpen(conv.id,null);return conversationView(conv.id);}
-    const system=`Egy társas jelenetet foglalsz össze Palor és ${people.map(c=>c.name).join(', ')} között. Csak azt írd le, ami ténylegesen elhangzott. ${RICH_FIELDS_HINT} Csak JSON, magyarul: {"title":"rövid cím","summary":"1-2 mondat","memories":{"<név>":"egy mondat az ő szemszögéből"},"palor_memory":"egy mondat Palor szemszögéből",${RICH_FIELDS_JSON}}`;
-    const data=await w.ask(system,ls.map(l=>(l.speaker==='palor'?'Palor':l.speaker_name||'?')+': '+l.text).join('\n'),800)||{};
+    // 2026-11-22: like a 1:1 save point, each participant also gets his inner state, his view of
+    // where things stand with Palor and his opinions (E2/E6/E12), in the same single call.
+    const before=w.inner?people.map(c=>{const x=w.inner.summaryContext(c.id);return x?`${c.name} – ${x}`:'';}).filter(Boolean).join('\n'):'';
+    const system=`Egy társas jelenetet foglalsz össze Palor és ${people.map(c=>c.name).join(', ')} között. Csak azt írd le, ami ténylegesen elhangzott. ${FACT_RULES} ${RICH_FIELDS_HINT} "inner": résztvevőnként (név szerint) a belső állapota a jelenet UTÁN, az ő szemszögéből, a profilja, a korábbi állapota és ez a jelenet alapján: {"mood":"1-3 szó","intensity":0-3,"reason":"egy mondat","concerns":["legfeljebb 3, a korábbiakat vidd tovább, ha még igazak"],"wants_from_palor":"","palor_view":"1-2 mondat: ahogy ő látja, hol tartanak Palorral"}. "opinions": résztvevőnként legfeljebb 2 vélemény egy szóba került emberről (nem Palorról, nem önmagáról) vagy témáról, egy-egy mondatban, az ő szemszögéből. Csak JSON, magyarul: {"title":"rövid cím","summary":"1-2 mondat","memories":{"<név>":"egy mondat az ő szemszögéből"},"palor_memory":"egy mondat Palor szemszögéből",${RICH_FIELDS_JSON},"inner":{"<név>":{}},"opinions":{"<név>":[{"about":"","text":""}]}}`;
+    const data=await w.ask(system,(before?'KORÁBBI BELSŐ ÁLLAPOTUK:\n'+before+'\n\n':'')+ls.map(l=>(l.speaker==='palor'?'Palor':l.speaker_name||'?')+': '+l.text).join('\n'),1400)||{};
     const summary={title:clip(data.title,120)||'Beszélgetés társaságban',summary:clip(data.summary,600),palor_memory:clip(data.palor_memory,1000),group:true,...richFields(data,[...people.map(c=>c.id),pid].filter(Boolean))};
     if(one('SELECT 1 FROM play_conversation_flags WHERE conversation_id=? AND intimate_at IS NOT NULL',conv.id))summary.intimate=true;
     const mem=data.memories&&typeof data.memories==='object'?data.memories:{};
@@ -1413,7 +1423,10 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       if(!closeOpen(conv.id,summary))return;
       const eventId=randomUUID();
       run('INSERT INTO world_events(id,world_day,kind,status,title,summary,payload_json,model,seen_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',eventId,conv.world_day,'meeting','applied',summary.title,summary.summary||summary.title,JSON.stringify({slot:SLOTS.find(s=>s.label===conv.slot)?.id||null,character_ids:people.map(c=>c.id),location_id:conv.location_id,memories:[],level_changes:[],play_conversation_id:conv.id,with_palor:true,intimate:!!summary.intimate}),'play',iso(),iso());
-      for(const c of people){const m=clip(mem[c.name]??Object.entries(mem).find(([n])=>matchPerson(people,n)===c.id)?.[1],1000);if(m)w.remember(c.id,m,eventId);}
+      const byPerson=(obj,c)=>obj&&typeof obj==='object'?(obj[c.name]??Object.entries(obj).find(([n])=>matchPerson(people,n)===c.id)?.[1]):undefined;
+      for(const c of people){const m=clip(byPerson(mem,c),1000);if(m)w.remember(c.id,m,eventId,{importance:summary.importance});
+        if(w.inner)w.inner.record(c.id,byPerson(data.inner,c),{day:conv.world_day,eventId,conversationId:conv.id});
+        if(w.social?.addOpinions){const ops=byPerson(data.opinions,c);w.social.addOpinions(c.id,(Array.isArray(ops)?ops:[]).filter(o=>String(o?.about||'').trim().toLocaleLowerCase('hu')!==String(w.palor()?.name||'Palor').toLocaleLowerCase('hu')),{day:conv.world_day,people:w.people().filter(x=>x.id!==pid),eventId});}}
       if(summary.palor_memory&&pid)w.remember(pid,summary.palor_memory,eventId);
       meetingSaved(eventId);
     });
