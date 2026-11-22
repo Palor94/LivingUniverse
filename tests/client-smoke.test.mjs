@@ -32,7 +32,7 @@ test('the main page and every module it imports are served',async t=>{
     const file=queue.shift();if(seen.has(file))continue;seen.add(file);
     const r=await fetch(origin+'/'+file);
     assert.equal(r.status,200,'/'+file+' is not served (add it to the static list in server.mjs)');
-    if(file.endsWith('.js'))for(const m of (await r.text()).matchAll(/(?:^|\n)\s*import\s[^'"]*['"]\.\/([^'"?]+)/g))queue.push(m[1]);
+    if(file.endsWith('.js'))for(const m of (await r.text()).matchAll(/\bimport\s*(?:\(\s*|[^'"\n]*?from\s*)['"]\.\/([^'"?]+)/g))queue.push(m[1]);
   }
   assert.ok(seen.has('client.js')&&seen.has('dev-tools.js')&&seen.size>20,'walked the module graph');
 });

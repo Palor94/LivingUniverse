@@ -225,17 +225,17 @@ export function installPlayAssets({db,root,one,all,run,transaction,fail,worldEng
     if(args.media_id)noteSource(args.media_id,'Játék: az Új képek mappába mentve ('+name+').','picture');
     return {target:'picture',file:name,folder:path.join('20_SHARED_MEDIA',INTAKE_FOLDER),people:ordered.map(p=>p.name),content,next:'Saved into the Új képek folder. The owner reads it in with the home task "Új képek beolvasása"; it is then linked to these characters and moved into their folder.',canon_changed:false};
   }
-  async function place(args){
+  async function place(args,internal={}){
     check(args,['media_id','url','target','character_id','character_ids','location_id','expression','time_of_day','content','prompt','model','outfit','image','label']);
     if(args.label!==undefined&&args.target!=='picture')throw fail('label is only for target picture.');
     args=fromImage(args);
-    if((args.media_id===undefined)===(args.url===undefined))throw fail('Give either media_id (an imported picture) or url (a public HTTPS image), not both.');
+    if(!internal.bytes&&(args.media_id===undefined)===(args.url===undefined))throw fail('Give either media_id (an imported picture) or url (a public HTTPS image), not both.');
     if(args.media_id!==undefined&&!uuid.test(args.media_id))throw fail('media_id is required.');if(!TARGETS.includes(args.target)&&args.target!=='picture')throw fail('target is figure, background, scene or picture.');
     for(const k of ['prompt','model'])if(args[k]!==undefined&&(typeof args[k]!=='string'||args[k].length>(k==='prompt'?12000:120)))throw fail(k+' is too long.');
     if(args.target==='picture')return placePicture(args);
     // Cheap checks before any download.
     if(args.target==='background'?!one('SELECT 1 FROM locations WHERE id=?',args.location_id||''):!one('SELECT 1 FROM characters WHERE id=?',args.character_id||''))throw fail(args.target==='background'?'location_id is required.':'character_id is required.',404);
-    const got=args.url!==undefined?await bytesFromUrl(args.url):await bytesOf(args.media_id),{bytes,type,sha}=got,source='Grok (MCP)'+(args.model?' · '+args.model:'')+(got.host?' · '+got.host:'');
+    const got=internal.bytes?{bytes:internal.bytes,type:await validateMedia(internal.bytes),sha:createHash('sha256').update(internal.bytes).digest('hex')}:args.url!==undefined?await bytesFromUrl(args.url):await bytesOf(args.media_id),{bytes,type,sha}=got,source=(internal.source||'Grok (MCP)')+(args.model?' · '+args.model:'')+(got.host?' · '+got.host:'');
     if(args.target==='background'){
       if(!uuid.test(args.location_id||''))throw fail('location_id is required.');
       const time=args.time_of_day||'nappal';if(!TIMES.includes(time))throw fail('time_of_day is nappal, este or ejjel.');
@@ -289,7 +289,7 @@ export function installPlayAssets({db,root,one,all,run,transaction,fail,worldEng
     run("INSERT INTO play_generation_jobs(id,target,character_id,location_id,expression,time_of_day,status,brief_json,media_id,placed_media_id,note,model,created_at,updated_at,outfit) VALUES(?,?,?,?,?,?,'open',?,NULL,NULL,NULL,NULL,?,?,?)",id,b.target,b.character_id||null,b.location_id||null,b.expression||null,b.time_of_day||null,JSON.stringify(b),t,t,b.target==='figure'?b.outfit||'dressed':null);
     return {job_id:id,...b};
   }
-  async function finishJob(args){
+  async function finishJob(args,internal={}){
     check(args,['job_id','outcome','media_id','url','note','model','content','image']);
     if(args.outcome==='done')args=fromImage(args);else if(args.image!==undefined){const {image,...rest}=args;args=rest;}
     const job=one('SELECT * FROM play_generation_jobs WHERE id=?',args.job_id||'');if(!job)throw fail('Job not found',404);
@@ -300,7 +300,7 @@ export function installPlayAssets({db,root,one,all,run,transaction,fail,worldEng
     let placed=null;
     if(args.outcome==='done'){
       const b=JSON.parse(job.brief_json);
-      placed=await place({...(args.url!==undefined?{url:args.url}:{media_id:args.media_id}),target:job.target,...(job.character_id?{character_id:job.character_id}:{}),...(job.location_id?{location_id:job.location_id}:{}),...(job.expression?{expression:job.expression}:{}),...(job.target==='figure'&&job.outfit?{outfit:job.outfit}:{}),...(job.time_of_day?{time_of_day:job.time_of_day}:{}),...(job.target==='scene'?{content:args.content||b.content_expected}:{}),prompt:b.prompt,...(args.model?{model:args.model}:{})});
+      placed=await place({...(args.url!==undefined?{url:args.url}:{media_id:args.media_id}),target:job.target,...(job.character_id?{character_id:job.character_id}:{}),...(job.location_id?{location_id:job.location_id}:{}),...(job.expression?{expression:job.expression}:{}),...(job.target==='figure'&&job.outfit?{outfit:job.outfit}:{}),...(job.time_of_day?{time_of_day:job.time_of_day}:{}),...(job.target==='scene'?{content:args.content||b.content_expected}:{}),prompt:b.prompt,...(args.model?{model:args.model}:{})},internal);
     }
     run('UPDATE play_generation_jobs SET status=?,media_id=?,placed_media_id=?,note=?,model=?,updated_at=? WHERE id=?',args.outcome,args.media_id||null,placed?.placed_media_id||placed?.sprite_id||null,args.note||null,args.model||null,iso(),job.id);
     return {job_id:job.id,status:args.outcome,placed,next:args.outcome==='done'?'Placed. Call list_generation_needs for the next item.':args.outcome==='cancelled'?'Cancelled. No refusal cooldown applies.':'Recorded. This item is skipped for 7 days; continue with the next need.'};

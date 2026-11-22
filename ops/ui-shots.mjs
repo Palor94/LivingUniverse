@@ -1,3 +1,4 @@
+import {retainedShots} from './ui-shots-retained.mjs';
 // T0: local Edge screenshots, using only the sandbox (never the live server).
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -56,7 +57,7 @@ try{
     const fixturePng=figureFixture?Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=160;c.height=280;const x=c.getContext('2d');x.fillStyle='#00ff00';x.fillRect(0,0,160,280);x.fillStyle='#c4a88e';x.beginPath();x.arc(80,40,26,0,Math.PI*2);x.fill();x.fillStyle='#eeeeee';x.fillRect(35,75,90,115);x.fillStyle='#26364b';x.fillRect(42,190,30,80);x.fillRect(88,190,30,80);return c.toDataURL('image/png').split(',')[1];}),'base64'):null;
     const assetFixture=process.argv.includes('--asset-generation');let assetStage='compose',assetKind='background';
     const generationFixture=process.argv.includes('--generation-fixture'),fixtureImage=generationFixture||assetFixture?await readFile(new URL('../app/public/app-icon-192.png',import.meta.url)):null;let generationStage='pending';
-    const profileFixture=process.argv.includes('--profile-fixture')||generationFixture?{
+    const profileFixture=process.argv.includes('--profile-fixture')||generationFixture||process.argv.includes('--retained-four')?{
       character:{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'Teszt Ádám',aliases:'Ádi; Ádámka (a barátai használják). Egy hosszú megjegyzés.',race:'Ember',gender:'férfi',biography:'Korábbi tesztszöveg.',personality:'',sexuality:'',speech_style:'',appearance:'',notes:'',cover_id:null,relationships:[],history:[],canon:null,reference_media:[],deletion_block:'fixture',media_count:0},
       ghost:{version:1,profile_version:'fixture-version',template:{version:1,fields:[{id:'identity',label:'Élettörténet',group:'Alapok',type:'text',source:'biography'},{id:'occupation',label:'Foglalkozás',group:'Alapok',type:'text'},{id:'personality',label:'Személyiség',group:'Személyiség',type:'text',source:'personality'},{id:'appearance',label:'Megjelenés',group:'Megjelenés',type:'text',source:'appearance'},{id:'weekly_routine',label:'Heti rutin',group:'Életvitel',type:'text'},{id:'sexuality',label:'Intimitás',group:'Intimitás',type:'text',source:'sexuality'}]},values:{personality:{value:'Ez egy hosszú, szintetikus tesztszöveg. (Javaslat) '.repeat(140),kind:'hypothesis',source:'Tesztmodell',visibility:'creator',interpretation:''},occupation:{value:'Könyvtáros; a tesztben.',kind:'fact',source:'Teszt tulajdonos',visibility:'public',interpretation:''},sexuality:{value:'Ez egy általános hosszú mező a megjelenítés ellenőrzéséhez. '.repeat(120),kind:'hypothesis',source:'Tesztmodell',visibility:'creator',interpretation:''}},legacy:{biography:'Korábbi tesztszöveg.',personality:'',appearance:'',sexuality:'',speech_style:''},history:[],proposals:[]},writes:[]}:null;
     let simulatedFailure=null;
@@ -150,6 +151,7 @@ try{
     };
     if(process.argv.includes('--system-errors'))await page.locator('#sys-box:not([hidden])').waitFor();
     await shot('home');
+    if(process.argv.includes('--retained-four')){await retainedShots({page,browser,origin,shot,report,width,height,character:profileFixture.character});await page.close();continue;}
     if(process.argv.includes('--commands')){
       const overview=await page.evaluate(async()=>{const data=await fetch('/api/play').then(response=>response.json());localStorage.setItem('lu-play-tour-v1','done');localStorage.setItem('lu-favourite-places',JSON.stringify(data.nodes.filter(node=>node.location_id&&node.id!==data.node_id).slice(0,2).map(node=>node.id)));return {node_id:data.node_id};});
       let actions=0;page.on('request',request=>{if(request.method()==='POST'&&/\/api\/play\/(?:travel|talk|wait|group-talk)(?:\?|$)/.test(request.url()))actions++;});
@@ -488,6 +490,7 @@ try{
     await page.close();
   }
   await writeFile(path.join(out,'report.json'),JSON.stringify(report,null,2));
+  if(process.argv.includes('--retained-four')&&report.some(r=>r.name==='retained-four-check'&&!r.passed))throw Error('Retained package verification failed; see report.json in '+out);
   console.log('Screenshots: '+out+' ('+report.filter(r=>!r.name.endsWith('-check')).length+')');
   if(process.argv.includes('--verify-navigation')&&report.some(r=>r.name==='navigation-check'&&!r.passed))throw Error('Navigation scroll verification failed; see report.json.');
   if(process.argv.includes('--verify-routes')&&report.some(r=>r.name==='routes-check'&&!r.passed))throw Error('Route verification failed; see report.json.');

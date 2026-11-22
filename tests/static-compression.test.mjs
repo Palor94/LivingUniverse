@@ -21,6 +21,10 @@ test('interface files are sent compressed, with a version tag, and a repeat visi
     const gz=await raw(port,'/i18n.js',{'accept-encoding':'gzip'});assert.equal(gz.headers['content-encoding'],'gzip');assert.deepEqual(gunzipSync(gz.body),original);
     const plain=await raw(port,'/i18n.js');assert.equal(plain.headers['content-encoding'],undefined);assert.deepEqual(plain.body,original);
     const again=await raw(port,'/i18n.js',{'if-none-match':br.headers.etag,'accept-encoding':'br'});assert.equal(again.status,304);assert.equal(again.body.length,0);
-    assert.equal((await raw(port,'/')).status,200);
+    const home=await raw(port,'/');assert.equal(home.status,200);assert.equal(home.headers['cache-control'],'no-cache');
+    const route=home.body.toString().match(/src="(\/client\.js\?v=[a-f0-9]+)"/)[1];
+    const versioned=await raw(port,route);assert.equal(versioned.headers['cache-control'],'public, max-age=31536000, immutable');assert.match(versioned.body.toString(),/studio-reads.js\?v=[a-f0-9]+/);
+    const stale=await raw(port,'/client.js?v=old');assert.equal(stale.status,307);assert.equal(stale.headers['cache-control'],'no-store');assert.equal(stale.headers.location,route);
+    assert.equal((await raw(port,'/api/state')).headers['cache-control'],'no-store');
   }finally{await app?.close();await fs.rm(temp,{recursive:true,force:true});}
 });

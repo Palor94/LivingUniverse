@@ -61,7 +61,7 @@ test('organized figures use only owned-folder pictures, block missing inputs, pr
   const dressed=(await mcp('job_start',{...args,outfit:'dressed'})).data;
   const bare=(await mcp('job_start',{...args,outfit:'shirtless'})).data;
   assert.notEqual(dressed.job_id,bare.job_id);assert.equal(bare.outfit,'shirtless');
-  assert.match(bare.prompt,/Clothing: shirtless/);assert.match(bare.prompt,/same supplied pictures/);
+  assert.match(bare.prompt,/Clothing: shirtless/);assert.match(bare.prompt,/use the supplied pictures to preserve the same person/);
   assert.equal(path.basename(bare.save.folder),'felmeztelen');assert.deepEqual(bare.references,dressed.references);
   for(const j of [dressed,bare]){
     const response=await mcp('job_finish',{job_id:j.job_id,outcome:'done',url:'https://fixture.example/figure.png',model:'fixture'});

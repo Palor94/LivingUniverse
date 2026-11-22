@@ -8,6 +8,7 @@ import {installQuickTag} from '../app/quick-tag.mjs';
 function catalogue(){
   const db=new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE characters(id TEXT PRIMARY KEY,name TEXT,aliases TEXT DEFAULT '',biography TEXT,personality TEXT,appearance TEXT,cover_id TEXT);
+    CREATE TABLE identity_faces(media_id TEXT,face_index INTEGER);
     CREATE TABLE character_ui(character_id TEXT PRIMARY KEY,cover_crop TEXT,merged_into TEXT);
     CREATE TABLE character_cover_frames(character_id TEXT,media_id TEXT);
     CREATE TABLE media(id TEXT PRIMARY KEY,relative_path TEXT,folder TEXT,kind TEXT,size INTEGER,modified_at TEXT,created_at TEXT);

@@ -1,5 +1,9 @@
 # Munkaszakasz lezárása – 2026-11-17
 
+**Utólagos tulajdonosi tervszűkítés:** a folytatásból csak A16 (navigáció/profilfülváltás), V14 (statikus gyorsítótár), V7 (csoportképes borítók kivágása) és a 13. csomag vegyes figura/háttér keretes sora maradt meg. Az alábbi eredeti nyitott lista történeti állapot; a többi további igényt a tulajdonos törölte. A már elkészült funkciókat ez nem vonja vissza. Az aktuális lista a `docs/CODEX_TERV_2026-11-16.md` elején található.
+
+**2026-11-22-i folytatás:** a megtartott négy feladat kódja elkészült és ellenőrizve (497/497 teszt; T0 előtte/utána és célzott próbák). Részletek és bizonyítékok az aktuális terv elején. Az alábbi november 17-i állapot történeti átadás.
+
 A tulajdonos kérésére a hosszú UX-munkaszakasz lezárva. A teljes UX-terv még nincs befejezve. A módosítások a munkamappában vannak; nem történt commit, feltöltés vagy éles újraindítás.
 
 ## Elkészült és ellenőrizve

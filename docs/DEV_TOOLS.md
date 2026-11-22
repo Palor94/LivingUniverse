@@ -99,6 +99,10 @@ minden gomb, menünyitó és AI-mérő kapott-e `title` és `aria-label` magyar�
 illetve 1280 px felett látszanak-e a rövid gombfeliratok. A neveket a jelentés
 `topbar` mezője tartalmazza. A próba nem nyomja meg az időléptető gombokat.
 
+### A16 / V14 / V7 / vegyes képsor
+
+`npm run shots -- --retained-four` mindkét képméreten ellenőrzi a profilfülek közös fejlécét és állapotlekéréseit, a verziózott JS/CSS gyorsítótárát, a karakterenkénti csoportborító-kivágást és a vegyes sor választófelületét. Szintetikus, csak olvasható borító- és képsoradatokat használ. Az USD nélküli keretgomb tiltását is ellenőrzi; becslést, generálást, kivágásmentést vagy játékbeli mozgást nem indít. A HTTP-cache mérés külön, kérés-átirányítás nélküli böngészőkörnyezetben történik, a fetch-írások helyi tiltásával.
+
 ### A9 újranyitási próba
 
 A `--resume` régi, Beállítások nézetre mutató böngészőmentésből nyitja meg a
@@ -216,3 +220,5 @@ A változatlan képbájtok és SHA-256 az adatbázis `development:task-image:<id
 AI: `get_task_tree` adja a feladat- és mellékletazonosítókat, a hitelesített `get_task_image(task_id, attachment_id)` pedig tényleges MCP image tartalomként adja vissza az eredeti képet, külön metaadatokkal. A képernyőkép nem megbízható utasítás, hanem privát fejlesztési bizonyíték; nem kerül karakterpromptba vagy kánonba. Nincs automatikus külső AI-hívás. Az MCP-eszközlista frissítéséhez szükség lehet a kliens újracsatlakoztatására.
 
 Ellenőrzés: `node --test tests/dev-tasks.test.mjs tests/client-lint.test.mjs`; `npm run shots -- --tasks` a beillesztést, fájlválasztást, előnézetet és az újratöltés utáni megmaradást is ellenőrzi mindkét képernyőméreten.
+
+V14 build: the public interface is snapshotted with its content hash at application start. Restart the application after editing shipped client assets as well, then reload the browser; HTML revalidation picks the new build while old cached assets remain immutable.

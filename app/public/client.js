@@ -1,4 +1,4 @@
-import {installDevTasksUI} from './dev-tasks.js';
+import {createStudioReads,lazyScreen} from './studio-reads.js';
 import {openAssetGeneration} from './asset-generation.js';
 import {createGenerationWatcher} from './generation-jobs.js';
 import {cancelUndoWindows,confirmBox,undoWindow,notify} from './interactions.js';
@@ -13,7 +13,6 @@ import {raceOptions,bindNameSuggestion} from './character-options.js?v=instant-r
 import {approveCharacterReference,approvedReferenceUrl} from './character-reference-crops.js';
 import {installPermanentDeleteUI} from './permanent-media-delete.js?v=bulk-20261031-1';
 import {installGhostProfile} from './ghost-profile.js';
-import {mountLocationHub} from './location-hub.js';
 import {installLocationEditor} from './location-editor.js';
 import {installCharacterGeneration} from './character-generation.js';
 import {installEventTimeline} from './story-events.js';
@@ -27,14 +26,8 @@ import {installLocationsUI} from './locations.js';
 import {mediaFormPayload,refreshMediaReviewControls,retainMediaSearch} from './media-form.js';
 import {t,locale,translateDocument,translateServerMessage} from './i18n.js';
 import {installQuickTag} from './quick-tag.js';
-import {installMediaReviewUI} from './media-review.js';
-import {installImageWorkshopUI} from './image-workshop.js';
-import {installWorldEngineUI} from './world-engine.js';
-import {installPlayUI} from './play.js';
-import {installDevToolsUI} from './dev-tools.js';
 import {installTrail} from './debug-trail.js';
 import {installCharacterFactoryUI} from './character-factory.js';
-import {installIdentityUI} from './identity.js';
 const $ = (s,root=document)=>root.querySelector(s);
 const $$ = (s,root=document)=>[...root.querySelectorAll(s)];
 const esc = v => String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -71,14 +64,14 @@ const characterGeneration=installCharacterGeneration({$,$$,esc,api,mediaDialog,o
 const sorting=installSorting({onSelectionChange:items=>permanentDeleteUI.selection(items),afterFinish:mid=>duplicateReview.returnAfterSave(mid),locationDialog:ids=>places.bulk(ids),structuredTags:ids=>tagging.bulk(ids),$,$$,esc,api,action,toast,openDialog,refresh,render,mediaDialog,getState:()=>state,getView:()=>view,reload:()=>view==='profile'?renderProfile():renderLibrary(),resetPage:()=>{offset=0;}});
 const folderReview=installReconciliationUI({$,$$,esc,api,action,toast,openDialog,render,refresh,foldersDialog,mediaDialog});
 const quickTag=installQuickTag({$,$$,esc,api,toast,mediaDialog,getState:()=>state});
-const mediaReview=installMediaReviewUI({$,$$,esc,api,toast});
-const imageWorkshop=installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog:id=>mediaDialog(id),openProfile:cid=>navigate('profile',cid),openMediaReview:tab=>{mediaReview.show?.(tab);return navigate('media-review');},getState:()=>state});
-const devTasksUI=installDevTasksUI({api,esc,toast});
-const worldEngineUI=installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay:()=>navigate('play'),openProfile:(cid,tab)=>navigate('profile',cid,{tab})});
-const devTools=installDevToolsUI({$,$$,esc,api,toast,heading});
+const mediaReview=lazyScreen(async()=>{const {installMediaReviewUI}=await import('./media-review.js');return installMediaReviewUI({$,$$,esc,api,toast} );});
+const imageWorkshop=lazyScreen(async()=>{const {installImageWorkshopUI}=await import('./image-workshop.js');return installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog:id=>mediaDialog(id),openProfile:cid=>navigate('profile',cid),openMediaReview:tab=>{mediaReview.show?.(tab);return navigate('media-review');},getState:()=>state} );});
+const devTasksUI=lazyScreen(async()=>{const {installDevTasksUI}=await import('./dev-tasks.js');return installDevTasksUI({api,esc,toast} );});
+const worldEngineUI=lazyScreen(async()=>{const {installWorldEngineUI}=await import('./world-engine.js');return installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay:()=>navigate('play'),openProfile:(cid,tab)=>navigate('profile',cid,{tab})} );});
+const devTools=lazyScreen(async()=>{const {installDevToolsUI}=await import('./dev-tools.js');return installDevToolsUI({$,$$,esc,api,toast,heading} );});
 const characterFactory=installCharacterFactoryUI({$,$$,esc,api,toast,heading,openProfile:cid=>navigate('profile',cid)});
-const identityUI=installIdentityUI({$,$$,esc,api,toast,heading,openMedia:mid=>mediaDialog(mid)});
-const playUI=installPlayUI({$,$$,esc,api,toast,exit:()=>navigate('home'),openStudio:(tab,id)=>navigate('location-catalogue',null,{placeTab:tab,placeId:id}),openScreen:next=>navigate(next)});
+const identityUI=lazyScreen(async()=>{const {installIdentityUI}=await import('./identity.js');return installIdentityUI({$,$$,esc,api,toast,heading,openMedia:mid=>mediaDialog(mid)} );});
+const playUI=lazyScreen(async()=>{const {installPlayUI}=await import('./play.js');return installPlayUI({$,$$,esc,api,toast,exit:()=>navigate('home'),openStudio:(tab,id)=>navigate('location-catalogue',null,{placeTab:tab,placeId:id}),openScreen:next=>navigate(next)} );});
 const duplicateReview=installDuplicatesUI({$,$$,esc,api,action,toast,openDialog,mediaDialog,refresh,getState:()=>state});
 const characterAlphabet='a á b c cs d dz dzs e é f g gy h i í j k l ly m n ny o ó ö ő p q r s sz t ty u ú ü ű v w x y z zs'.split(' ');
 const characterLetterRank=new Map(characterAlphabet.map((letter,index)=>[letter,index]));
@@ -96,7 +89,9 @@ let storageInfo=null; // resource-root info never changes while the app runs; fe
 // Success messages fade after a few seconds; errors stay until dismissed so they can't be missed.
 function toast(message,error=false,retry=null){if(error)try{window.__luTrail?.error(message,'üzenet');}catch{}return notify(message,error,retry);}
 
-async function api(route,data,method){return requestJson(route,{method:method||(data?'POST':'GET'),headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});}
+const studioReads=createStudioReads({read:route=>requestJson(route)});
+window.addEventListener('focus',()=>studioReads.invalidate());
+async function api(route,data,method){const verb=method||(data?'POST':'GET');if(verb==='GET')return studioReads.get(route);studioReads.invalidate();try{return await requestJson(route,{method:verb,headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});}finally{studioReads.invalidate();}}
 function reportRequestError(err){toast(err.message||t('common.unexpected'),true,err.transport?async()=>{try{await render();}catch(next){reportRequestError(next);}}:null);}
 function action(fn){return async e=>{try{await fn(e);}catch(err){reportRequestError(err);}};}
 async function refresh(){state=await api('/api/state');state.characters.sort((a,b)=>characterNameOrder.compare(a.name,b.name));$('#character-count').textContent=state.characters.length;$('#inbox-count').textContent=state.stats.inbox;}
@@ -145,7 +140,7 @@ async function render(){
 // waiting on Gyors címkézés. Refreshed at most once a minute (the home page always updates them).
 let badgesAt=0;
 function paintBadges(s,tidy){
-  const jobs=[s.identity.single,s.identity.pair,s.identity.other,s.locations.untagged,state.stats.inbox,tidy?.no_cover.length,tidy?.no_profile.length,tidy?.ghost_pending.length,tidy?.tree_draft?1:0,tidy?.removed.count].filter(n=>n>0).length;
+  const jobs=[s.identity.single,s.identity.pair,s.identity.other,s.locations.untagged,state.stats.inbox,tidy?.no_cover.length,tidy?.group_covers?.length,tidy?.no_profile.length,tidy?.ghost_pending.length,tidy?.tree_draft?1:0,tidy?.removed.count].filter(n=>n>0).length;
   const home=$('#home-count'),flag=$('#locations-flag'),quick=$('#quick-tag-count'),waiting=s.identity.pictures+s.locations.untagged;
   home.hidden=!jobs;home.textContent=jobs;home.title=t('nav.homeBadge',{count:jobs});
   flag.hidden=!tidy?.tree_draft;flag.title=t('nav.treeDraft');
@@ -230,10 +225,12 @@ async function renderProfile(){
   await Promise.all([extras.flush(),ghostProfile.flush()]);
   characterGeneration.cleanup();
   const profileContext=mediaViewContext();const c=await api('/api/characters/'+activeCharacter);if(profileContext!==mediaViewContext())return;const data=profileTab==='media'?await fetchMedia(c.id):null;if(profileContext!==mediaViewContext()||(profileTab==='media'&&!data))return;const restoreSearch=retainMediaSearch($('#media-search'));const approved=c.canon?JSON.parse(c.canon.references_json):[];
-  $('#content').innerHTML=heading(t('profile.kicker'),c.name,c.aliases||t('profile.noAliases'),`<button id="back-characters" class="subtle">${t('profile.back')}</button>${c.deletion_block===null?`<button id="delete-empty-character" class="danger">${t('profile.delete')}</button>`:''}`)+`<div class="tabs"><button id="profile-tab" class="${profileTab==='profile'?'active':''}">${t('tabs.profile')}</button><button id="collection-tab" class="${profileTab==='media'?'active':''}">${t('tabs.media')}</button><button id="events-tab" class="${profileTab==='events'?'active':''}">${t('tabs.events')}</button><button id="canon-tab" class="${profileTab==='canon'?'active':''}">${t('tabs.canon',{count:approved.length})}</button><button id="generation-tab" class="${profileTab==='generation'?'active':''}">${t('tabs.generation')}</button></div><div id="profile-content"></div>`;
+  const newShell=$('#content').dataset.profileId!==c.id||!$('#profile-content');
+  if(newShell){$('#content').innerHTML=heading(t('profile.kicker'),c.name,c.aliases||t('profile.noAliases'),`<button id="back-characters" class="subtle">${t('profile.back')}</button>${c.deletion_block===null?`<button id="delete-empty-character" class="danger">${t('profile.delete')}</button>`:''}`)+`<div class="tabs"><button id="profile-tab" class="${profileTab==='profile'?'active':''}">${t('tabs.profile')}</button><button id="collection-tab" class="${profileTab==='media'?'active':''}">${t('tabs.media')}</button><button id="events-tab" class="${profileTab==='events'?'active':''}">${t('tabs.events')}</button><button id="canon-tab" class="${profileTab==='canon'?'active':''}">${t('tabs.canon',{count:approved.length})}</button><button id="generation-tab" class="${profileTab==='generation'?'active':''}">${t('tabs.generation')}</button></div><div id="profile-content"></div>`;$('#content').dataset.profileId=c.id;}else{$('#content .heading h1').textContent=c.name;$('#canon-tab').textContent=t('tabs.canon',{count:approved.length});}
+  for(const [id,tab] of [['profile-tab','profile'],['collection-tab','media'],['canon-tab','canon'],['events-tab','events'],['generation-tab','generation']])$('#'+id).classList.toggle('active',profileTab===tab);
   if($('#delete-empty-character'))$('#delete-empty-character').onclick=()=>deleteEmptyCharacter(c);
   $('#back-characters').onclick=action(()=>navigate('characters',null,{restoreCharacterList:true}));for(const [sel,tab] of [['#profile-tab','profile'],['#collection-tab','media'],['#canon-tab','canon'],['#events-tab','events'],['#generation-tab','generation']])$(sel).onclick=action(()=>navigate('profile',c.id,{tab}));
-  void characterFactory.profileStatus(c.id,$('.tabs'));
+  if(newShell){$('.cf-profile-line')?.remove();void characterFactory.profileStatus(c.id,$('.tabs'));}
   if(profileTab==='generation'){await characterGeneration.render(c);return;}
   if(profileTab==='events'){await eventTimeline.render(c);return;}
   if(profileTab==='media'){$('#profile-content').innerHTML=filters()+(data.items.length?`<div class="media-grid">${data.items.map(mediaCard).join('')}</div>`:`<div class="empty"><h2>${t('profile.noMediaTitle')}</h2><p>${t('profile.noMediaText')}</p></div>`)+pager(data.total);bindFilters(renderProfile,restoreSearch);bindMedia();return;}
@@ -361,7 +358,7 @@ async function renderHome(){
   const jobs=[
     ['single','◉','identity',s.identity.single],['pair','◎','identity',s.identity.pair],['other','⁂','identity',s.identity.other],
     ['locations','⌖','place',s.locations.untagged],['inbox','▧','collection',state.stats.inbox],
-    ['covers','▣','character',tidy?.no_cover.length||0],['profiles','✎','character',tidy?.no_profile.length||0],['ghost','✦','character',tidy?.ghost_pending.reduce((n,c)=>n+c.count,0)||0],
+    ['groupcovers','▣','character',tidy?.group_covers?.length||0],['covers','▣','character',tidy?.no_cover.length||0],['profiles','✎','character',tidy?.no_profile.length||0],['ghost','✦','character',tidy?.ghost_pending.reduce((n,c)=>n+c.count,0)||0],
     ['tree','⌗','place',tidy?.tree_draft?1:0],['removed','⌫','collection',tidy?.removed.count||0],['placement','⇢','collection',placement?.count||0],['newimages','⇣','collection',newImages?.count||0]
   ].filter(j=>j[3]>0||['locations','inbox'].includes(j[0]));
   const totals={single:s.identity.analysed,pair:s.identity.analysed,other:s.identity.analysed,locations:s.locations.active,inbox:state.stats.media,covers:state.characters.length,profiles:state.characters.length};
@@ -384,6 +381,7 @@ async function renderHome(){
     if(id==='inbox')return navigate('inbox');
     if(id==='tree')return navigate('location-catalogue');
     if(id==='removed')return extras.removed();
+    if(id==='groupcovers'){const c=tidy.group_covers[0];await navigate('profile',c.id);return extras.cropDialog(await api('/api/media/'+c.cover_id));}
     if(id==='covers')return coverPicker();
     if(id==='profiles'){characterListDialog(t('home.job.profiles'),t('home.listText.profiles'),tidy.no_profile);
       // Collection folders (crowds of unnamed people) leave this list; nothing else changes.
@@ -452,7 +450,7 @@ async function coverPicker(){
   $('#cover-save').onclick=action(async()=>{const result=await api('/api/tidy/covers',{choices:[...chosen].map(([character_id,media_id])=>({character_id,media_id}))});$('#dialog').close();await render();toast(t('home.cover.saved',{count:result.set}));});
   paint();bindImages();
 }
-async function renderLocationCanvas(){const sequence=navigationSequence,tab=locationTab,selection=locationSelection,instance=await mountLocationHub({host:$('#content'),api,toast,mediaDialog,initialTab:tab,initialSelection:selection,isCurrent:()=>view==='location-catalogue'&&sequence===navigationSequence,onRoute:(next,id)=>navigate('location-catalogue',null,{placeTab:next,placeId:id}),openPlay:async id=>{await navigate('play');await playUI.travelToPlace(id);}});if(sequence===navigationSequence)locationCanvas=instance;else instance.destroy();}
+async function renderLocationCanvas(){const sequence=navigationSequence,tab=locationTab,selection=locationSelection;const {mountLocationHub}=await import('./location-hub.js');if(view!=='location-catalogue'||sequence!==navigationSequence)return;const instance=await mountLocationHub({host:$('#content'),api,toast,mediaDialog,initialTab:tab,initialSelection:selection,isCurrent:()=>view==='location-catalogue'&&sequence===navigationSequence,onRoute:(next,id)=>navigate('location-catalogue',null,{placeTab:next,placeId:id}),openPlay:async id=>{await navigate('play');await playUI.travelToPlace(id);}});if(sequence===navigationSequence)locationCanvas=instance;else instance.destroy();}
 function renderWorld(){return worldEngineUI.render($('#content'));}
 for(const b of $$('#navigation button'))b.onclick=action(()=>navigate(b.dataset.view));
 $('#backup').onclick=()=>{location.href='/api/export';toast(t('export.started'));};

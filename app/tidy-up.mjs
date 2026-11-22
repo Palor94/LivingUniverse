@@ -33,7 +33,8 @@ export function installTidyUp({one,all,run,transaction,fail,locationCanvas}){
     // Figure sources and Ötletláda pictures are not pictures waiting for a character.
     const noCharacter=one(`SELECT count(*) n FROM active_media m WHERE NOT EXISTS(SELECT 1 FROM depictions d WHERE d.media_id=m.id) AND ${playAssetFilter(one)} AND ${notPlanningSQL}`).n;
     let draft=false;try{const c=await locationCanvas.context();draft=!!c.head&&c.head!==c.approved_head;}catch{}
-    return {no_cover:noCover,no_profile:noProfile,ghost_pending:pending,removed:{count:removed.n,bytes:removed.bytes,oldest:removed.oldest},no_character:noCharacter,tree_draft:draft};
+    const groupCovers=all(`SELECT c.id,c.name,c.cover_id FROM characters c JOIN active_media m ON m.id=c.cover_id LEFT JOIN character_ui u ON u.character_id=c.id WHERE u.merged_into IS NULL AND m.kind='image' AND ((SELECT count(*) FROM depictions d WHERE d.media_id=c.cover_id)>1 OR (SELECT count(*) FROM identity_faces f WHERE f.media_id=c.cover_id AND f.face_index>=0)>1) AND (u.cover_crop IS NULL OR coalesce(json_extract(u.cover_crop,'$.media_id'),'')<>c.cover_id) ORDER BY c.name`).filter(c=>!folders.has(c.id));
+    return {group_covers:groupCovers,no_cover:noCover,no_profile:noProfile,ghost_pending:pending,removed:{count:removed.n,bytes:removed.bytes,oldest:removed.oldest},no_character:noCharacter,tree_draft:draft};
   }
 
   // Up to six candidate covers per character without one, best first:

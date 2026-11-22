@@ -1,3 +1,4 @@
+import {createStaticAssets} from './static-assets.mjs';
 import {installDevTasks} from './dev-tasks.mjs';
 import {installLocationHub} from './location-hub.mjs';
 import {installAssetGeneration} from './asset-generation.mjs';
@@ -57,17 +58,7 @@ import {installThumbnails} from './thumbnails.mjs';
 import {createGameClock} from './game-clock.mjs';
 import {installIdentitySuggest,workerAnalyser} from './identity-suggest.mjs';
 import {installCharacterOrders} from './character-orders.mjs';
-import {brotliCompressSync,gzipSync,constants as zlibConstants} from 'node:zlib';
 
-// Interface files (JS/CSS/HTML) are read and compressed once per version (size + mtime).
-const staticCache=new Map();
-async function staticFile(file){
-  const st=await fs.stat(file),version=st.size+'-'+Math.round(st.mtimeMs),hit=staticCache.get(file);
-  if(hit?.version===version)return hit;
-  const raw=await fs.readFile(file);
-  const entry={version,raw,etag:'"s'+createHash('sha1').update(raw).digest('hex').slice(0,20)+'"',br:brotliCompressSync(raw,{params:{[zlibConstants.BROTLI_PARAM_QUALITY]:9}}),gzip:gzipSync(raw,{level:9})};
-  staticCache.set(file,entry);return entry;
-}
 function pickEncoding(header=''){const h=String(header);return /\bbr\b/.test(h)?'br':/\bgzip\b/.test(h)?'gzip':null;}
 import {installMediaReview} from './media-review.mjs';
 import {installWorldEngine} from './world-engine.mjs';
@@ -117,6 +108,7 @@ export function resolveDataDir(env=process.env,exists=existsSync){
 }
 
 export async function createApp(options={}) {
+  const publicAssets=await createStaticAssets(path.join(appDir,'public'));
   const root = path.resolve(options.root || defaultRoot);
   // Uploads that only served as the source of a Play figure/background/scene (play_asset_sources)
   // are not pictures to sort: they stay in the catalogue but leave the Rendezésre vár lists.
@@ -350,8 +342,8 @@ export async function createApp(options={}) {
   const permanentDelete=installPermanentMediaDelete({db,root,dataDir,one,all,run,transaction,moving,isBusy:()=>scanning||folderSync.isBusy()||reconciliation.isRelinking()||mediaImports.isBusy()||imageGeneration.isBusy(),...(options.permanentDeleteTestOptions||{})});
   assetGeneration=installAssetGeneration({one,all,run,transaction,dataDir,backgrounds,locationTree,guests:{context:playMode.guestGenerationContext,save:playMode.saveGeneratedGuest},characterPolicy,config:imageConfig,env:imageEnv,isBusy:()=>imageGeneration.isBusy()||mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking(),...(options.assetGenerationTestOptions||{})});
   const locationHub=installLocationHub({all,editor:locations.editor,locationTree});
-  const generationSessions=installGenerationSessions({one,all,run,transaction,imageGeneration,clock:options.generationTestOptions?.clock});imageGeneration.setSessions(generationSessions);
-  const playImageWorker=installPlayImageWorker({one,all,run,imageGeneration,sessions:generationSessions,playAssets,playMode,origin:characterOrigin,palor:()=>worldEngine.internals.palor(),identity});
+  const generationSessions=installGenerationSessions({one,all,run,transaction,imageGeneration,viewRun:rid=>one('SELECT id FROM image_generation_runs WHERE id=?',rid)?imageGeneration.view(rid):assetGeneration.view(rid),clock:options.generationTestOptions?.clock});imageGeneration.setSessions(generationSessions);assetGeneration.setSessions(generationSessions);
+  const playImageWorker=installPlayImageWorker({one,all,run,imageGeneration,assetGeneration,sessions:generationSessions,playAssets,playMode,origin:characterOrigin,palor:()=>worldEngine.internals.palor(),identity});
   const devTasks=installDevTasks({one,run,transaction,authenticate:token=>mcpChanges.authenticate(token)});
   const desktopGeneration=installDesktopGeneration({imageGeneration,assetGeneration,generationSessions,one,all});
   const ideaBox=installIdeaBox({root,db,one,all,run,fail,now,mover:createMediaMover({root,one,run,transaction,fingerprint,moving,now}),isBusy:()=>scanning||folderSync.isBusy()||reconciliation.isRelinking()||mediaImports.isBusy()||imageGeneration.isBusy()});
@@ -695,11 +687,14 @@ export async function createApp(options={}) {
         const headers={'Content-Type':types[path.extname(full).toLowerCase()]||'application/octet-stream','Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':m.kind==='image'?'private, no-cache':'private, max-age=60','ETag':etag,'X-Content-Type-Options':'nosniff'};if(status===206)headers['Content-Range']=`bytes ${start}-${end}/${s.size}`;
         res.writeHead(status,headers);if(req.method==='HEAD')return res.end();const stream=createReadStream(full,{start,end});stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);return;
       }
-      if(req.method==='GET'&&['/dev-tasks.js','/generation-jobs.js','/interactions.js','/interactions.css','/manifest.webmanifest','/play.webmanifest','/app-icon.svg','/app-icon-192.png','/app-icon-512.png','/app-install.js','/service-worker.js','/app-routes.js','/world-review.js','/world-review.css','/character-rename.html','/character-rename.js','/character-rename.css','/','/style.css','/theme.css','/i18n.js','/quick-tag.js','/media-signals.js','/media-review.js','/image-workshop.js','/world-engine.js','/play.js','/command-palette.js','/upload-image.js','/asset-generation.js','/picture-order.js','/play-scene.js','/play-dialog.js','/play-travel.js','/play-map.js','/play-map-layout.js','/play-story.js','/place-tools.js','/play-town-map.js','/play-icons.js','/character-factory.js','/debug-trail.js','/layout-check.js','/play-debug.js','/sprite-cutout.js','/sprite-cutout-worker.js','/sprite-cutout-pixels.js','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/profile-autosave.js','/client.js','/api-json.js','/system-error-summary.js','/character-options.js','/character-readiness.js','/enhancements.js','/picture-crop.js','/character-reference-crops.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/name-picker.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/location-editor.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-hub.js','/location-canvas-model.js','/location-canvas.css','/permanent-media-delete.js','/dev-tools.js','/identity.js'].includes(p)){
-        const file=path.join(appDir,'public',p==='/'?'index.html':p.slice(1));const s=await staticFile(file),enc=pickEncoding(req.headers['accept-encoding']);
+      if(req.method==='GET'&&['/generation-queue.js','/studio-reads.js','/dev-tasks.js','/generation-jobs.js','/interactions.js','/interactions.css','/manifest.webmanifest','/play.webmanifest','/app-icon.svg','/app-icon-192.png','/app-icon-512.png','/app-install.js','/service-worker.js','/app-routes.js','/world-review.js','/world-review.css','/character-rename.html','/character-rename.js','/character-rename.css','/','/style.css','/theme.css','/i18n.js','/quick-tag.js','/media-signals.js','/media-review.js','/image-workshop.js','/world-engine.js','/play.js','/command-palette.js','/upload-image.js','/asset-generation.js','/picture-order.js','/play-scene.js','/play-dialog.js','/play-travel.js','/play-map.js','/play-map-layout.js','/play-story.js','/place-tools.js','/play-town-map.js','/play-icons.js','/character-factory.js','/debug-trail.js','/layout-check.js','/play-debug.js','/sprite-cutout.js','/sprite-cutout-worker.js','/sprite-cutout-pixels.js','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/profile-autosave.js','/client.js','/api-json.js','/system-error-summary.js','/character-options.js','/character-readiness.js','/enhancements.js','/picture-crop.js','/character-reference-crops.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/name-picker.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/location-editor.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-hub.js','/location-canvas-model.js','/location-canvas.css','/permanent-media-delete.js','/dev-tools.js','/identity.js'].includes(p)){
+        const version=url.searchParams.get('v'),name=p==='/'?'index.html':p.slice(1);
+        if(version&&version!==publicAssets.version&&!p.endsWith('.html')&&p!=='/'){res.writeHead(307,{'Location':p+'?v='+publicAssets.version,'Cache-Control':'no-store'});return res.end();}
+        const immutable=version===publicAssets.version&&!name.endsWith('.html'),cacheControl=immutable?'public, max-age=31536000, immutable':'no-cache';
+        const s=publicAssets.get(name,{versioned:immutable}),enc=pickEncoding(req.headers['accept-encoding']);
         // Compressed once per file version; the browser keeps it and only asks "changed?" (304).
-        if(req.headers['if-none-match']===s.etag){res.writeHead(304,{'ETag':s.etag,'Cache-Control':'no-cache','Vary':'Accept-Encoding'});return res.end();}
-        const data=enc?s[enc]:s.raw;res.writeHead(200,{...(enc?{'Content-Encoding':enc}:{}),'Content-Length':data.length,'ETag':s.etag,'Cache-Control':'no-cache','Vary':'Accept-Encoding','Content-Type':p.endsWith('.webmanifest')?'application/manifest+json':p.endsWith('.svg')?'image/svg+xml':p.endsWith('.png')?'image/png':p.endsWith('.css')?'text/css':p.endsWith('.js')?'text/javascript':'text/html; charset=utf-8','Content-Security-Policy':`default-src 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' ${characterCrops.adminOrigin()||''}; frame-ancestors 'none'`,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Permissions-Policy':'camera=(), microphone=(), geolocation=(), payment=()','Cross-Origin-Opener-Policy':'same-origin'});return res.end(data);
+        if(req.headers['if-none-match']===s.etag){res.writeHead(304,{'ETag':s.etag,'Cache-Control':cacheControl,'Vary':'Accept-Encoding'});return res.end();}
+        const data=enc?s[enc]:s.raw;res.writeHead(200,{...(enc?{'Content-Encoding':enc}:{}),'Content-Length':data.length,'ETag':s.etag,'Cache-Control':cacheControl,'Vary':'Accept-Encoding','Content-Type':p.endsWith('.webmanifest')?'application/manifest+json':p.endsWith('.svg')?'image/svg+xml':p.endsWith('.png')?'image/png':p.endsWith('.css')?'text/css':p.endsWith('.js')?'text/javascript':'text/html; charset=utf-8','Content-Security-Policy':`default-src 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' ${characterCrops.adminOrigin()||''}; frame-ancestors 'none'`,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Permissions-Policy':'camera=(), microphone=(), geolocation=(), payment=()','Cross-Origin-Opener-Policy':'same-origin'});return res.end(data);
       }
       throw fail('Not found',404);
     }catch(e){if(!e.status){errorLog.write(e,{method:req.method,route:String(req.url||'').split('?')[0],requestId});if(process.env.LU_DEBUG)console.error(e);}if(!res.headersSent)json({error:e.status?e.message:'The operation could not be completed. Your original media has not been changed.',...(e.status?{}:{request_id:requestId})},e.status||500);else res.destroy();}

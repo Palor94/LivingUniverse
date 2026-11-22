@@ -29,7 +29,9 @@ test('phone play: same identity and origin rules, CSRF on changes, answers come 
     const install=JSON.parse(manifest.text);assert.equal(install.start_url,'/play');assert.equal(install.display,'standalone');
     for(const icon of install.icons){const response=await request(remote,icon.src,null,'GET',auth);assert.equal(response.status,200);assert.match(response.headers['content-type'],/image\/png/);}
     assert.equal((await request(remote,'/service-worker.js',null,'GET',auth)).status,200);
-    const script=await request(remote,'/play.js',null,'GET',auth);assert.equal(script.status,200);assert.match(script.text,/installPlayUI/);
+    const script=await request(remote,'/play.js',null,'GET',auth);assert.equal(script.status,200);assert.match(script.text,/installPlayUI/);assert.equal(script.headers['cache-control'],'no-store');
+    const home=await request(local,'/');const version=home.text.match(/client\.js\?v=([a-f0-9]+)/)[1];const cachedScript=await request(remote,'/play.js?v='+version,null,'GET',auth);assert.equal(cachedScript.status,200);assert.equal(cachedScript.headers['cache-control'],'no-store','authenticated mobile forwarding never inherits public immutable caching');
+    assert.equal((await request(remote,'/play.js?v='+version)).status,403);
     assert.equal((await request(remote,'/client.js',null,'GET',auth)).status,404,'the desktop studio is not exposed');
     // Everything the phone page loads, followed import by import through the phone listener
     // (debugging package, 2026-11-13: a module missing here leaves the phone screen blank).

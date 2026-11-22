@@ -1,3 +1,4 @@
+import {openGenerationQueue} from './generation-queue.js';
 import {openPictureOrder} from './picture-order.js';
 import {openAssetGeneration} from './asset-generation.js';
 import {sortNames} from './name-picker.js';
@@ -132,12 +133,13 @@ export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfi
   async function paintGeneration(){
     const box=$('#iw-body');const g=await api('/api/workshop/generation');if(!$('#iw-body'))return;
     const open=g.jobs.filter(j=>j.status==='open'),stuck=g.jobs.filter(j=>['refused','failed'].includes(j.status));
-    box.innerHTML=`<div class="iw-banner"><span>${t('iw.gen.lead')}</span><button class="primary" id="iw-starter">${t('iw.gen.copyStarter')}</button></div>
+    box.innerHTML=`<div class="iw-banner"><span>${t('iw.gen.lead')}</span><button type="button" id="iw-queue">${t('queue.title')}</button><button class="primary" id="iw-starter">${t('iw.gen.copyStarter')}</button></div>
       <h2>${t('iw.gen.needs',{count:g.total})}</h2>
       <div class="iw-needs">${g.needs.map((n,i)=>`<details class="iw-need" data-iw-need="${i}"><summary><span class="iw-target">${t('we.gen.'+n.target)}</span> <b>${esc(n.name||'')}</b>${n.target==='figure'?` · ${t('iw.gen.outfit.'+(n.outfit||'dressed'))}`:''}${n.expression?` · ${esc(n.expression)}`:''}${n.time_of_day?` · ${esc(n.time_of_day)}`:''} <small class="muted">${esc(n.why||'')}</small></summary><div class="iw-brief muted">${t('iw.loading')}</div></details>`).join('')||`<p class="muted">${t('iw.gen.none')}</p>`}</div>
       ${g.blocked_figures?.length?`<h2>${t('iw.gen.missingPictures')}</h2><ul class="iw-jobs">${g.blocked_figures.map(c=>`<li><b>${esc(c.name)}</b> · ${esc(c.source_folder)}</li>`).join('')}</ul>`:''}
       ${open.length?`<h2>${t('iw.gen.open',{count:open.length})}</h2><ul class="iw-jobs">${open.map(j=>`<li>${t('we.gen.'+j.target)} · ${esc(j.character||j.location||'')}${j.brief?.owner_note?` — <i>${esc(j.brief.owner_note)}</i>`:''}</li>`).join('')}</ul>`:''}
       ${stuck.length?`<h2>${t('iw.gen.stuck')}</h2><ul class="iw-jobs">${stuck.map(j=>`<li>${t('we.gen.'+j.target)} · ${esc(j.character||j.location||'')} · ${esc(j.status)}${j.note?` — ${esc(j.note)}`:''} <button class="subtle" data-iw-clear="${esc(j.id)}">${t('iw.gen.offerAgain')}</button></li>`).join('')}</ul>`:''}`;
+    $('#iw-queue').onclick=run(()=>openGenerationQueue({needs:g.needs,api,esc}));
     $('#iw-starter').onclick=run(async()=>{await navigator.clipboard.writeText(STARTER);toast(t('iw.copied'));});
     for(const b of $$('[data-iw-clear]'))b.onclick=run(async()=>{await api('/api/play/generation/jobs/'+b.dataset.iwClear+'/clear',{});await paintGeneration();});
     for(const d of $$('[data-iw-need]'))d.addEventListener('toggle',()=>{if(d.open&&!d.dataset.loaded){d.dataset.loaded='1';loadBrief(d,g.needs[Number(d.dataset.iwNeed)]);}});

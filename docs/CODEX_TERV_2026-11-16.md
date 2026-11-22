@@ -1,5 +1,20 @@
 # Living Universe – Codex-utasításterv (2026-11-16)
 
+## Megtartott négy feladat – elkészült (2026-11-22)
+
+A tulajdonos az alábbi négy feladatot tartotta meg. Ez felülírja a lentebbi korábbi munkasorrendet és a lezárási jegyzet eredeti nyitott listáját.
+
+1. **Kész – A16:** gyorsabb navigáció és profilfülváltás.
+2. **Kész – V14:** statikus fájlok verziózása és gyorsítótárazása, a privát adatok gyorsítótárazási szabályainak megtartásával.
+3. **Kész – V7:** csoportképes borítók karakterre igazított kivágása, kizárólag megjelenítési változtatásként.
+4. **Kész – 13. csomag / B21:** figurákat és háttereket közösen kezelő, keretes generálási sor befejezése.
+
+**Ellenőrzés (2026-11-22):** 497/497 teszt sikeres, 170 tesztfájlból, `npm test -- --changed`. T0: előtte `2026-11-22T12-46-31-920Z` (14 kép); utána `2026-11-22T13-05-50-831Z` (14 kép); célzott `--retained-four`: `2026-11-22T13-07-39-138Z` (12 kép). Mindkét méret sikeres; ugyanaz a profilfejléc, 0 új állapotolvasás fülváltáskor, 43 statikus fájl gyorsítótárból és 0 átvitt bájt újranyitáskor. A képek és a `report.json` a `%LOCALAPPDATA%\LivingUniverse\ui-shots` alatt vannak. A generálás szintetikus szolgáltatóval ellenőrizve; igazolt USD-becslés nélkül az éles keretes sor továbbra sem indítható. Kézzel a Képműhely → Generálás → Keretes képsor, illetve a többalakos borító kivágása nézhető át. Ez nem nyitja újra a törölt feladatokat.
+
+**Törölt további igények:** a 16. csomag külön lezárási/mérési/dokumentációs munkája, V8 (diszkrét mód), W7 (teendőszámlálók), W8 (külön fordítási audit), valamint az önálló éles Sogni-ellenőrzési feladat. A már elkészült funkciók eltávolítása nem része ennek a döntésnek. A megtartott fejlesztések kapcsolódó tesztjei és T0-ellenőrzései továbbra is szükségesek.
+
+A keretes generálás változatlanul betartja az AGENTS.md engedélyezési és költségkorlátait: hiányzó igazolt pénzbeli becslés mellett nincs indítás; ez a tervszűkítés nem ad éles futási vagy feltöltési engedélyt.
+
 **A hosszú munkaszakasz a tulajdonos kérésére lezárva (2026-11-17).** A kész és nyitott tételek átadási jegyzete: [CODEX_LEZARAS_2026-11-17.md](CODEX_LEZARAS_2026-11-17.md). Ez a munkaszakasz lezárása, nem a teljes UX-terv befejezése.
 
 Ez az egyetlen belépési pont. Tartalma: munkaszabályok, munkasorrend, majd négy feladatlista:
@@ -53,8 +68,8 @@ A 11. Sogni I. csomag kódja és homokozós ellenőrzése elkészült (A20, B20,
 A 12. Sogni II. csomag kódja és homokozós ellenőrzése elkészült (B18 + A22 → B22; 2026-11-17).
 A 13. csomag pontos jóváhagyási szabályszövegét a tulajdonos jóváhagyta; az AGENTS.md és DECISIONS.md frissítve. Ez nem éles futási engedély.
 A döntésre várva a 14. Helyszínek csomag is elkészült és ellenőrizve (A19 + V10 → B4/A18 → B5; 2026-11-17).
-A 13. csomagból elkészült B19 (több kimenet és keretes engedély), B23 (pillanatkép) és a B21 figura-munkás, valamint W2 javító hivatkozásai. Nyitva: a vegyes figura/háttér munkamenetes sor és a B17 igazolt USD-séma; éles Sogni-ellenőrzés csak a fiókhiba rendezése után.
-A 15. Stúdió-képernyők csomag elkészült és homokozóban ellenőrizve (W1, W3, W4, W5, W6). Következő: 16. Párbeszéd II. és költség, majd 17. Maradék.
+A 13. csomagból elkészült B19 (több kimenet és keretes engedély), B23 (pillanatkép) és a B21 figura-munkás, valamint W2 javító hivatkozásai. A vegyes figura/háttér sor 2026-11-22-én elkészült. Igazolt szolgáltatói USD-válasz nélkül a keretes indítás tiltott; külön éles ellenőrzés nincs a megtartott feladatok között.
+A 15. Stúdió-képernyők csomag elkészült és homokozóban ellenőrizve (W1, W3, W4, W5, W6). A további munkát a dokumentum elején szereplő szűkített tulajdonosi lista határozza meg; a 16. csomag külön lezárása kikerült az igényből.
 A tulajdonos újabb utasítása szerint a fennmaradó csomagok egymás után folytatandók;
 ez felülírja a 0. fejezet munkamenetenként egy csomagos korlátját.
 
@@ -615,3 +630,6 @@ A futó, élő programban nem történt kattintás figurára, ajtóra, Várok/Al
 ### Munkamegszakítási pont (2026-11-17)
 
 A tulajdonos a maradék heti keretből külön a közös hierarchikus fejlesztési feladatlistát kérte. Ez elsőbbséget kapott, elkészült a Feladatok képernyő és a megosztott MCP-eszközkészlet. A korábbi terv 16. csomagja részben megvalósítva, még nem lezárva; a 17. csomag és a 13. csomag vegyes háttér/figura munkamenetes sora hátravan. A Sogni-fiókhibáig nincs éles próba. A folytatás innen induljon, ne tekintse az egész UX-tervet késznek.
+
+
+Éles kódbetöltés ellenőrizve (2026-11-22): üres futómunkalista mellett a program saját újraindítója lefutott. A kezdőlap és az új modul HTTP 200, a verziózott modul immutable fejlécű, a képsor API elérhető, a kódfrissesség szerint nincs szükség újabb újraindításra. A katalógus, Grok gateway és privát MCP alagút ütemezett szolgáltatásai futnak; generálás nem indult. Tesztnapló: `%LOCALAPPDATA%\LivingUniverse\ux-four-final-tests.log`.

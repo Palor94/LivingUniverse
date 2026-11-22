@@ -1,3 +1,4 @@
+import {coverFocus} from './cover-focus.mjs';
 // Local face identity at work (2026-11-12): "who is in this picture" suggestions, likely wrong
 // links, and a consistency check of every character's approved face references.
 //
@@ -162,7 +163,24 @@ export function installIdentitySuggest({db,one,all,run,transaction,safeFile,fail
     run('INSERT INTO identity_feedback VALUES(?,?,?,?,?) ON CONFLICT(media_id,character_id) DO NOTHING',body.media_id,body.character_id,'no',actor,iso());
     return {ok:true};
   }
+  async function coverSuggestion(characterId,mediaId,{scan=false}={}){
+    if(!one('SELECT 1 FROM depictions WHERE character_id=? AND media_id=?',characterId,mediaId))throw fail('Choose a picture assigned to this character.',404);
+    const result={method,canon_changed:false,face_count:0,suggestion:null};
+    const refs=faceReferences().filter(ref=>ref.character_id===characterId),ids=[...new Set([mediaId,...refs.map(ref=>ref.media_id)])];
+    if(ids.length>21)return {...result,reason:'REFERENCE_LIMIT'};
+    const media=ids.map(id=>one("SELECT * FROM active_media WHERE id=? AND kind='image'",id));if(media.some(m=>!m))return {...result,reason:'REFERENCE_UNAVAILABLE'};
+    if(scan){if(job.running||analyse.available&&!analyse.available())throw fail('Local face analysis is unavailable.',409);job={running:true,scope:'cover',total:media.length,done:0,faces:0,errors:0,failed:[],started_at:iso(),finished_at:null,stopped:false};await runScan(media);}
+    try{for(const m of media)if(cachedKey(m.id)!==(await fileKey(m)).key)return {...result,reason:'SCAN_REQUIRED'};}catch{return {...result,reason:'REFERENCE_UNAVAILABLE'};}
+    const faces=facesOf(mediaId);result.face_count=faces.length;
+    if(!refs.length)return {...result,reason:'FACE_REFERENCE_MISSING'};
+    const vectors=refs.map(ref=>!ref.crop&&facesOf(ref.media_id).length!==1?null:referenceVector(ref));
+    if(vectors.some(v=>!v))return {...result,reason:'AMBIGUOUS_REFERENCE'};
+    result.suggestion=coverFocus(faces,vectors,{threshold:SUGGEST,margin:MARGIN});return {...result,reason:result.suggestion?null:'AMBIGUOUS_FACE'};
+  }
   async function handle({p,req,body,json}){
+    const cover=p.match(/^\/api\/identity\/cover\/([a-f0-9-]{36})\/([a-f0-9-]{36})$/i);
+    if(cover&&['GET','POST'].includes(req.method)){json(await coverSuggestion(cover[1],cover[2],{scan:req.method==='POST'}));return true;}
+
     if(p==='/api/identity'&&req.method==='GET')return json({status:status(),report:report()}),true;
     if(p==='/api/identity/status'&&req.method==='GET')return json(status()),true;
     if(p==='/api/identity/scan'&&req.method==='POST')return json(startScan(body.scope)),true;
@@ -179,5 +197,5 @@ export function installIdentitySuggest({db,one,all,run,transaction,safeFile,fail
     const vectors=[];for(const ref of refs){const m=one('SELECT * FROM active_media WHERE id=?',ref.media_id);if(!m)return {...result,reason:'REFERENCE_UNAVAILABLE'};const {key}=await fileKey(m);if(cachedKey(m.id)!==key)await runScan([m]);const vector=referenceVector(ref);if(!vector)return {...result,reason:'AMBIGUOUS_REFERENCE'};vectors.push(vector);}
     try{const analysed=await analyse(await safeFile(media)),faces=(analysed.faces||[]).filter(face=>face.px>=MIN_FACE_PX&&face.score>=MIN_DET);if(faces.length!==1)return {...result,reason:faces.length?'MULTIPLE_FACES':'NO_FACE'};const vector=toVector(Buffer.from(faces[0].embedding,'base64')),score=Math.max(...vectors.map(ref=>cosine(vector,ref)));return {...result,face_verdict:score>=SUGGEST?'matches':'mismatch',score:round(score),threshold:SUGGEST};}catch{return {...result,reason:'IDENTITY_UNAVAILABLE'};}
   }
-  return {handle,startScan,status,report,feedback,faceReferences,checkGenerated,close:()=>{job.stopped=true;analyse.close?.();},wait:async()=>{while(job.running)await new Promise(r=>setTimeout(r,10));}};
+  return {handle,startScan,status,report,feedback,faceReferences,checkGenerated,coverSuggestion,close:()=>{job.stopped=true;analyse.close?.();},wait:async()=>{while(job.running)await new Promise(r=>setTimeout(r,10));}};
 }

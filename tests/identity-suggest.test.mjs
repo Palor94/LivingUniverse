@@ -74,6 +74,11 @@ test('face identity: suggestions only above the margin, likely wrong links, refe
     // Unchanged files are not analysed again.
     const scannedBefore=r.status.scanned;let calls=0;const counting=async f=>{calls++;return fakeAnalyse(f);};void counting;
     await api('/api/identity/scan',{scope:'all'});await app.identity.wait();assert.equal((await api('/api/identity/status')).scanned,scannedBefore);
+    // Cover suggestions use only fresh, character-bound approved face references.
+    const coverRoute='/api/identity/cover/'+b.id+'/'+id('ref-b-crop.png');let cover=await api(coverRoute);assert.equal(cover.face_count,2);assert.ok(cover.suggestion);assert.ok(Math.abs(cover.suggestion.crop.x+cover.suggestion.crop.w/2-.6)<1e-6);
+    app.db.prepare('UPDATE characters SET cover_id=? WHERE id=?').run(id('ref-b-crop.png'),b.id);assert.ok((await api('/api/tidy')).group_covers.some(c=>c.id===b.id));
+    await api('/api/characters/'+b.id+'/cover-crop',{media_id:id('ref-b-crop.png'),crop:cover.suggestion.crop});assert.ok(!(await api('/api/tidy')).group_covers.some(c=>c.id===b.id));
+    app.db.prepare("UPDATE identity_faces SET file_key='stale' WHERE media_id=?").run(id('ref-b.png'));assert.equal((await api(coverRoute)).reason,'SCAN_REQUIRED');cover=await api(coverRoute,{});assert.ok(cover.suggestion,'an explicit bounded local scan refreshes the stale reference');
     assert.equal(JSON.stringify(app.db.prepare('SELECT * FROM canon ORDER BY rowid').all()),canonBefore,'canon is never written');
     assert.equal(app.db.prepare('SELECT count(*) n FROM depictions').get().n,linksBefore+1,'only the owner-clicked link was added');
     await assert.rejects(api('/api/identity/feedback',{media_id:solo.media_id,character_id:solo.character_id,verdict:'yes'}),{status:400});

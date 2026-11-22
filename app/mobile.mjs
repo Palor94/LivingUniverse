@@ -23,6 +23,7 @@ function forward(req,res,target,securityHeaders){
     const out=http.request(target,{method:req.method,headers},answer=>{
       const back={'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':securityHeaders['Content-Security-Policy']};
       for(const h of FORWARD_RESPONSE)if(answer.headers[h]!==undefined)back[h]=answer.headers[h];
+      back['cache-control']='no-store';
       res.writeHead(answer.statusCode,back);answer.pipe(res);answer.on('end',resolve);answer.on('error',()=>{res.destroy();resolve();});
     });
     out.on('error',()=>{if(!res.headersSent){res.writeHead(502,{...securityHeaders,'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({error:'The desktop application did not answer. Retry shortly.'}));}else res.destroy();resolve();});

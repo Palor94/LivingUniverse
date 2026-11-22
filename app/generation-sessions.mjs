@@ -3,25 +3,25 @@ import {GenerationError} from './image-providers.mjs';
 
 // The grant freezes existing, reviewed manifests. It never widens their scope or
 // authorizes an estimate upload. Reservations survive errors and process restarts.
-export function installGenerationSessions({one,run,all,transaction,imageGeneration,clock=()=>Date.now()}){
+export function installGenerationSessions({one,run,all,transaction,imageGeneration,viewRun=rid=>imageGeneration.view(rid),clock=()=>Date.now()}){
   const prefix='generation-session:',hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
   const fail=(code,message,status=409)=>{throw new GenerationError(code,message,status);};
   const shape=(value,keys)=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key)))fail('INVALID_ARGUMENT','Invalid session fields.');};
   const save=value=>run('INSERT INTO application_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',prefix+value.id,JSON.stringify(value));
   const get=id=>{const row=typeof id==='string'&&one('SELECT value FROM application_settings WHERE key=?',prefix+id);if(!row)fail('NOT_FOUND','Generation session not found.',404);return JSON.parse(row.value);};
   const event=(value,type,actor,detail={})=>value.events.push({type,actor,at:new Date(clock()).toISOString(),...detail});
-  function quote(plan){const estimate=plan.manifest.sogni_estimate;
+  function quote(plan){const estimate=plan.manifest.sogni_estimate||plan.manifest.estimate;
     if(plan.manifest.provider!=='sogni'||estimate?.source!=='sogni'||typeof estimate.usd!=='number'||!Number.isFinite(estimate.usd)||estimate.usd<0||!Number.isFinite(estimate.capacity_units)||estimate.capacity_units<=0)fail('SESSION_PRICE_UNKNOWN','A provider-verified USD estimate is required for every session job.');
     if(!Number.isFinite(Date.parse(estimate.estimated_at))||clock()-Date.parse(estimate.estimated_at)>300000||Date.parse(estimate.estimated_at)>clock()+1000)fail('ESTIMATE_EXPIRED','The cost estimate expired. Prepare and review a fresh plan.');
     if(estimate.capacity_units>plan.manifest.max_estimated_capacity_units)fail('COST_LIMIT','The estimate exceeds the approved capacity ceiling.');
     return {images:plan.manifest.n||1,capacity:estimate.capacity_units,micro_usd:Math.ceil(estimate.usd*1e6)};
   }
-  function current(job){const plan=imageGeneration.view(job.run_id);if(plan.manifest_hash!==job.manifest_hash||hash(plan.manifest)!==job.manifest_hash||!['pending','approved'].includes(plan.status)||Date.parse(plan.expires_at)<=clock())fail('SESSION_SCOPE_CHANGED','A frozen session job changed or expired.');quote(plan);return plan;}
+  function current(job){const plan=viewRun(job.run_id);if(plan.manifest_hash!==job.manifest_hash||hash(plan.manifest)!==job.manifest_hash||!['pending','approved'].includes(plan.status)||!(Date.parse(plan.expires_at)>clock()))fail('SESSION_SCOPE_CHANGED','A frozen session job changed or expired.');quote(plan);return plan;}
   function prepare(args,actor){shape(args,['run_ids','expires_at','max_images','max_capacity_units','max_usd']);
     if(!Array.isArray(args.run_ids)||!args.run_ids.length||args.run_ids.length>50||new Set(args.run_ids).size!==args.run_ids.length)fail('INVALID_ARGUMENT','Select one to fifty distinct prepared runs.');
     const expiry=Date.parse(args.expires_at);if(!Number.isFinite(expiry)||expiry<=clock()||expiry>clock()+86400000)fail('INVALID_ARGUMENT','Choose a session expiry within twenty-four hours.');
     if(!Number.isInteger(args.max_images)||args.max_images<1||args.max_images>200||!Number.isFinite(args.max_capacity_units)||args.max_capacity_units<=0||args.max_capacity_units>1e9||typeof args.max_usd!=='number'||!Number.isFinite(args.max_usd)||args.max_usd<=0||args.max_usd>1e5)fail('INVALID_ARGUMENT','Choose finite positive session limits.');
-    const jobs=args.run_ids.map(run_id=>{const plan=imageGeneration.view(run_id);if(!['pending','approved'].includes(plan.status)||Date.parse(plan.expires_at)<=clock())fail('INVALID_STATE','Select pending or approved unexpired plans.');return {run_id,manifest_hash:plan.manifest_hash,manifest:plan.manifest};});
+    const jobs=args.run_ids.map(run_id=>{const plan=viewRun(run_id);if(!['pending','approved'].includes(plan.status)||!(Date.parse(plan.expires_at)>clock()))fail('INVALID_STATE','Select pending or approved unexpired plans.');return {run_id,manifest_hash:plan.manifest_hash,manifest:plan.manifest};});
     const scope={jobs,expires_at:new Date(expiry).toISOString(),max_images:args.max_images,max_capacity_units:args.max_capacity_units,max_micro_usd:Math.floor(args.max_usd*1e6)},value={id:randomUUID(),status:'draft',scope,scope_hash:hash(scope),reservations:[],events:[]};event(value,'prepared',actor);save(value);return value;
   }
   function approve(id,args,actor){shape(args,['scope_hash','acknowledge_external_upload_and_cost']);return transaction(()=>{const value=get(id);if(value.scope_hash!==args.scope_hash||hash(value.scope)!==args.scope_hash)fail('SESSION_SCOPE_CHANGED','Review this exact session scope.');if(value.status==='approved')return value;if(value.status!=='draft'||Date.parse(value.scope.expires_at)<=clock())fail('SESSION_EXPIRED','The session is no longer approvable.');if(args.acknowledge_external_upload_and_cost!==true)fail('APPROVAL_REQUIRED','Approve the listed reference uploads and the session cost ceiling.');
