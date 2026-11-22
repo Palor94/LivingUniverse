@@ -42,18 +42,26 @@ export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()})
 
   // meetings: [{id, character_ids}] events of this round, already written. palorId is left out:
   // Palor's own knowledge is the player's.
-  function spread(meetings,day,{palorId=null}={}){
+  // Limited attention (2026-11-22, after Generative Agents att_bandwidth, Apache-2.0): attention(cid)
+  // → {miss:0..1, extra:bool}. An upset or inattentive listener may not take a story in (a
+  // deterministic draw per meeting, story and listener); an attentive one may hear a second one.
+  const draw=key=>{let h=2166136261;for(const ch of key){h^=ch.codePointAt(0);h=Math.imul(h,16777619)>>>0;}return h/4294967296;};
+  function spread(meetings,day,{palorId=null,attention=null}={}){
     const told=[];
     for(const m of meetings){
       const ids=[...new Set(m.character_ids||[])].filter(id=>id&&id!==palorId);
       for(const a of ids)for(const b of ids){
         if(a===b||told.length>=MAX_TOLD)continue;
         // Newest first; one thing per direction per meeting.
-        const pick=knownEvents(a,day).filter(e=>e.id!==m.id&&shareable(e)&&!knows(b,e.id,parse(e.payload_json))).sort((x,y)=>y.created_at.localeCompare(x.created_at))[0];
-        if(!pick)continue;
+        const att=attention?.(b)||{miss:0,extra:false};
+        const picks=knownEvents(a,day).filter(e=>e.id!==m.id&&shareable(e)&&!knows(b,e.id,parse(e.payload_json))).sort((x,y)=>y.created_at.localeCompare(x.created_at)).slice(0,att.extra?2:1);
+        for(const pick of picks){
+        if(told.length>=MAX_TOLD)break;
+        if(att.miss>0&&draw(m.id+'|'+pick.id+'|'+b)<att.miss)continue;
         run('INSERT INTO world_knowledge(event_id,character_id,via_character_id,meeting_event_id,world_day,created_at,rewound_at) VALUES(?,?,?,?,?,?,NULL) ON CONFLICT(event_id,character_id) DO UPDATE SET via_character_id=excluded.via_character_id,meeting_event_id=excluded.meeting_event_id,world_day=excluded.world_day,created_at=excluded.created_at,rewound_at=NULL',pick.id,b,a,m.id,day,iso());
         remember(b,`${name(a)} mesélte (${pick.world_day}): ${clip(pick.title,120)} – ${clip(pick.summary,240)}`,m.id);
         told.push({event_id:pick.id,from:a,to:b});
+        }
       }
     }
     return told;

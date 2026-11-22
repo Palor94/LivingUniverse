@@ -22,7 +22,8 @@ export async function mapLimit(items,limit,fn){
   return out;
 }
 import {installWorldSocial} from './world-social.mjs';
-import {installInnerState} from './inner-state.mjs';
+import {installInnerState,effectiveIntensity} from './inner-state.mjs';
+import {installKnownPlaces} from './known-places.mjs';
 import {bm25} from './world-text-rank.mjs';
 import {plan as offscreenPlan,record as offscreenRecord} from './offscreen-life.mjs';
 import {readFileSync as readSql} from 'node:fs';
@@ -66,6 +67,8 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   const social=installWorldSocial({db,one,all,run,remember:(...a)=>remember(...a),now});
   // E2 (2026-11-21): each character's inner state, carried between conversations.
   const inner=installInnerState({db,one,all,run,now});
+  // Known places (2026-11-22).
+  const knownPlaces=installKnownPlaces({db,one,all,run,now});
   let running=false,timer=null;
   const iso=()=>now().toISOString();
 
@@ -262,6 +265,16 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   // just happened is forgotten. Returned oldest first, like recentMemories.
   const stem=w=>{w=w.toLocaleLowerCase('hu');return w.length>4&&/[aeáé]$/.test(w)?w.slice(0,-1):w;};
   const wordsOf=s=>[...new Set((String(s).toLocaleLowerCase('hu').match(/\p{L}{5,}/gu)||[]).map(x=>x.slice(0,5)))];
+  // Limited attention (2026-11-22): how much of what he is told he takes in. Upset (a strong
+  // negative mood that has not faded) or inattentive (Figyelmesség ≤3/10): may miss a story;
+  // attentive (≥7/10) and not upset: may take in a second one.
+  const NEGATIVE_MOOD=/megbánt|sért|düh|ingerül|mérges|szomor|fáradt|feszült|csalód|nyugtalan|szorong|keser|elkesered/i;
+  function attentionOf(cid){
+    const p=profile(cid),att=profileScale(p,'attentiveness'),st=inner.current(cid);
+    const upset=!!st&&NEGATIVE_MOOD.test(st.mood||'')&&effectiveIntensity(st,worldDayAt(now()),p)>=1.5;
+    let miss=0;if(upset)miss+=0.5;if(att!==null&&att<=3)miss+=0.3;
+    return {miss:Math.min(0.8,miss),extra:!upset&&att!==null&&att>=7};
+  }
   function recallMemories(cid,{about=[],place='',text='',limit=12}={}){
     const rowsFull=all("SELECT m.id,m.text,s.importance,s.recall_count,s.last_recalled_day FROM character_memories m LEFT JOIN memory_salience s ON s.memory_id=m.id WHERE m.character_id=? AND m.status='approved' ORDER BY m.rowid DESC LIMIT 300",cid);
     const rows=rowsFull.map(r=>r.text);
@@ -481,7 +494,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
         meetings.push({id,character_ids:payload.character_ids});offscreen++;
       }
       // News travels only through these meetings (plan step 2.5).
-      told=social.spread(meetings,day,{palorId:pid});
+      told=social.spread(meetings,day,{palorId:pid,attention:attentionOf});
       for(const i of intentions)if(i.message){const mid=randomUUID();run('INSERT INTO world_messages(id,from_character_id,text,world_day,event_id,read_at,created_at) VALUES(?,?,?,?,?,?,?)',mid,i.id,i.message,day,null,null,iso());messages++;
         if(i.invite&&hasTable('play_invitations')){const aid=randomUUID();run("INSERT INTO play_appointments(id,character_id,location_id,world_day,slot,status,created_at) VALUES(?,?,?,?,?,'invited',?)",aid,i.id,i.invite.location_id,i.invite.day,i.invite.slot,iso());run('INSERT INTO play_invitations VALUES(?,?,?)',aid,mid,iso());}}
       run('INSERT INTO world_runs VALUES(?,?,?,?,?,?,?,?)',randomUUID(),day,slot.id,fresh.length,messages,dropped,roundCost(),iso());
@@ -622,7 +635,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     return false;
   }
   // Shared with Play mode and rewind (same cost cap, same memories and levels).
-  const internals={inner,ask,people,palor,profile,profileText,autonomous,meetable,placesOf,levelOf,setLevel,remember,recentMemories,recallMemories,groupIds,openThreadsFor,addThreads,resolveThreads,noteLapsed,threadsOf,social,beliefsFor:social.beliefsFor};
+  const internals={inner,knownPlaces,attention:cid=>attentionOf(cid),ask,people,palor,profile,profileText,autonomous,meetable,placesOf,levelOf,setLevel,remember,recentMemories,recallMemories,groupIds,openThreadsFor,addThreads,resolveThreads,noteLapsed,threadsOf,social,beliefsFor:social.beliefsFor};
   // Job ledger (2026-11-13): a round whose status says "running" while no round runs in this
   // process was cut off (crash, restart). It is shown as stuck and can be marked interrupted.
   function roundState(){return {running,last:lastRound(),spent_today:spentToday(),cap:settings().daily_cap_usd};}

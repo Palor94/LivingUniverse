@@ -100,6 +100,16 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
     const gaps=r.gaps.length?`<div class="we-where-gaps"><b>${t('we.whereGaps',{count:r.gaps.length})}</b><ul>${r.gaps.map(g=>`<li><button class="vn-link" data-where-fix="${esc(g.id)}">${esc(g.name)}</button>: ${esc(g.text)}</li>`).join('')}</ul></div>`:`<p class="muted">${t('we.whereNoGaps')}</p>`;
     const names=r.slots[0]?.people||[];
     box.innerHTML=gaps+`<table class="we-table we-where"><thead><tr><th>${esc(r.day)} ${esc(r.weekday||'')}</th>${r.slots.map(s=>`<th${s.current?' class="we-now"':''}>${esc(s.label)}</th>`).join('')}</tr></thead><tbody>${names.map((p,i)=>`<tr><td>${esc(p.name)}</td>${r.slots.map(s=>{const x=s.people[i];return `<td${s.current?' class="we-now"':''}>${x.location?esc(x.location):'—'}${x.reason_label?`<br><small class="muted">${esc(x.reason_label)}</small>`:''}</td>`;}).join('')}</tr>`).join('')}</tbody></table>`;
+    // Whisper (2026-11-22): plant a thought in a character; it becomes his own thought.
+    box.insertAdjacentHTML('beforeend',`<details class="we-whisper"><summary><b>${t('we.whisper')}</b></summary><p class="muted">${t('we.whisperLead')}</p>
+      <div class="we-row"><select id="we-whisper-who" aria-label="${esc(t('we.whisperWho'))}">${names.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>
+      <input id="we-whisper-text" maxlength="400" placeholder="${esc(t('we.whisperPlaceholder'))}"><button id="we-whisper-send" class="primary">${t('we.whisperSend')}</button></div><div id="we-whisper-list"></div></details>`);
+    const listWhispers=async()=>{const who=$('#we-whisper-who').value,r=await api('/api/play/characters/'+encodeURIComponent(who)+'/whispers');
+      $('#we-whisper-list').innerHTML=r.whispers.length?`<ul>${r.whispers.map(x=>`<li>${esc(x.world_day)}: ${esc(x.text)} <button class="subtle" data-whisper-withdraw="${esc(x.id)}">${t('we.whisperWithdraw')}</button></li>`).join('')}</ul>`:`<p class="muted">${t('we.whisperNone')}</p>`;
+      const listEl=$('#we-whisper-list');for(const b of listEl.querySelectorAll('[data-whisper-withdraw]'))b.onclick=wrap(async()=>{await api('/api/play/whispers/'+encodeURIComponent(b.dataset.whisperWithdraw)+'/withdraw',{});await listWhispers();});};
+    $('#we-whisper-who').onchange=wrap(listWhispers);
+    $('#we-whisper-send').onclick=wrap(async()=>{const text=$('#we-whisper-text').value.trim();if(!text)return;await api('/api/play/characters/'+encodeURIComponent($('#we-whisper-who').value)+'/whispers',{text});$('#we-whisper-text').value='';toast(t('we.whisperDone'));await listWhispers();});
+    if(names.length)await listWhispers();
     for(const b of box.querySelectorAll('[data-where-fix]'))b.onclick=()=>{selectedPlaceCharacter=b.dataset.whereFix;worldTab='places';render(root).catch(error=>toast(error.message,true));};
   }
   function bindLab(){

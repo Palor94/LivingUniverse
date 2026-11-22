@@ -346,6 +346,25 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   // over his profile where they disagree. The profile itself is not rewritten; notes are kept
   // with time and can be withdrawn. Character policy still applies to what is written.
   db.exec('CREATE TABLE IF NOT EXISTS play_director_notes(id TEXT PRIMARY KEY,character_id TEXT NOT NULL REFERENCES characters(id),text TEXT NOT NULL,created_at TEXT NOT NULL,withdrawn_at TEXT)');
+  // Whispers (2026-11-22, after Generative Agents "whisper", Apache-2.0): the owner plants a thought in
+  // a character. It becomes his own memory (importance 4, so recall and reflection use it) and stays
+  // in his prompt as "what is on his mind" for 7 world days; withdrawable; never another's prompt.
+  const WHISPER_DAYS=7;
+  const whispers=cid=>all('SELECT id,text,world_day,created_at FROM character_whispers WHERE character_id=? AND withdrawn_at IS NULL ORDER BY created_at DESC',cid);
+  const activeWhispers=(cid,day)=>whispers(cid).filter(x=>(Date.parse(day+'T00:00:00Z')-Date.parse(x.world_day+'T00:00:00Z'))/86400000<WHISPER_DAYS).slice(0,3);
+  function addWhisper(cid,body){
+    if(!one('SELECT 1 FROM characters WHERE id=?',cid))throw fail('Character not found',404);
+    const text=clip(String(body?.text??'').replace(/[\u0000-\u001f\u007f]/g,' ').trim(),400);if(!text)throw fail('Írd le a gondolatot.');
+    characterPolicy?.assertProfile?.({id:cid,biography:text});
+    if(whispers(cid).length>=20)throw fail('Ennek a szereplőnek már 20 aktív suttogása van. Vonj vissza egy régit.',409);
+    const id=randomUUID(),day=clock().day,mem=w.remember(cid,'Gondolat: '+text,null,{reason:'Suttogás (tulajdonos)',importance:4});
+    run('INSERT INTO character_whispers VALUES(?,?,?,?,?,?,NULL)',id,cid,text,day,mem||null,new Date().toISOString());
+    return {whispers:whispers(cid)};
+  }
+  function withdrawWhisper(id){const x=one('SELECT * FROM character_whispers WHERE id=? AND withdrawn_at IS NULL',id);if(!x)throw fail('A suttogás nem található.',404);
+    run('UPDATE character_whispers SET withdrawn_at=? WHERE id=?',new Date().toISOString(),id);
+    if(x.memory_id)run("UPDATE character_memories SET status='withdrawn',updated_at=? WHERE id=? AND status='approved'",new Date().toISOString(),x.memory_id);
+    return {whispers:whispers(x.character_id)};}
   const directorNotes=cid=>all('SELECT id,text,created_at FROM play_director_notes WHERE character_id=? AND withdrawn_at IS NULL ORDER BY created_at',cid);
   const directorText=cid=>{const n=directorNotes(cid);return n.length?'AZ ALKOTÓ JAVÍTÁSAI (mindig ezek az irányadók; ha a profiloddal vagy az emlékeiddel ütköznek, ezek szerint viselkedj):\n'+n.map(x=>'- '+clip(x.text,400)).join('\n'):'';};
   function addDirectorNote(body){
@@ -1224,6 +1243,10 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       ...(()=>{const st=w.inner?.current(cid);return [stanceLines(c.profile,{inner:st,effective:effectiveIntensity(st,k.day,c.profile),level:level??0}).join('\n')];})(),
       // E4 (2026-11-21): his own aim in this talk.
       ...(()=>{const a=agendaFor({lapsed:threads.lapsed,inner:w.inner?.current(cid),profile:c.profile,early:history.length<6});return a?[a]:[];})(),
+      // Whispers: what is on his mind (owner-planted, his own thought now).
+      ...(()=>{const x=activeWhispers(cid,k.day);return x.length?['EZ JÁR A FEJEDBEN (a saját gondolatod; hiszed, akkor is, ha tévedsz; a természeted szerint hat rád, ne mondd ki szó szerint):\n'+x.map(v=>'- '+v.text).join('\n')]:[];})(),
+      // Known places: only these may be described concretely.
+      ...(()=>{const x=w.knownPlaces?.promptLine(cid);return x?[x]:[];})(),
       // E8: how he sees himself lately (from his reflections).
       ...(()=>{const v=w.social?.selfView?.(cid);return v?['AHOGY MOSTANÁBAN MAGADAT LÁTOD (saját benyomás, változhat; ne mondd ki szó szerint): '+clip(v.text,300)]:[];})(),
       ...(beliefs.length?['A VÉLEMÉNYED (saját benyomás, tévedhetsz; ne mondd ki szó szerint):\n'+beliefs.map(b=>`- ${b.about_name}: ${clip(b.text,200)}`).join('\n')]:[]),
@@ -1426,6 +1449,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       const byPerson=(obj,c)=>obj&&typeof obj==='object'?(obj[c.name]??Object.entries(obj).find(([n])=>matchPerson(people,n)===c.id)?.[1]):undefined;
       for(const c of people){const m=clip(byPerson(mem,c),1000);if(m)w.remember(c.id,m,eventId,{importance:summary.importance});
         if(w.inner)w.inner.record(c.id,byPerson(data.inner,c),{day:conv.world_day,eventId,conversationId:conv.id});
+        if(w.knownPlaces)w.knownPlaces.learn(c.id,data.mentioned_places);
         if(w.social?.addOpinions){const ops=byPerson(data.opinions,c);w.social.addOpinions(c.id,(Array.isArray(ops)?ops:[]).filter(o=>String(o?.about||'').trim().toLocaleLowerCase('hu')!==String(w.palor()?.name||'Palor').toLocaleLowerCase('hu')),{day:conv.world_day,people:w.people().filter(x=>x.id!==pid),eventId});}}
       if(summary.palor_memory&&pid)w.remember(pid,summary.palor_memory,eventId);
       meetingSaved(eventId);
@@ -1497,6 +1521,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       w.addThreads(c.id,id,data.promises,conv.world_day);
       // E2: his inner state after this talk, from his point of view.
       if(w.inner)w.inner.record(c.id,data.inner,{day:conv.world_day,eventId,conversationId:id});
+      // Places he heard of in this talk become known to him.
+      if(w.knownPlaces)w.knownPlaces.learn(c.id,data.mentioned_places);
       // E12: his opinions from this talk about others or a topic.
       if(w.social?.addOpinions)w.social.addOpinions(c.id,(Array.isArray(data.opinions)?data.opinions:[]).filter(o=>String(o?.about||'').trim().toLocaleLowerCase('hu')!==String(w.palor()?.name||'Palor').toLocaleLowerCase('hu')),{day:conv.world_day,people:w.people().filter(p=>p.id!==pid),eventId});
     });
@@ -1638,6 +1664,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       return json({media:await director.forEvent(row,{repick:body.verdict!==1})}),true;}
     if(p==='/api/play/readiness'&&m==='GET')return json(await readiness()),true;
     if(p==='/api/play/whereabouts'&&m==='GET')return json(whereabouts()),true;
+    {const wm=p.match(/^\/api\/play\/characters\/([a-f0-9-]{36})\/whispers$/i);if(wm){if(m==='GET')return json({whispers:whispers(wm[1])}),true;if(m==='POST')return json(addWhisper(wm[1],body)),true;}}
+    {const wd=p.match(/^\/api\/play\/whispers\/([a-f0-9-]{36})\/withdraw$/i);if(wd&&m==='POST')return json(withdrawWhisper(wd[1])),true;}
     if(p==='/api/play/export'&&m==='GET'){
       // The story so far as a Markdown file (journal + Palor's conversations), newest last.
       const ev=journal().events.slice().reverse();let md='# Élő világ – a történet eddig\n';let day='';

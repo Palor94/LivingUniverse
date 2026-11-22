@@ -103,3 +103,18 @@ test('E8 reflection: due by weight of the new memories; how he sees himself is k
   const r=w.social.rewindAfter('2026-11-12T00:00:00Z','2026-11-14T00:00:00Z');assert.equal(w.social.selfView(w.ids.Ádám),null);
   w.social.undoRewind(r);assert.ok(w.social.selfView(w.ids.Ádám));
 });
+
+test('limited attention: an upset or inattentive listener may miss news; an attentive one hears a second story',()=>{
+  const w=world();
+  w.event('Ádám új munkát kapott',['Ádám']);w.event('Ádám összeveszett a szomszéddal',['Ádám']);
+  const meet=(n)=>w.event('Találkozó '+n,['Ádám','Béla']);
+  // Fully distracted: nothing is taken in.
+  let told=w.social.spread([{id:meet(1),character_ids:[w.ids.Ádám,w.ids.Béla]}],'2026-11-12',{palorId:w.ids.Palor,attention:id=>id===w.ids.Béla?{miss:1,extra:false}:{miss:0}});
+  assert.ok(!told.some(x=>x.to===w.ids.Béla),'Béla missed it');
+  // Attentive: two stories in one meeting.
+  told=w.social.spread([{id:meet(2),character_ids:[w.ids.Ádám,w.ids.Béla]}],'2026-11-12',{palorId:w.ids.Palor,attention:id=>id===w.ids.Béla?{miss:0,extra:true}:{miss:0}});
+  assert.equal(told.filter(x=>x.to===w.ids.Béla).length,2);
+  // No attention function: the earlier one-per-direction behaviour.
+  const w2=world();w2.event('Ádám új munkát kapott',['Ádám']);w2.event('Másik hír',['Ádám']);const m=w2.event('Kávé',['Ádám','Béla']);
+  assert.equal(w2.social.spread([{id:m,character_ids:[w2.ids.Ádám,w2.ids.Béla]}],'2026-11-12',{palorId:w2.ids.Palor}).filter(x=>x.to===w2.ids.Béla).length,1);
+});
