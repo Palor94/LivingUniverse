@@ -24,6 +24,7 @@ export async function mapLimit(items,limit,fn){
 import {installWorldSocial} from './world-social.mjs';
 import {installInnerState,effectiveIntensity} from './inner-state.mjs';
 import {installKnownPlaces} from './known-places.mjs';
+import {installMorning} from './morning.mjs';
 import {bm25} from './world-text-rank.mjs';
 import {plan as offscreenPlan,record as offscreenRecord} from './offscreen-life.mjs';
 import {readFileSync as readSql} from 'node:fs';
@@ -69,6 +70,8 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   const inner=installInnerState({db,one,all,run,now});
   // Known places (2026-11-22).
   const knownPlaces=installKnownPlaces({db,one,all,run,now});
+  // The morning step (S3, 2026-11-22).
+  const morning=installMorning({db,one,all,run,now});
   let running=false,timer=null;
   const iso=()=>now().toISOString();
 
@@ -428,6 +431,10 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   async function simulateDay(day,slot=WHOLE_DAY){
     const fullCast=autonomous();if(!fullCast.length)return {day,slot:slot.id,events:0,messages:0,note:'Nincs Szellemprofillal rendelkező szereplő.'};
     const {acting:cast,resting}=roundCast(fullCast,day,slot);
+    // Morning step (S3): once a world day, before its first round; its call is capped like the rest
+    // and a failure never stops the round.
+    let morningResult=null;
+    if(!morning.done(day)){try{morningResult=await morning.runFor(day,fullCast,{ask:(s,u,m,o={})=>ask(s,u,m,{...o,purpose:'world'}),inner,places:knownPlaces});}catch(e){if(e.code==='CAP_REACHED')throw e;console.error('Morning step skipped: '+e.message);}}
     const everyone=people(),byId=new Map(everyone.map(c=>[c.id,c])),pid=palor()?.id;
     const date=new Date(day+'T12:00:00'),holiday=HOLIDAYS[day.slice(5)],weekend=date.getDay()===0||date.getDay()===6;
     const when=`Dátum: ${day} (${WEEKDAYS[date.getDay()]}${weekend?', hétvége':''}${holiday?', ünnep: '+holiday:''}), évszak: ${SEASON[date.getMonth()]}, napszak: ${slot.label}.`;
@@ -505,7 +512,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     progress.step('reflection',{events:fresh.length,messages});
     try{beliefs=await social.reflect(cast,day,{ask:(s,u,m,o={})=>ask(s,u,m,{...o,purpose:'world'}),model,people:()=>everyone.map(c=>({id:c.id,name:c.name}))});}catch(e){if(e.code!=='CAP_REACHED')console.error('Reflection skipped: '+e.message);}
     progress.done({beliefs:beliefs.length});
-    return {day,slot:slot.id,events:fresh.length,messages,dropped,acting:cast.length,resting,offscreen,told:told.length,beliefs:beliefs.length};
+    return {day,slot:slot.id,events:fresh.length,messages,dropped,acting:cast.length,resting,offscreen,morning:morningResult,told:told.length,beliefs:beliefs.length};
   }
 
   // ---- runs ---------------------------------------------------------------------------------
@@ -635,7 +642,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     return false;
   }
   // Shared with Play mode and rewind (same cost cap, same memories and levels).
-  const internals={inner,knownPlaces,attention:cid=>attentionOf(cid),ask,people,palor,profile,profileText,autonomous,meetable,placesOf,levelOf,setLevel,remember,recentMemories,recallMemories,groupIds,openThreadsFor,addThreads,resolveThreads,noteLapsed,threadsOf,social,beliefsFor:social.beliefsFor};
+  const internals={inner,knownPlaces,morning,attention:cid=>attentionOf(cid),ask,people,palor,profile,profileText,autonomous,meetable,placesOf,levelOf,setLevel,remember,recentMemories,recallMemories,groupIds,openThreadsFor,addThreads,resolveThreads,noteLapsed,threadsOf,social,beliefsFor:social.beliefsFor};
   // Job ledger (2026-11-13): a round whose status says "running" while no round runs in this
   // process was cut off (crash, restart). It is shown as stuck and can be marked interrupted.
   function roundState(){return {running,last:lastRound(),spent_today:spentToday(),cap:settings().daily_cap_usd};}

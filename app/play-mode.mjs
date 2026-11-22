@@ -475,6 +475,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       for(const p of events)if(p.location_id&&p.character_ids.includes(c2.id))loc=p.location_id;
       if(loc)why.set(c2.id,{kind:'event'});
       // Weekly schedule (plan 3.2, 2026-11-15): a fixed place per weekday and day part.
+      // Today's plan (S3 morning step) before the weekly routine.
+      if(!loc){const dp=w.morning?.planFor(c2.id,c.day,slotId);if(dp&&one('SELECT 1 FROM locations WHERE id=?',dp.location_id)){loc=dp.location_id;why.set(c2.id,{kind:'day_plan',reason:dp.reason});}}
       if(!loc){loc=scheduled(c2.id,c.day,slotId);if(loc)why.set(c2.id,{kind:'schedule'});}
       if(!loc){
         // A street, stairwell or Káloz határa is walked through, never a place to be found in
@@ -501,7 +503,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   const REASON_LABEL={appointment:'találkozó Palorral',event:'mai esemény',schedule:'heti rutin',day_plan:'napi terv',last_seen:'ma itt látták utoljára',home:'otthon',work:'munkahely',routine:'megszokott hely',other:'kapcsolt hely'};
   const reasonKey=r=>!r?null:r.kind==='place'?r.role:r.kind;
   // Why he is where he is now, in his own words for his prompt (null when unknown).
-  function reasonOf(cid){const r=positions().why?.get(cid);const k=reasonKey(r);return k?REASON_TEXT[k]||null:null;}
+  function reasonOf(cid){const r=positions().why?.get(cid);const k=reasonKey(r);if(k==='day_plan'&&r.reason)return 'Mára ezt tervezted: '+r.reason;return k?REASON_TEXT[k]||null:null;}
   // Owner view (S1): every meetable character in each part of today, with the reason, plus the gaps.
   function whereabouts(){
     const k=clock(),cast=w.meetable(),name=id=>one('SELECT name FROM locations WHERE id=?',id)?.name||null;
