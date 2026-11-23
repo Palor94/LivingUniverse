@@ -41,8 +41,7 @@ SAVING (after every single picture)
 - Call place_play_asset with:
   target "picture",
   character_ids = everyone in the picture (scenes 1–7: [him]; 8–12 and 11b–12b: [Palor, him]; 13–14 and 13b–14b: [both]),
-  content "non_intimate",
-  label "felmeztelen" for 11b, 12b, 13b and 14b (no label for the others),
+  content "non_intimate" for the dressed pictures and "shirtless" for 11b, 12b, 13b and 14b,
   location_id only if the scene is at a place you know from the app,
   image = the picture you just generated (attach it as the file parameter),
   model "ChatGPT".

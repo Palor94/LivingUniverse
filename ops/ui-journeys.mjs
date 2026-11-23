@@ -29,7 +29,7 @@ export const JOURNEYS=[
     {name:'click a town pin',selector:'[data-town-pin]',run:async(page,el)=>{await el.click();await page.waitForLoadState('networkidle');}}]},
   {id:'talk',steps:[
     {name:'go where someone is',run:async page=>{const ov=(await api('/api/play')).data;const n=ov.nodes.find(n=>!n.passage&&n.location_id&&ov.people.some(p=>p.location_id===n.location_id));if(!n)return 'SKIPPED: nobody anywhere';await api('/api/play/travel',{node_id:n.id});await page.goto(origin+'/#/play');await page.waitForLoadState('networkidle');}},
-    {name:'start a talk',selector:'[data-play-talk]',run:async(page,el)=>{await el.click();await page.locator('textarea').first().waitFor({timeout:15000});}},
+    {name:'start a talk',selector:'[data-play-talk]',run:async(page,el)=>{await el.click();const go=page.locator('[role=dialog] button.primary, dialog button.primary, .person-card button.primary').first();if(await go.count()&&!await page.locator('textarea').first().isVisible().catch(()=>false))await go.click();await page.locator('textarea').first().waitFor({timeout:15000});}},
     {name:'say something',selector:'textarea',run:async(page,el)=>{await el.fill('Szia, mi újság?');await el.press('Enter');await page.waitForLoadState('networkidle');}},
     {name:'refresh mid-talk: the talk resumes, nothing is sent twice',run:async page=>{
       const open=(await api('/api/play')).data.open_conversation;if(!open)return 'FAIL: no open talk after saying something';
@@ -44,7 +44,7 @@ export const JOURNEYS=[
     {name:'end the talk',run:async()=>{const open=(await api('/api/play')).data.open_conversation;if(open){const r=await api(`/api/play/conversations/${open.id}/end`,{});if(r.status>=500)return 'FAIL: end → '+r.status;}}}]},
   {id:'wait',steps:[
     {name:'open Play',run:async page=>{await page.goto(origin+'/#/play');await page.waitForLoadState('networkidle');}},
-    {name:'wait one day part',selector:'[data-play-wait]',run:async(page,el)=>{await el.click();await page.waitForLoadState('networkidle');}}]},
+    {name:'wait one day part',selector:'[data-play-wait=next_slot]',open:'.play-wait-menu summary',run:async(page,el)=>{await el.click();await page.waitForLoadState('networkidle');}}]},
   {id:'phone-page',steps:[
     {name:'open the phone Play page',run:async page=>{await page.goto(origin+'/play');await page.waitForLoadState('networkidle');}}]}
 ];
@@ -65,12 +65,12 @@ async function main(){
       const page=await browser.newPage({viewport:{width,height}});const errors=[];
       await page.addInitScript(()=>{try{localStorage.setItem('lu-play-tour-v1','done');}catch{}});
       page.on('console',m=>{if(m.type()==='error')errors.push('console: '+m.text().slice(0,300));});
-      page.on('pageerror',e=>errors.push('page: '+String(e.message).slice(0,300)));
+      page.on('response',r=>{if(r.status()===404)errors.push('404: '+r.url().slice(0,160));});page.on('pageerror',e=>errors.push('page: '+String(e.message).slice(0,300)));
       const res={journey:j.id,screen:label,steps:[]};
       for(const step of j.steps){
         let outcome='ok';
         try{
-          let el=null;if(step.selector){el=page.locator(step.selector).first();if(!await el.count()||!await el.isVisible().catch(()=>false)){res.steps.push({step:step.name,outcome:'SKIPPED: not found '+step.selector});continue;}}
+          let el=null;if(step.selector){el=page.locator(step.selector).first();if(step.open)await page.locator(step.open).first().click().catch(()=>{});if(!await el.count()||!await el.isVisible().catch(()=>false)){res.steps.push({step:step.name,outcome:'SKIPPED: not found '+step.selector});continue;}}
           const r=await step.run(page,el);if(typeof r==='string')outcome=r;
         }catch(e){outcome='FAIL: '+String(e.message).split('\n')[0].slice(0,300);}
         const inv=(await api('/api/play/invariants')).data;

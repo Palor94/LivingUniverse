@@ -41,6 +41,15 @@ export function appraisalLines(p,{person='te'}={}){
 export function appraiseEvent(p,kind){
   const a=val(p,'attachment'),r=val(p,'recognition'),au=val(p,'autonomy'),s=val(p,'security');
   const reading=[];
+  const social={
+    praise:()=>r!==null&&r>=7?'az elismerés különösen jólesik':r!==null&&r<=3?'a dicséret kevéssé mozgat meg':'jóleshet az elismerés, a mértékét a természeted dönti el',
+    criticism:()=>r!==null&&r>=7?'érzékenyen érint, hogy nem vesznek komolyan':au!==null&&au>=7?'fontos neked, hogy magad dönthess, mit fogadsz meg':'mérlegeled a kritikát, nem kell automatikusan megsértődnöd',
+    rejection:()=>a!==null&&a>=7?'elutasításként éled meg, fáj':a!==null&&a<=3?'nem veszed különösebben a szívedre':'tudomásul veszed a nemet; a csalódás nem jogosít nyomásgyakorlásra',
+    help:()=>s!==null&&s>=7?'megnyugtat, hogy konkrétan számíthattál rá':au!==null&&au>=7?'értékelheted a segítséget, de az önállóságodat is őrzöd':'a konkrét segítség számít, nem jelent automatikus vonzalmat',
+    boundary_respected:()=>au!==null&&au>=7?'fontos megkönnyebbülés, hogy tiszteletben tartja az önállóságodat':'biztonságosabbnak érezheted a viszonyt, mert elfogadta a határodat',
+    attraction:()=> 'ez a saját kimondott vonzalmad; nem bizonyítja a másik vonzalmát vagy beleegyezését'
+  };
+  if(Object.hasOwn(social,kind))reading.push(social[kind]());
   if(kind==='missed_date'||kind==='broken_promise'){
     if(a!==null&&a>=7)reading.push('elutasításként éled meg, fáj');
     if(r!==null&&r>=7)reading.push('sértésként éled meg, mintha nem vennének komolyan');
@@ -51,4 +60,15 @@ export function appraiseEvent(p,kind){
   if(!reading.length)return '';
   const how=expression(p);
   return `Neked ez: ${reading.join('; ')}${how.length?'. Ahogy reagálsz: '+how.slice(0,3).join(', '):''}.`;
+}
+
+// Hearsay is an opinion about someone else's experience, never the listener's own deed.
+export function appraiseHeardEvent(p,kind){
+  let reading='csak elbeszélésből tudsz róla, a részletek bizonytalanok';
+  if(kind==='help')reading=high(p,'security')?'biztató hír lehet, hogy másnak konkrétan segített':high(p,'autonomy')?'figyeled, hogy a segítség mások önállóságát is meghagyta-e':'másoknak adott segítségről hallottál';
+  if(kind==='praise')reading=high(p,'recognition')?'figyeled, hogyan ismeri el mások munkáját':'mások dicséretéről hallottál';
+  if(kind==='criticism')reading=high(p,'recognition')?'érzékenyen figyeled, hogyan bírál másokat':'mások kritikájáról hallottál, a körülményeket nem ismered';
+  if(kind==='rejection')reading='egy elutasításról hallottál; a nemet tiszteletben kell tartani';
+  if(kind==='boundary_respected')reading=high(p,'autonomy')?'jó jel lehet, hogy mások önállóságát tiszteletben tartja':'mások határának elfogadásáról hallottál';
+  return `A hallottak lehetséges értelmezése: ${reading}; nem saját tapasztalat, ne állíts biztosat vagy szemtanúságot.`;
 }

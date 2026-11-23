@@ -25,7 +25,7 @@ Szereplő + Szereplő - Helyszín - tartalom - bármi.png
 - **Elválasztó:** ` - ` (szóköz, kötőjel, szóköz). A részek sorrendje szabad, csak a szereplőknek kell egy részben lenniük.
 - **Szereplők:** a meglévő nevek `+` jellel összekötve. Az ékezet és a kis- vagy nagybetű nem számít (`Peter` = `Péter`). A hosszú nevek rövid alakja is működik, ha egyértelmű: `Dávid` = „Dávid - ikea mellizmos srác”.
 - **Helyszín** (nem kötelező): a Helyszínek fa egyik helyének neve, például `Kávézó`.
-- **Tartalom** (nem kötelező): `hetkoznapi`, `meztelen` vagy `szex`. **Érdemes megadni:** a jelöletlen képet a játék intimnek veszi, ezért csak később mutatja meg.
+- **Tartalom** (nem kötelező): `hetkoznapi`, `felmeztelen`, `meztelen` vagy `szex` (a `félmeztelen` ékezettel is jó). **Érdemes megadni:** a jelöletlen képet a játék intimnek veszi, ezért csak később mutatja meg.
 - **Bármi:** sorszám vagy rövid leírás. Ezt a program nem értelmezi.
 
 Példák:
@@ -107,7 +107,8 @@ Az intimitási szint a kapcsolatnál feljebb lépve oldódik fel. A tartalom szi
 
 | Fokozat | Tartalom a névben | Példák |
 |---|---|---|
-| Flört | `meztelen` | félmeztelen szelfi, strand, öltözés utáni kép (egyedül vagy Palorral) |
+| Flört | `felmeztelen` | félmeztelen szelfi, strand, edzés vagy öltözés utáni kép, nadrág marad (egyedül vagy Palorral) |
+| Flört | `meztelen` | meztelen kép, szex nélkül |
 | Intim | `szex` | közös jelenetek Palorral: csók, vetkőzés, utána |
 
 Az intim képek generálásánál a meglévő szabály érvényes: referenciaként csak bizonyítottan generált képek használhatók.

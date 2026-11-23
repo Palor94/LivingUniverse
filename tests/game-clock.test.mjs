@@ -44,3 +44,35 @@ test('waiting moves the play clock; the AI cost cap still counts real days',asyn
     assert.equal((await api('/api/world-engine')).spent_today_usd,0.5,'game time is a day ahead; the cap still sees today\'s real spending');
   }finally{await app?.close();await fs.rm(temp,{recursive:true,force:true});}
 });
+
+test('break cap (2026-11-23): a break runs on only to the next 07:00, play continues from there',()=>{
+  const s=store();let real=new Date(2026,10,23,20,0),engineOn=false;
+  const c=createGameClock({...s,realNow:()=>real,capBreaks:()=>!engineOn});
+  c.notePlay();c.advance(30,'travel');assert.equal(c.now().getHours(),20);assert.equal(c.now().getMinutes(),30);
+  // Three real days away: the game holds at the next morning instead of skipping three days.
+  real=new Date(2026,10,26,18,0);
+  assert.equal(c.now().getDate(),24);assert.equal(c.now().getHours(),7);assert.equal(c.now().getMinutes(),0);
+  assert.equal(c.info().held,true);
+  const away=c.notePlay();
+  assert.equal(away.minutes,10*60+30,'20:30 → 07:00');assert.ok(away.held_minutes>0);
+  assert.equal(c.info().away.to,away.to);assert.equal(c.info().held,false);
+  // From there real time runs normally again.
+  real=new Date(2026,10,26,18,10);assert.equal(c.now().getHours(),7);assert.equal(c.now().getMinutes(),10);assert.equal(c.notePlay(),null);
+  // A short pause (under 20 minutes) is not a break and changes nothing.
+  real=new Date(2026,10,26,18,25);assert.equal(c.notePlay(),null);assert.equal(c.now().getMinutes(),25);
+  // Sleeping to 07:00 during play never freezes the clock at that morning.
+  c.advance(c.toMorning(),'sleep');const slept=c.now().getTime();real=new Date(real.getTime()+5*60_000);
+  assert.equal(c.now().getTime()-slept,5*60_000);
+  // A break that does not reach the next morning is kept in full.
+  real=new Date(real.getTime()+3*3600_000);assert.equal(c.now().getHours(),10);
+  // With the world engine always on the world really lives in real time: no cap.
+  engineOn=true;real=new Date(real.getTime()+48*3600_000);assert.equal(c.now().getHours(),10);assert.equal(c.now().getDate(),27);
+});
+
+test('break cap: an owner rewind anchors the hold at the rewound moment',()=>{
+  const s=store();let real=new Date(2026,10,23,12,0);
+  const c=createGameClock({...s,realNow:()=>real});
+  c.rewindTo(new Date(2026,10,20,23,0).toISOString());
+  real=new Date(2026,10,25,12,0);
+  assert.equal(c.now().getDate(),21);assert.equal(c.now().getHours(),7);
+});

@@ -16,8 +16,8 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {isPlanningSource,planningSQL} from './media-purpose.mjs';
 import {estimateIdentityCostUsd} from './vision-identity.mjs';
+import {LEVELS,videoFrameLevelSql,aiLevelSql} from './content-levels.mjs';
 
-const LEVELS=['non_intimate','nudity','sexual_activity'];
 const STEPS=['signals','duplicate','people','content','tagged'];
 const VERDICTS=['accept','reject','regenerate'],FACE=['match','mismatch','unsure','none'];
 const NOT_MOMENTS=['Kollázs','Generálási terv','Referenciakép','Helyszín háttér'];
@@ -33,8 +33,8 @@ export function installImageWorkshop({db,root,one,all,run,fail,dataDir,playAsset
   const hasTable=name=>!!one("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",name);
   const names=()=>new Map(all('SELECT id,name FROM characters').map(c=>[c.id,c.name]));
   const notMoments=()=>JSON.stringify(all(`SELECT st.id FROM structured_tags st JOIN tag_groups g ON g.id=st.group_id WHERE g.name='Kép típusa' AND st.name IN (${NOT_MOMENTS.map(()=>'?').join(',')})`,...NOT_MOMENTS).map(r=>r.id));
-  const lastAi=`(SELECT json_extract(w.raw_json,'$.world_details.content.level') FROM world_review_sources w WHERE w.media_id=m.id ORDER BY w.rowid DESC LIMIT 1)`;
-  const level=`COALESCE((SELECT level FROM play_content pc WHERE pc.media_id=m.id),CASE WHEN m.kind='video' THEN (SELECT CASE max(CASE f.level WHEN 'sexual_activity' THEN 3 WHEN 'nudity' THEN 2 WHEN 'non_intimate' THEN 1 END) WHEN 3 THEN 'sexual_activity' WHEN 2 THEN 'nudity' WHEN 1 THEN 'non_intimate' END FROM media_video_frames f WHERE f.media_id=m.id) ELSE (CASE WHEN ${lastAi} IN ('non_intimate','nudity','sexual_activity') THEN ${lastAi} END) END)`;
+  const lastAi=`(SELECT ${aiLevelSql('w.raw_json')} FROM world_review_sources w WHERE w.media_id=m.id ORDER BY w.rowid DESC LIMIT 1)`;
+  const level=`COALESCE((SELECT level FROM play_content pc WHERE pc.media_id=m.id),CASE WHEN m.kind='video' THEN ${videoFrameLevelSql('m.id')} ELSE (CASE WHEN ${lastAi} IN (${LEVELS.map(l=>`'${l}'`).join(',')}) THEN ${lastAi} END) END)`;
   const latestCanon=cid=>{const r=one('SELECT appearance,references_json FROM canon WHERE character_id=? ORDER BY rowid DESC LIMIT 1',cid);let refs=[];try{refs=JSON.parse(r?.references_json||'[]').filter(x=>x?.media_id);}catch{}return {appearance:r?.appearance||null,refs};};
   const cast=()=>{const w=worldEngine.internals,list=w.meetable().map(c=>({id:c.id,name:c.name}));const p=w.palor();if(p&&!list.some(c=>c.id===p.id))list.unshift({id:p.id,name:p.name});return list;};
 
@@ -209,9 +209,9 @@ export function installImageWorkshop({db,root,one,all,run,fail,dataDir,playAsset
   // ---- 5. readiness and benchmark -------------------------------------------------------------
   function readiness(){
     const levels=all(`SELECT d.character_id,${level} level,count(*) n FROM depictions d JOIN active_media m ON m.id=d.media_id WHERE m.kind IN ('image','video') AND NOT EXISTS(SELECT 1 FROM play_asset_sources a WHERE a.media_id=m.id) GROUP BY d.character_id,2`);
-    const per=new Map();for(const r of levels){const p=per.get(r.character_id)||{non_intimate:0,nudity:0,sexual_activity:0,unknown:0};p[r.level||'unknown']+=r.n;per.set(r.character_id,p);}
+    const per=new Map();for(const r of levels){const p=per.get(r.character_id)||Object.fromEntries([...LEVELS,'unknown'].map(l=>[l,0]));p[r.level||'unknown']+=r.n;per.set(r.character_id,p);}
     const out=cast().map(c=>{
-      const {appearance,refs}=latestCanon(c.id),roles=new Set(refs.map(r=>r.role)),figs=sprites.forCharacter(c.id),pics=per.get(c.id)||{non_intimate:0,nudity:0,sexual_activity:0,unknown:0};
+      const {appearance,refs}=latestCanon(c.id),roles=new Set(refs.map(r=>r.role)),figs=sprites.forCharacter(c.id),pics=per.get(c.id)||Object.fromEntries([...LEVELS,'unknown'].map(l=>[l,0]));
       const scenes=one("SELECT count(*) n FROM play_inserts i JOIN active_media m ON m.id=i.media_id WHERE i.kind='scene' AND i.character_id=?",c.id).n;
       const checks=[
         {id:'appearance',ok:!!appearance,fix:'profile'},

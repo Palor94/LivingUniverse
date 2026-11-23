@@ -43,7 +43,8 @@ test('shared scene pictures: folder, upload, content marks, prompts and the inse
 
   // Prompts: background (3 times of day) and a scene for the two of them.
   const pr=(await call(`/api/play/prompts?character_id=${a.id}&location_id=${flat.id}`)).data;
-  assert.match(pr.background.night,/night/);assert.match(pr.scene.prompt,/Palor and Teszt Aladár together/);assert.match(pr.scene.prompt,/everyday friendly moment/);
+  assert.match(pr.background.night,/night/);assert.match(pr.scene.prompt,/Palor and Teszt Aladár together/);assert.match(pr.scene.prompt,/flirty, close, playful moment/);
+  assert.equal(pr.scene.reference_policy,'text_only');assert.doesNotMatch(pr.scene.prompt,/intimate, consensual/,'the current flirt stage does not permit an intimate moment');
   assert.equal((await call('/api/play/inserts')).data.inserts.length,1);
 
   // With an open talk (2026-11-13): the moment, the summary so far and the latest lines go in.
@@ -61,5 +62,5 @@ test('shared scene pictures: folder, upload, content marks, prompts and the inse
   // A beat beyond what the relationship allows: no explicit moment, no lines, no summary.
   ins("INSERT INTO play_lines VALUES('l3','c1','character','Gyere közelebb.','x')");ins("INSERT INTO play_line_meta(line_id,beat) VALUES('l3','sex')");
   scene=(await call(`/api/play/prompts?character_id=${a.id}&location_id=${flat.id}&conversation_id=c1`)).data.scene.prompt;
-  assert.doesNotMatch(scene,/consensual sex|Gyere közelebb|kanapét/);assert.match(scene,/everyday friendly moment/);
+  assert.doesNotMatch(scene,/consensual sex|Gyere közelebb|kanapét/);assert.match(scene,/flirty, close, playful moment/);
 });

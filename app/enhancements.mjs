@@ -71,6 +71,7 @@ export const extraTables={
   play_inserts:['id','media_id','kind','source','character_id','location_id','created_at'],
   play_appointments:['id','character_id','location_id','world_day','slot','status','created_at'],
   play_invitations:['appointment_id','message_id','created_at'],
+  play_appointment_sources:['appointment_id','source','created_at'],
   play_items:['id','name','kind','node_id','carried','created_at','updated_at'],
   play_asset_sources:['media_id','target','placed_at'],
   play_media_feedback:['media_id','panel','cast_key','verdict','at'],
@@ -90,7 +91,16 @@ export const extraTables={
   workshop_dismissed:['key','created_at'],
   sprite_rejections:['sprite_id','sha256','note','rejected_at'],
   play_generation_jobs:['id','target','character_id','location_id','expression','time_of_day','status','brief_json','media_id','placed_media_id','note','model','created_at','updated_at'],
-  world_runs:['id','world_day','slot','events','messages','dropped','cost_usd','created_at']
+  world_runs:['id','world_day','slot','events','messages','dropped','cost_usd','created_at'],
+  world_knowledge:['event_id','character_id','via_character_id','meeting_event_id','world_day','created_at','rewound_at'],
+  hidden_events:['id','title','brief','condition_json','character_ids_json','priority','status','actor','created_at','updated_at','private'],
+  hidden_event_reveals:['id','event_id','world_day','slot','character_id','created_at','rewound_at'],
+  social_experiences:['id','character_id','target_id','event_id','conversation_id','memory_id','kind','quote','line_id','reading','deltas_json','via_character_id','method','world_day','created_at','rewound_at'],
+  identity_quality_reviews:['id','character_id','media_id','canon_id','target_sha256','crop_json','face_verdict','body_verdict','note','method','created_at','actor'],
+  narrative_runs:['id','story_id','version','status','context_json','state_json','created_at','updated_at','rewound_at'],
+  narrative_turns:['id','run_id','request_key','input_hash','expected_version','input_text','output_json','status','created_at','rewound_at'],
+  world_fact_commits:['id','source_type','source_id','source_hash','event_id','actor','plan_json','created_at','rewound_at'],
+  world_fact_proposals:['id','source_type','source_id','source_version','source_hash','fact_json','status','reason','actor','created_at','decided_at','rewound_at']
 };
 export function installEnhancements(ctx){
   const {db,root,dataDir,all,one,run,transaction,asset,character,canon,safeFile,fingerprint,moving,isScanning,fail}=ctx;

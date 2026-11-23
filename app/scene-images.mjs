@@ -10,14 +10,16 @@ import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {organized} from './storage-layout.mjs';
 import {validateMedia} from './media-imports.mjs';
+import {LEVELS} from './content-levels.mjs';
 import {backgroundPrompt,scenePrompt} from './figure-prompts.mjs';
 
 export const SCENE_FOLDER='Közös jelenetek';
-const MAX_BYTES=20*1024*1024,LEVELS=['non_intimate','nudity','sexual_activity'];
+const MAX_BYTES=20*1024*1024;
 const safeName=s=>String(s).replace(/[\\/:*?"<>|\x00-\x1f]/g,'-').replace(/[. ]+$/,'').trim().slice(0,80);
 const fold=s=>String(s).normalize('NFD').replace(/\p{M}/gu,'').toLocaleLowerCase('hu').trim();
-// Content from the file name: "… hetkoznapi.png", "… meztelen.png", "… szex.png".
-const contentFromName=n=>/hetkoznapi|everyday/i.test(fold(n))?'non_intimate':/meztelen|nude/i.test(fold(n))?'nudity':/szex|sex/i.test(fold(n))?'sexual_activity':null;
+// Content from the file name: "… hetkoznapi.png", "… felmeztelen.png", "… meztelen.png", "… szex.png".
+// "felmeztelen" is checked before "meztelen", which it contains.
+const contentFromName=n=>/hetkoznapi|everyday/i.test(fold(n))?'non_intimate':/felmeztelen|shirtless/i.test(fold(n))?'shirtless':/meztelen|nude/i.test(fold(n))?'nudity':/szex|sex/i.test(fold(n))?'sexual_activity':null;
 
 export function installSceneImages({db,root,one,all,run,transaction,fail,palor,locationTree,activityOf=()=>'',stageOf=()=>'none',mayUseReferences=()=>true,mayUseEverydayReferences=mayUseReferences,intimateAllowed=mayUseReferences}){
   db.exec(`CREATE TABLE IF NOT EXISTS play_content(media_id TEXT PRIMARY KEY,level TEXT NOT NULL,set_at TEXT NOT NULL);
@@ -123,7 +125,7 @@ export function installSceneImages({db,root,one,all,run,transaction,fail,palor,l
       // Origin eligibility does not replace the separate content, consent or provider gates.
       const stage=intimateAllowed(c.id)?stageOf(c.id):'none',everyday=stage==='none',refsOk=everyday?mayUseEverydayReferences:mayUseReferences;
       const useReferences=refsOk(c.id),p=palor(),palorReferences=!!p&&refsOk(p.id);
-      out.scene={...scenePrompt({palor:p?.name||'Palor',name:c.name,place:node?.short_name||loc?.name||'',path:node?.path||loc?.name||'',stage:stageOf(c.id),activity:location_id?activityOf(c.id,location_id):'',folder:path.join(base(),safeName(c.name)),useReferences,intimateAllowed:intimateAllowed(c.id),appearance:look(c.id),palorReferences,palorAppearance:p?look(p.id):'',talk:talkContext(c.id,conversation_id)}),reference_policy:useReferences?(everyday?'approved_references_everyday':'approved_references'):intimateAllowed(c.id)?'text_only':'text_only_everyday',palor_reference_policy:palorReferences?'approved_references':'text_only'};}
+      out.scene={...scenePrompt({palor:p?.name||'Palor',name:c.name,place:node?.short_name||loc?.name||'',path:node?.path||loc?.name||'',stage,activity:location_id?activityOf(c.id,location_id):'',folder:path.join(base(),safeName(c.name)),useReferences,intimateAllowed:intimateAllowed(c.id),appearance:look(c.id),palorReferences,palorAppearance:p?look(p.id):'',talk:talkContext(c.id,conversation_id)}),reference_policy:useReferences?(everyday?'approved_references_everyday':'approved_references'):intimateAllowed(c.id)?'text_only':'text_only_everyday',palor_reference_policy:palorReferences?'approved_references':'text_only'};}
     return out;
   }
   const recentInserts=(limit=12)=>all(`SELECT i.kind,i.source,i.created_at,COALESCE(m.relative_path,s.relative_path) relative_path,c.name character FROM play_inserts i LEFT JOIN media m ON m.id=i.media_id

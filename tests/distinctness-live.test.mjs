@@ -1,0 +1,24 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {prepare,execute,hashPlan} from '../ops/distinctness-live.mjs';
+
+test('frozen synthetic live benchmark enforces budget, hash, exclusive receipt and uncertain no-retry',async t=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'lu-live-benchmark-test-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+  const {plan,sha256}=await prepare({model:'grok-4.20-non-reasoning',prices:{input:1.25,cached_input:0.2,output:2.5}});
+  assert.equal(plan.jobs.length,25);assert.equal(plan.private_data,false);assert.ok(plan.reserved_usd>plan.estimated_usd);
+  assert.ok(plan.jobs.every(j=>!j.request.user.includes('Szintetikus tesztválasz.')),'independent cases must contain no earlier mock responses');
+  assert.ok(plan.jobs.every(j=>j.request.user.includes('(most kezdődik)')),'each case starts a separate synthetic conversation');
+  let calls=0;const provider={name:'xai',model:plan.model,complete:async()=>{calls++;return {text:'{"reply":"Eltérő szintetikus mondat."}',usage:{input:10,output:10,cached:0},finish:'stop'};}};
+  const args={plan,expectedHash:sha256,maxUsd:plan.reserved_usd,ackCost:true,receipt:path.join(dir,'complete.json'),provider};
+  await assert.rejects(execute({...args,ackCost:false}),/APPROVAL/);await assert.rejects(execute({...args,maxUsd:0}),/BUDGET/);await assert.rejects(execute({...args,expectedHash:'changed'}),/PLAN/);assert.equal(calls,0);
+  const result=await execute(args);assert.equal(calls,25);assert.equal(result.status,'complete');assert.equal(result.metrics.length,5);assert.ok(result.metrics.every(m=>m.mean===0));
+  await assert.rejects(execute(args),/EEXIST/);assert.equal(calls,25);
+  const uncertain={...provider,complete:async()=>{calls++;throw Object.assign(Error('uncertain'),{code:'AI_UNCERTAIN'});}},receipt=path.join(dir,'uncertain.json');
+  await assert.rejects(execute({...args,provider:uncertain,receipt}),/uncertain/);assert.equal(calls,26);
+  const stopped=JSON.parse(await readFile(receipt,'utf8'));assert.equal(stopped.status,'stopped');assert.equal(stopped.jobs.length,1);assert.equal(stopped.reserved_usd,plan.jobs[0].reserved_usd);
+  await assert.rejects(execute({...args,provider:uncertain,receipt}),/EEXIST/);assert.equal(calls,26);
+  const expired={...plan,expires_at:'2000-01-01T00:00:00Z'};await assert.rejects(execute({...args,plan:expired,expectedHash:hashPlan(expired),receipt:path.join(dir,'expired.json')}),/PLAN/);
+});

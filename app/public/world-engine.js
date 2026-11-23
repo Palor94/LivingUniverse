@@ -1,6 +1,7 @@
 import {openPictureOrder} from './picture-order.js';
 import {openAssetGeneration} from './asset-generation.js';
 import {sortNames} from './name-picker.js';
+import {renderFactProposals} from './fact-proposals.js';
 // "Élő világ" screen: world-engine switch and cost cap, what happened while away,
 // serious events to accept/refuse, messages to Palor, place links and relationship levels.
 import {t} from './i18n.js';
@@ -25,6 +26,7 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
     const st=s.settings;
     // Owner only: what the characters think of people, and who heard what from whom.
     const socialHtml=social?`<section class="we-section" data-we-section="relations"><h2>${t('we.socialTitle')}</h2><p class="muted">${t('we.socialLead')}</p>
+      ${social.dimensions?.length?`<h3>${t('we.npcDimensions')}</h3>${social.dimensions.map(p=>`<details class="we-log"><summary>${esc(p.source_name)} → ${esc(p.target_name)}</summary><p>${Object.entries(p.scores).map(([key,value])=>`${esc(social.dimension_labels[key])}: ${value>0?'+':''}${esc(value)}`).join(' · ')}</p>${p.evidence.map(e=>`<p><small>${esc(new Date(e.created_at).toLocaleDateString('hu-HU'))}</small> ${esc(e.quote)}</p>`).join('')}</details>`).join('')}`:''}
       ${social.beliefs.length?`<table class="we-table"><tbody>${social.beliefs.map(b=>`<tr><td><b>${esc(b.character_name)}</b> → ${esc(b.about_name)}</td><td>${esc(b.text)}</td><td class="muted">${esc(b.world_day)} · ${t('we.socialMemories',{count:b.memory_count})}</td></tr>`).join('')}</tbody></table>`:`<p class="muted">${t('we.socialNoBeliefs')}</p>`}
       ${social.told.length?`<details class="we-log"><summary>${t('we.socialTold',{count:social.told.length})}</summary><table class="we-table"><tbody>${social.told.map(k=>`<tr><td>${esc(k.world_day)}</td><td>${esc(k.via_name)} → ${esc(k.character_name)}</td><td>${esc(k.title)}</td></tr>`).join('')}</tbody></table></details>`:''}
     </section>`:'';
@@ -129,7 +131,8 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
     const cellEdit=(key,c)=>`<select data-sch-cell="${esc(key)}">${opts(c?.location_id)}</select><input data-sch-act="${esc(key)}" maxlength="200" value="${esc(c?.activity||'')}" placeholder="${esc(t('we.scheduleActivity'))}"><select data-sch-priv="${esc(key)}" aria-label="${esc(t('we.schedulePrivacy'))}">${['public','private','secret'].map(v=>`<option value="${v}"${(c?.privacy||'public')===v?' selected':''}>${esc(t('we.privacy.'+v))}</option>`).join('')}</select>`;
     const prop=r.proposal?`<div class="we-where-gaps"><b>${t('we.scheduleProposal')}</b><ul>${Object.entries(r.proposal.grid).map(([k,v])=>{const [d,sl]=k.split('|');return `<li>${esc(t('we.day.'+d))} ${esc(r.slots.find(x=>x.id===sl)?.label||sl)}: ${esc(cellText(v))}${r.proposal.why?.[k]?` <span class="muted">(${esc(r.proposal.why[k])})</span>`:''}</li>`;}).join('')}</ul>
       <div class="we-row"><button id="we-sch-accept" class="primary">${t('we.scheduleAccept')}</button><button id="we-sch-reject" class="subtle">${t('we.scheduleReject')}</button></div></div>`:'';
-    box.innerHTML=`<div class="we-row"><select id="we-sch-who" aria-label="${esc(t('we.whisperWho'))}">${people.map(p=>`<option value="${esc(p.id)}"${p.id===scheduleWho?' selected':''}>${esc(p.name)}</option>`).join('')}</select></div>`
+    box.innerHTML=`<div class="we-row"><select id="we-sch-who" aria-label="${esc(t('we.whisperWho'))}">${people.map(p=>`<option value="${esc(p.id)}"${p.id===scheduleWho?' selected':''}>${esc(p.name)}</option>`).join('')}</select><button id="we-sch-accept-all" class="subtle">${t('we.scheduleAcceptAll')}</button></div>`
+      +(r.flexible?`<p><b>${t('we.scheduleFlexible')}</b></p>`:'')
       +(r.routine?`<p><b>${t('we.scheduleRoutine')}</b> ${esc(r.routine)}</p>`:`<p class="muted">${t('we.scheduleNoRoutine')}</p>`)
       +(r.places.length?'':`<p class="muted">${t('we.scheduleNoPlaces')}</p>`)
       +`<table class="we-table"><thead><tr><th></th>${r.slots.map(x=>`<th>${esc(x.label)}</th>`).join('')}</tr></thead><tbody>${days.map(d=>`<tr><td>${esc(t('we.day.'+d))}</td>${r.slots.map(x=>`<td class="we-sch-cell">${cellEdit(d+'|'+x.id,r.grid[d+'|'+x.id])}</td>`).join('')}</tr>`).join('')}</tbody></table>`
@@ -137,7 +140,14 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
       +`<div class="we-row"><button id="we-sch-save" class="primary">${t('we.scheduleSave')}</button><button id="we-sch-propose" class="subtle"${r.routine?'':' disabled'}>${t('we.schedulePropose')}</button>${r.has_previous?`<button id="we-sch-undo" class="subtle">${t('we.scheduleUndo')}</button>`:''}</div>`+prop;
     const base='/api/play/schedules/'+encodeURIComponent(scheduleWho);
     $('#we-sch-who').onchange=wrap(async e=>{scheduleWho=e.target.value;await renderSchedule();});
-    $('#we-sch-save').onclick=wrap(async()=>{const grid={};const cells=box.querySelectorAll('[data-sch-cell]');for(const sel of cells)if(sel.value){const k=sel.dataset.schCell,act=box.querySelector(`[data-sch-act="${CSS.escape(k)}"]`),priv=box.querySelector(`[data-sch-priv="${CSS.escape(k)}"]`);grid[k]={location_id:sel.value,activity:act?.value.trim()||'',privacy:priv?.value||'public'};}await api(base,{grid});toast(t('play.saved'));await renderSchedule();});
+    // Accept every pending proposal at once (2026-11-22); each person's previous schedule stays undoable.
+    $('#we-sch-accept-all').onclick=wrap(async()=>{
+      const pending=[];for(const p of people){const x=await api('/api/play/schedules/'+encodeURIComponent(p.id));if(x.proposal)pending.push(p);}
+      if(!pending.length){toast(t('we.scheduleAcceptAllNone'));return;}
+      if(!confirm(t('we.scheduleAcceptAllConfirm',{count:pending.length})))return;
+      let ok=0,bad=0;for(const p of pending){try{await api('/api/play/schedules/'+encodeURIComponent(p.id)+'/proposal/accept',{});ok++;}catch{bad++;}}
+      toast(t('we.scheduleAcceptAllDone',{ok,bad}),bad>0);await renderSchedule();});
+    $('#we-sch-save').onclick=wrap(async()=>{const grid={};const cells=box.querySelectorAll('[data-sch-cell]');for(const sel of cells)if(sel.value){const k=sel.dataset.schCell,act=box.querySelector(`[data-sch-act="${CSS.escape(k)}"]`),priv=box.querySelector(`[data-sch-priv="${CSS.escape(k)}"]`);grid[k]={location_id:sel.value,activity:act?.value.trim()||'',privacy:priv?.value||'public'};}await api(base,{grid,expected_version:r.version});toast(t('play.saved'));await renderSchedule();});
     $('#we-sch-propose').onclick=wrap(async()=>{await api(base+'/propose',{});await renderSchedule();});
     if($('#we-sch-undo'))$('#we-sch-undo').onclick=wrap(async()=>{await api(base+'/undo',{});await renderSchedule();});
     if($('#we-sch-accept'))$('#we-sch-accept').onclick=wrap(async()=>{await api(base+'/proposal/accept',{});toast(t('play.saved'));await renderSchedule();});
@@ -154,15 +164,17 @@ export function installWorldEngineUI({$,$$,esc,api,toast,heading,openPlay=()=>{}
       +`<details class="we-whisper"><summary><b>${t('we.hiddenNew')}</b></summary><form id="we-he-form" class="ml-form">
         <label class="ml-wide">${t('we.hiddenTitle')}<input name="title" maxlength="120" required></label>
         <label class="ml-wide">${t('we.hiddenBrief')}<textarea name="brief" maxlength="1200" rows="3" required placeholder="${esc(t('we.hiddenBriefHint'))}"></textarea></label>
+        <label><input type="checkbox" name="private"> ${t('we.hiddenPrivate')}</label>
         <label class="ml-wide">${t('we.hiddenWho')}<select name="who" multiple size="5">${people.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
         <label class="ml-wide">${t('we.hiddenCondition')}<textarea name="condition" rows="3">{"day_gte":"${esc(wh.day)}"}</textarea></label>
         <small class="muted ml-wide">${t('we.hiddenConditionHelp')}</small>
         <label>${t('we.hiddenPriority')}<input name="priority" type="number" min="-10" max="10" value="0"></label>
         <button class="primary">${t('we.hiddenSave')}</button></form></details>`;
+    await renderFactProposals(box,{api,esc,toast});
     const actions=box.querySelectorAll('[data-he]');
     for(const b of actions)b.onclick=wrap(async()=>{await api('/api/play/hidden-events/'+encodeURIComponent(b.dataset.he)+'/'+b.dataset.heAct,{});await renderHidden();});
     $('#we-he-form').onsubmit=wrap(async e=>{e.preventDefault();const f=e.target;let condition;try{condition=JSON.parse(f.condition.value);}catch{toast(t('we.hiddenBadJson'),true);return;}
-      await api('/api/play/hidden-events',{title:f.title.value,brief:f.brief.value,condition,character_ids:[...f.who.selectedOptions].map(o=>o.value),priority:Number(f.priority.value)||0});toast(t('play.saved'));await renderHidden();});
+      await api('/api/play/hidden-events',{title:f.title.value,brief:f.brief.value,private:f.elements.namedItem('private').checked,condition,character_ids:[...f.who.selectedOptions].map(o=>o.value),priority:Number(f.priority.value)||0});toast(t('play.saved'));await renderHidden();});
   }
   function bindLab(){
     const box=$('#ml-box');if(!box)return;let loaded=false;

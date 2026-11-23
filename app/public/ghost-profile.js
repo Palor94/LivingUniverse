@@ -70,6 +70,15 @@ export function parseGhostImport(text,characterId){
   if(!object(values)||!Object.keys(values).length||Object.values(values).some(v=>!object(v)||!Object.hasOwn(v,'value')))throw Error('Nem található kitölthető profiljavaslat. Válaszd a values mezőket tartalmazó JSON-fájlt.');
   return {values:normalizeGhostValues(values),model:typeof input.model==='string'?input.model:''};
 }
+export async function mergeGhostProposals({api,base}){
+  const plan=await api(base+'/merge/prepare',{});
+  const overlaps=plan.fields.filter(f=>f.proposals>1);
+  const message=plan.api_calls
+    ?`${overlaps.length} mezőhöz több függő javaslat tartozik: ${overlaps.map(f=>f.label).join(', ')}. Csak ezek szövegét küldjük a Groknak (${plan.model}), ${plan.api_calls} API-hívással. Becsült költség a válaszkerettel: $${plan.estimated_usd.toFixed(4)} USD. A legújabb tartalom az alap; az ellentmondó régebbi mezőjavaslat teljesen kimarad.`
+    :'Nincs ismétlődő profilmező. A javaslatok helyben egyesülnek, Grok API-hívás és költség nélkül.';
+  if(!await confirmBox(message+(plan.skipped_fields?` ${plan.skipped_fields} régi mezőjavaslat kézi módosítás vagy megszűnt sablonmező miatt kimarad.`:'')+' Az eredmény új, jóváhagyásra váró javaslat lesz.',{title:'Profiljavaslatok átfésülése',accept:plan.api_calls?'Küldés Groknak és átfésülés':'Javaslatok egyesítése'}))return null;
+  return await api(base+'/merge/execute',{plan_id:plan.plan_id,ack_upload_cost:true});
+}
 export function installGhostProfile({$,esc,api,action,toast}){
   let profileObserver=null,navObserver=null;
   let activeSave=null;
@@ -109,7 +118,7 @@ export function installGhostProfile({$,esc,api,action,toast}){
     const filledCount=fields.filter(filled).length;
     host.innerHTML=`${pendingHost?'':pendingHtml}<div class="pf-view-controls"><span>${t('pf.completion',{percent:Math.round(filledCount/fields.length*100),filled:filledCount,total:fields.length})}</span><button type="button" id="ghost-edit"${editing?' hidden':''}>${t('common.edit')}</button><button type="button" id="ghost-read"${editing?'':' hidden'}>${t('pf.readMode')}</button><label>${t('pf.filterLabel')}<select id="ghost-filter"><option value="all">${t('pf.filterAll')}</option><option value="hypothesis">${t('pf.filterHypotheses')}</option><option value="empty">${t('pf.filterEmpty')}</option></select></label></div><nav class="pf-nav" aria-label="Profilrészek">${groups.map((group,i)=>`<button type="button" data-jump="${i}" class="${INTIMATE_GROUPS.has(group)?'pf-intimate':''}">${esc(group)}</button>`).join('')}</nav>
 <section id="ghost-overview" class="profile-overview"${editing?' hidden':''}>${readGroups}</section><form id="ghost-form" class="pf-form"${editing?'':' hidden'}>${groups.map(groupHtml).join('')}<div class="pf-savebar" hidden><span id="pf-dirty"></span><button type="button" id="pf-discard">Elvetés</button><button class="primary">Mentés</button></div></form>
-<details class="panel pf-tools"><summary>AI-eszközök és javaslatok előzménye</summary><div class="actions"><button type="button" id="ghost-legacy">Meglévő szövegek átvételének javaslata</button><button type="button" id="ghost-export">Teljes profilgenerálási csomag letöltése</button><button type="button" id="ghost-empty-template">Üres profilsablon letöltése</button></div><details><summary>AI-javaslat betöltése</summary><label>Modell / forrás<input id="ghost-model" placeholder="Például ChatGPT, Grok vagy szerző"></label><label>JSON-fájl feltöltése<input id="ghost-file" type="file" accept=".json,application/json"></label><p id="ghost-file-status" role="status" aria-live="polite"></p><label>Vagy JSON-szöveg beillesztése<textarea id="ghost-import" rows="8" placeholder='{"values":{…}}'></textarea></label><button type="button" id="ghost-load">Javaslat betöltése</button></details><h3>Javaslatok</h3>${g.proposals.slice().reverse().map(p=>`<details><summary>${esc(p.model)} · ${esc(({pending:'Jóváhagyásra vár',accepted:'Elfogadva',rejected:'Elutasítva'})[p.status]||p.status)} · ${esc(p.at)}</summary><pre class="prose">${esc(JSON.stringify(p.values,null,2))}</pre>${p.status==='pending'?`<button type="button" data-review="${p.id}">Áttekintés kérdésenként</button><button type="button" data-reject="${p.id}">Elutasítás</button>`:''}</details>`).join('')||'<p>Még nincs javaslat.</p>'}<p>Elfogadott verzió: ${g.version}. Korábbi változatok: ${g.history.length}.</p><div class="actions"><button type="button" id="ghost-history">Teljes előzmény letöltése</button><select id="ghost-restore-version" aria-label="Korábbi verzió"><option value="">Korábbi verzió…</option>${g.history.filter(h=>Object.keys(h.values).length).map(h=>`<option value="${h.version}">${h.version}. verzió</option>`).join('')}</select><button type="button" id="ghost-restore">Visszaállítási javaslat</button></div></details>`;
+<details class="panel pf-tools"><summary>AI-eszközök és javaslatok előzménye</summary><div class="actions"><button type="button" id="ghost-legacy">Meglévő szövegek átvételének javaslata</button><button type="button" id="ghost-export">Teljes profilgenerálási csomag letöltése</button><button type="button" id="ghost-empty-template">Üres profilsablon letöltése</button></div><details><summary>AI-javaslat betöltése</summary><label>Modell / forrás<input id="ghost-model" placeholder="Például ChatGPT, Grok vagy szerző"></label><label>JSON-fájl feltöltése<input id="ghost-file" type="file" accept=".json,application/json"></label><p id="ghost-file-status" role="status" aria-live="polite"></p><label>Vagy JSON-szöveg beillesztése<textarea id="ghost-import" rows="8" placeholder='{"values":{…}}'></textarea></label><button type="button" id="ghost-load">Javaslat betöltése</button></details><h3>Javaslatok</h3>${g.proposals.slice().reverse().map(p=>`<details><summary>${esc(p.model)} · ${esc(({pending:'Jóváhagyásra vár',accepted:'Elfogadva',rejected:'Elutasítva',superseded:'Összefésülve új javaslatba'})[p.status]||p.status)} · ${esc(p.at)}</summary><pre class="prose">${esc(JSON.stringify(p.values,null,2))}</pre>${p.status==='pending'?`<button type="button" data-review="${p.id}">Áttekintés kérdésenként</button><button type="button" data-reject="${p.id}">Elutasítás</button>`:''}</details>`).join('')||'<p>Még nincs javaslat.</p>'}<p>Elfogadott verzió: ${g.version}. Korábbi változatok: ${g.history.length}.</p><div class="actions"><button type="button" id="ghost-history">Teljes előzmény letöltése</button><select id="ghost-restore-version" aria-label="Korábbi verzió"><option value="">Korábbi verzió…</option>${g.history.filter(h=>Object.keys(h.values).length).map(h=>`<option value="${h.version}">${h.version}. verzió</option>`).join('')}</select><button type="button" id="ghost-restore">Visszaállítási javaslat</button></div></details>`;
     const form=host.querySelector('#ghost-form'),bar=form.querySelector('.pf-savebar');
     const inputs=[...form.querySelectorAll('[data-value]')];for(const input of form.querySelectorAll('[data-value],[data-kind],[data-visibility]'))input.dataset.initial=input.value;
     const changed=()=>inputs.filter(input=>input.value!==input.dataset.initial||[...input.closest('[data-ghost]').querySelectorAll('[data-kind],[data-visibility]')].some(meta=>meta.value!==meta.dataset.initial));
@@ -186,10 +195,14 @@ export function installGhostProfile({$,esc,api,action,toast}){
     };
     $('#ghost-empty-template').onclick=()=>download('ures-karakterprofil-sablon.json',{character_id:c.id,template_version:g.template.version,template:g.template,model:'',values:Object.fromEntries(fields.map(f=>[f.id,{value:f.type==='scale'?null:'',interpretation:'',kind:'hypothesis',source:'',visibility:'creator'}]))});
     for(const b of document.querySelectorAll('[data-reject]'))b.onclick=action(async()=>{await api(base+'/proposals/'+b.dataset.reject+'/decision',{decision:'reject'});await rerender();});
-    function review(p){openGhostWizard({character:c,proposal:p,profile:g,esc,api,base,onSaved:async()=>{clearDraft();toast('A kiválasztott mezők jóváhagyva.');await rerender();}});}
+    function review(p){openGhostWizard({character:c,proposal:p,profile:g,esc,api,base,onSaved:async(result={})=>{clearDraft();toast(result.decision==='merged'?'Az összefésült javaslat elbírálásra vár.':result.decision==='rejected'?'A javaslat elutasítva.':'A profiljavaslat frissült.');await rerender(result.proposal_id||null);}});}
     for(const b of document.querySelectorAll('[data-review]'))b.onclick=()=>review(g.proposals.find(p=>p.id===b.dataset.review));
     const reviewButton=$('#ghost-latest-review'),acceptAllButton=$('#ghost-accept-all');
     if(latest&&reviewButton&&acceptAllButton){
+      if(pending.length>1){
+        acceptAllButton.insertAdjacentHTML('beforebegin','<button type="button" id="ghost-merge">Profiljavaslatok átfésülése</button>');
+        $('#ghost-merge').onclick=action(async e=>{const button=e.currentTarget;button.disabled=true;try{await flush();const result=await mergeGhostProposals({api,base});if(result){toast('Az összefésült javaslat elbírálásra vár.');await rerender(result.proposal.id);}}finally{button.disabled=false;}});
+      }
       reviewButton.onclick=()=>review(pending.find(p=>p.id===($('#ghost-review-choice')?.value||latest.id)));
       acceptAllButton.onclick=action(async e=>{if(!await confirmBox(t('modal.ghostAcceptAll')))return;if(!await undoWindow(t('modal.acceptAll'),{key:'accept-profile-proposals'}))return;e.target.disabled=true;const r=await api(base+'/accept-all',{});toast(r.accepted+' javaslat elfogadva.'+(r.skipped_fields?' '+r.skipped_fields+' mező kimaradt.':''));await rerender();});
     }
@@ -240,13 +253,25 @@ export function openGhostWizard({character,proposal,profile,esc,api,base,onSaved
     if(lines.length)e.value=[e.value,lines.join('\n')].filter(Boolean).join('\n\n');return e;
   }
   function pause(){if(saving)return;capture();store();dialog.close();dialog.remove();}
+  async function rejectProposal(){
+    if(saving)return;saving=true;
+    const buttons=[...dialog.querySelectorAll('#wizard-reject, #wizard-reject-bottom')];
+    for(const button of buttons){button.disabled=true;button.textContent='Elutasítás…';}
+    try{
+      await api(base+'/proposals/'+proposal.id+'/decision',{decision:'reject'});
+      try{sessionStorage.removeItem(key);}catch{}
+      dialog.close();dialog.remove();await onSaved({decision:'rejected'});
+    }catch(error){if(dialog.isConnected){$('#wizard-error').textContent=error.message;for(const button of buttons){button.disabled=false;button.textContent=button.id==='wizard-reject'?'Teljes javaslat elutasítása':'Elutasítom';}}}finally{saving=false;}
+  }
   dialog.oncancel=e=>{e.preventDefault();pause();};
   function draw(){
     const reviewed=Object.values(state.answers).filter(a=>typeof a.accept==='boolean').length;
     const accepted=fields.filter(f=>state.answers[f.id]?.accept===true);
     const stale=proposal.base_version!==profile.version||proposal.template_version!==profile.template.version||proposal.profile_version!==profile.profile_version;
-    dialog.innerHTML=`<div class="ghost-wizard-top"><span>${esc(character.name)} · profiljavaslat</span><button type="button" id="wizard-close" aria-label="Bezárás és folytatás később">Bezárás</button></div><p class="ghost-wizard-progress">${state.summary?'Összefoglaló':`${state.index+1}. kérdés / ${fields.length}`} · ${reviewed} átnézve</p><progress max="${fields.length}" value="${reviewed}" aria-label="Átnézett kérdések"></progress><div id="wizard-body"></div><p id="wizard-error" role="alert"></p>`;
+    dialog.innerHTML=`<div class="ghost-wizard-top actions"><span>${esc(character.name)} · profiljavaslat</span><button type="button" id="wizard-close" aria-label="Bezárás és folytatás később">Bezárás</button></div><p class="ghost-wizard-progress">${state.summary?'Összefoglaló':`${state.index+1}. kérdés / ${fields.length}`} · ${reviewed} átnézve</p><progress max="${fields.length}" value="${reviewed}" aria-label="Átnézett kérdések"></progress><div id="wizard-body"></div><p id="wizard-error" role="alert"></p>`;
     $('#wizard-close').onclick=pause;
+    $('#wizard-close').insertAdjacentHTML('beforebegin','<button type="button" id="wizard-reject">Teljes javaslat elutasítása</button>');
+    $('#wizard-reject').onclick=rejectProposal;
     // An old proposal (made on an earlier profile or template) cannot be applied as it is, but it
     // can be carried over: the same values become a new proposal on the current profile, to be
     // reviewed field by field again; the old one is closed and kept in the history. Fields the
@@ -262,7 +287,7 @@ export function openGhostWizard({character,proposal,profile,esc,api,base,onSaved
         await retire();try{sessionStorage.removeItem(key);}catch{}dialog.close();dialog.remove();await onSaved();
         const current=await api(base);openGhostWizard({character,proposal:current.proposals.find(p=>p.id===fresh.id)||fresh,profile:current,esc,api,base,onSaved});
       }catch(error){$('#wizard-error').textContent=error.message;}finally{saving=false;}};
-      $('#wizard-retire').onclick=async()=>{if(saving)return;saving=true;try{await retire();try{sessionStorage.removeItem(key);}catch{}dialog.close();dialog.remove();await onSaved();}catch(error){$('#wizard-error').textContent=error.message;}finally{saving=false;}};
+      $('#wizard-retire').onclick=rejectProposal;
       return;}
     if(state.summary){
       $('#wizard-body').innerHTML=`<h2 id="ghost-question-title" tabindex="-1">Ezeket szeretnéd elmenteni?</h2><p>${accepted.length} mezőt választottál ki. A kihagyott és még át nem nézett mezők változatlanok maradnak.</p><div class="ghost-wizard-summary">${fields.map((f,i)=>{const a=state.answers[f.id];return `<div><strong>${esc(f.label)}</strong><span>${a?.accept===true?'Elfogadva':a?.accept===false?'Kihagyva':'Még nincs átnézve'}</span>${a?.accept===true?`<p>${esc(finalEntry(a,f.id).value??'Ismeretlen')}</p>`:''}<button type="button" data-return="${i}">Átnézem</button></div>`;}).join('')}</div><div class="ghost-wizard-actions"><button type="button" id="wizard-back">Vissza a kérdésekhez</button><button type="button" id="wizard-save" class="primary" ${accepted.length?'':'disabled'}>${accepted.length} mező jóváhagyása és mentése</button></div>`;
@@ -280,6 +305,18 @@ export function openGhostWizard({character,proposal,profile,esc,api,base,onSaved
       $('#wizard-accept').onclick=()=>advance(true);$('#wizard-skip').onclick=()=>{capture();state.answers[f.id].accept=false;if(state.index+1===fields.length)state.summary=true;else state.index++;store();draw();};
       $('#wizard-back').onclick=()=>{capture();state.index--;store();draw();};$('#wizard-summary').onclick=()=>{capture();state.summary=true;store();draw();};
       $('#wizard-body').oninput=()=>capture();$('#wizard-body').onchange=()=>capture();
+    }
+    const rejectAnchor=$('#wizard-skip')||$('#wizard-save');
+    rejectAnchor.insertAdjacentHTML('afterend','<button type="button" id="wizard-reject-bottom" title="A teljes profiljavaslat elutasítása">Elutasítom</button>');
+    $('#wizard-reject-bottom').onclick=rejectProposal;
+    if(profile.proposals.filter(p=>p.status==='pending').length>1){
+      $('#wizard-reject-bottom').insertAdjacentHTML('afterend','<button type="button" id="wizard-merge">Profiljavaslatok átfésülése</button>');
+      $('#wizard-merge').onclick=async()=>{
+        if(saving)return;capture();store();saving=true;const button=$('#wizard-merge');button.disabled=true;button.textContent='Átfésülés…';
+        try{const result=await mergeGhostProposals({api,base});if(result){try{sessionStorage.removeItem(key);}catch{}dialog.close();dialog.remove();await onSaved({decision:'merged',proposal_id:result.proposal.id});}}
+        catch(error){if(dialog.isConnected)$('#wizard-error').textContent=error.message;}
+        finally{saving=false;if(dialog.isConnected){button.disabled=false;button.textContent='Profiljavaslatok átfésülése';}}
+      };
     }
     $('#ghost-question-title')?.focus();dialog.scrollTop=0;
   }

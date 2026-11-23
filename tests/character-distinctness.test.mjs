@@ -15,13 +15,8 @@ import {castProfileTexts,GROUP_LEVELS,profileText,CARD_HEAD,SECRET_HEAD,GROUP_SE
 
 const entry=value=>({value,interpretation:'',kind:'hypothesis',source:'teszt',visibility:'creator'});
 // Five synthetic men, deliberately unlike each other in goals, fears, motives and voice.
-export const CAST={
-  'Teszt Aladár':{personality:'Melegszívű, gondoskodó pék.',goals:'Saját pékséget nyitni a főtéren.',fears:'Hogy csalódást okoz a családjának.',conflicts:'Mindenkinek segítene, közben magára nem marad ideje.',speech:'Hosszú, kedves mondatok, sokszor mondja: „drága barátom”.',agreeableness:9,attachment:9,sarcasm:1,bluntness:2},
-  'Teszt Béla':{personality:'Sértett, csípős nyelvű volt könyvelő.',goals:'Bosszút állni a volt főnökén, aki kirúgta.',fears:'Hogy kinevetik és lenézik.',conflicts:'Elismerést akar, de mindenkit eltaszít.',speech:'Rövid, gúnyos mondatok, kérdésre kérdéssel felel.',play_voice:'Halkan, lassan gúnyolódik, sosem emeli fel a hangját.',play_rules:'Ha valaki dicséri, gyanakodni kezd, mit akar tőle.',play_contradiction:'Mindenkit lenéz, kivéve a kutyákat: velük gyengéd.',play_lines:'„Ennyi? Ezért ébresztettél fel?”',secrets:'TITOK-BELA: ő maga sikkasztott a cégnél, ezért rúgták ki.',agreeableness:2,recognition:9,sarcasm:9,bluntness:8},
-  'Teszt Csaba':{personality:'Zárkózott, önálló erdész.',goals:'Elköltözni egy tanyára, egyedül.',fears:'A bezártság és a kötelező társaság.',conflicts:'Szereti a testvérét, de fojtogatja a közelsége.',speech:'Szűkszavú, sokat hallgat, ha beszél, tárgyilagos.',play_voice:'Egy-két szó, hosszú csend után.',play_rules:'Személyes kérdésre a fákról kezd beszélni.',secrets:'TITOK-CSABA: már aláírta a tanya adásvételi szerződését.',extraversion:1,autonomy:10,expressiveness:1,directness:8},
-  'Teszt Dénes':{personality:'Szorongó, ragaszkodó családapa.',goals:'Egyben tartani a családját.',fears:'Hogy elhagyják.',conflicts:'Félti a feleségét, ezért féltékenykedik, és ettől romlik a házassága.',speech:'Sokat kérdez vissza, bizonytalankodik, bocsánatot kér.',emotional_stability:2,attachment:10,security:9},
-  'Teszt Ernő':{personality:'Kalandor, könnyelmű vállalkozó.',goals:'Egy év alatt meggazdagodni.',fears:'Az unalom és a hétköznapok.',conflicts:'Ígérget, de semmit nem fejez be.',speech:'Lelkes, túlzó, sok felkiáltás, nagy tervek.',reward:10,extraversion:9,agreeableness:6}
-};
+import {CAST} from './fixtures/distinctness-cast.mjs';
+export {CAST};
 const profileOf=values=>({template:defaultTemplate,values:Object.fromEntries(Object.entries(values).map(([k,v])=>[k,entry(v)]))});
 
 test('distinctness metrics: shared lines dropped, names ignored, identical texts score 0',()=>{

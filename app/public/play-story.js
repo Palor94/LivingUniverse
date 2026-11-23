@@ -29,6 +29,23 @@ export function roadTransition({from,to,minutes,vehicle,mode=null,line=null,esc,
 
 // Someone by the road on a car trip (owner, 2026-11-14): "Megállsz?" with A (stop) and B (drive
 // on); keys A/B or 1/2, Escape drives on. Resolves true when Palor stops.
+// Someone stops Palor on a town street (owner, 2026-11-23): talk to him there, or walk on.
+// Resolves 'talk' or 'go'.
+export function streetMeetChoice({text,name,destination,esc,t}){
+  return new Promise(resolve=>{
+    const el=overlay('ps-story ps-roadside');
+    const opt=(key,v,label)=>`<button type="button" class="ps-choice" data-v="${v}"><span class="ps-key">${key}</span><span>${esc(label)}</span></button>`;
+    el.innerHTML=`<div class="ps-card"><header class="ps-head"><span class="ps-icon" aria-hidden="true">🤝</span><b>${esc(t('play.streetMeetAsk',{name}))}</b></header>
+      <div class="ps-main"><div class="ps-body"><p class="ps-text">${esc(text)}</p></div></div>
+      <div class="ps-choices">${opt('A','talk',t('play.streetMeetTalk',{name}))}${opt('B','go',t('play.streetMeetGo',{place:destination}))}</div></div>`;
+    let gone=false;const done=v=>{if(gone)return;gone=true;document.removeEventListener('keydown',keys);el.remove();resolve(v);};
+    const keys=e=>{if(e.ctrlKey||e.metaKey||e.altKey)return;const k=e.key.toUpperCase();
+      if(k==='A'||k==='1'){e.preventDefault();done('talk');}else if(k==='B'||k==='2'||k==='ESCAPE'){e.preventDefault();done('go');}};
+    for(const b of el.querySelectorAll('[data-v]'))b.onclick=()=>done(b.dataset.v);
+    document.addEventListener('keydown',keys);el.querySelector('.ps-choice')?.focus();
+  });
+}
+
 export function roadsideChoice({text,esc,t}){
   return new Promise(resolve=>{
     const el=overlay('ps-story ps-roadside');
@@ -45,9 +62,11 @@ export function roadsideChoice({text,esc,t}){
 }
 
 // Plays one story. Resolves {ending|null, path}. Keys: A–D or 1–4 choose, Enter continues at an ending.
-export function playStory({run_id,story,api,esc,t,toast=()=>{}}){
+export function playStory({run_id,story,api,esc,t,toast=()=>{},startAt=null,bridge=null,priorPath=[]}){
+  if(story.mode==='narrative')return playNarrative({run_id,story,api,esc,t,toast});
   return new Promise(resolve=>{
-    const el=overlay('ps-story');const path=[];let nodeId=story.start;
+    // startAt/bridge/priorPath: back on the written path after a free answer or a free scene.
+    const el=overlay('ps-story');const path=[...priorPath];let nodeId=startAt&&story.nodes[startAt]?startAt:story.start,lead=bridge;
     // Story pictures: a block's picture stays beside the text until a later block has its own.
     const pictures=story.pictures||{};let shown=null;
     for(const p of Object.values(pictures)){const im=new Image();im.src=p.url;}
@@ -61,12 +80,24 @@ export function playStory({run_id,story,api,esc,t,toast=()=>{}}){
       const fresh=pictures[nodeId]&&pictures[nodeId]!==shown;if(pictures[nodeId])shown=pictures[nodeId];
       const pic=shown?`<figure class="ps-pic${shown.heat?' ps-pic-heat':''}${fresh?' ps-pic-new':''}"><img src="${esc(shown.url)}" alt="${esc(t('play.storyPicture'))}"></figure>`:'';
       el.innerHTML=`<div class="ps-card${shown?' ps-with-pic':''}"><header class="ps-head"><span class="ps-icon" aria-hidden="true">${icon}</span><b>${esc(story.title)}</b><button type="button" class="ps-skip" data-skip>${esc(t('play.storySkip'))}</button></header>
-        <div class="ps-main">${pic}<div class="ps-body"><p class="ps-text">${esc(n.text).replace(/\n+/g,'</p><p class="ps-text">')}</p></div></div>
+        <div class="ps-main">${pic}<div class="ps-body">${lead?`<p class="ps-text ps-bridge"><i>${esc(lead)}</i></p>`:''}<p class="ps-text">${esc(n.text).replace(/\n+/g,'</p><p class="ps-text">')}</p></div></div>
         ${n.ending?`<div class="ps-end ps-end-${esc(n.ending)}"><span>${esc(t('play.storyEnd.'+n.ending))}</span><button type="button" class="primary" data-continue>${esc(t('play.storyContinue'))}</button></div>`
-          :`<div class="ps-choices">${n.choices.map(c=>`<button type="button" class="ps-choice" data-to="${esc(c.to)}"><span class="ps-key">${esc(c.key)}</span><span>${esc(c.text)}</span></button>`).join('')}</div>`}
+          :`<div class="ps-choices">${n.choices.map(c=>`<button type="button" class="ps-choice" data-to="${esc(c.to)}"><span class="ps-key">${esc(c.key)}</span><span>${esc(c.text)}</span></button>`).join('')}</div><details class="ps-free"><summary>${esc(t('play.storyFree'))}</summary><form><textarea name="text" rows="2" maxlength="2000" required aria-label="${esc(t('play.storyFree'))}"></textarea><button type="submit">${esc(t('play.storyFreeSend'))}</button></form></details>`}
         <small class="ps-step">${esc(t('play.storyStep',{step}))}</small></div>`;
-      el.querySelector('[data-skip]').onclick=()=>finish(null);
+      lead=null;el.querySelector('[data-skip]').onclick=()=>finish(null);
       for(const b of el.querySelectorAll('[data-to]'))b.onclick=()=>{nodeId=b.dataset.to;draw();};
+      // Free answer (2026-11-22): instead of A–D, the player types his own; the free-text scene
+      // continues this story from what happened so far.
+      const ff=el.querySelector('.ps-free form');if(ff){const box=ff.text;box.onkeydown=e=>e.stopPropagation();
+        ff.onsubmit=async e=>{e.preventDefault();const text=box.value.trim();if(!text||ff.dataset.busy)return;ff.dataset.busy='1';ff.querySelector('button').disabled=true;
+          const toNarrative=s=>{document.removeEventListener('keydown',keys);el.remove();playNarrative({run_id,story:s,api,esc,t,toast,priorPath:path}).then(resolve);};
+          try{const r=await api('/api/play/story-runs/'+run_id+'/free',{text,path,request_key:crypto.randomUUID()});
+            // The answer fits the written story: a short bridge, then on along the written path.
+            if(r.rejoin&&story.nodes[r.rejoin]){lead=r.bridge||null;nodeId=r.rejoin;draw();return;}
+            toNarrative(r.story);}
+          catch(error){toast(error.message,true);
+            try{const scene=await api('/api/play/narratives/'+run_id);toNarrative({...story,mode:'narrative',opening:n.text,narrative:scene});}
+            catch{delete ff.dataset.busy;ff.querySelector('button').disabled=false;}}};}
       const cont=el.querySelector('[data-continue]');if(cont){cont.onclick=()=>finish(nodeId);cont.focus();}else el.querySelector('.ps-choice')?.focus();
       el.querySelector('.ps-body').scrollTop=0;
     }
@@ -77,5 +108,25 @@ export function playStory({run_id,story,api,esc,t,toast=()=>{}}){
       if(!n.ending&&i>=0&&n.choices[i]&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();nodeId=n.choices[i].to;draw();}};
     document.addEventListener('keydown',keys);
     draw();
+  });
+}
+
+function playNarrative({run_id,story,api,esc,t,toast,priorPath=[]}){
+  return new Promise(resolve=>{
+    const el=overlay('ps-story');let state=story.narrative,busy=false,key=null;
+    const finish=async()=>{if(busy)return;busy=true;try{await api('/api/play/narratives/'+run_id+'/finish',{expected_version:state.version});el.remove();resolve({ending:'narrative',path:[]});}catch(e){toast(e.message,true);busy=false;}};
+    function draw(){
+      const transcript=state.turns.filter(x=>x.status==='done').map(x=>`<p><b>Palor:</b> ${esc(x.input_text)}</p><p>${esc(x.output.narration)}</p>${x.output.replies.map(r=>`<p><b>${esc(state.context.cast.find(c=>c.id===r.character_id)?.name||'')}:</b> ${esc(r.text)}</p>`).join('')}`).join('');
+      el.innerHTML=`<div class="ps-card"><header class="ps-head"><b>${esc(story.title)}</b><button type="button" data-close>${t('play.storyContinue')}</button></header><div class="ps-main"><div class="ps-body"><p>${esc(story.opening)}</p>${transcript}${state.state.stakes?`<p><i>${esc(state.state.stakes)}</i></p>`:''}</div></div><div class="ps-choices">${(state.state.options||[]).map((s,i)=>`<button type="button" class="ps-choice" data-option="${i}"${busy?' disabled':''}>${esc(s)}</button>`).join('')}</div><form><textarea name="text" rows="2" maxlength="2000" required aria-label="${t('ns.input')}"></textarea><button${busy||state.state.finished?' disabled':''}>${t('ns.send')}</button></form></div>`;
+      el.querySelector('[data-close]').onclick=finish;const f=el.querySelector('form');
+      f.onsubmit=async e=>{e.preventDefault();if(busy||!f.text.value.trim())return;busy=true;key??=crypto.randomUUID();const text=f.text.value;f.querySelector('button').disabled=true;
+        try{state=await api('/api/play/narratives/'+run_id+'/turn',{text,expected_version:state.version,request_key:key});key=null;busy=false;
+          // The scene reached a written block: close the free scene and continue the written story there.
+          const back=state.state.rejoin;if(back&&story.nodes?.[back]){try{await api('/api/play/narratives/'+run_id+'/finish',{expected_version:state.version,resume:true});}catch(e){toast(e.message,true);draw();return;}
+            el.remove();const {mode,narrative,opening,...written}=story;playStory({run_id,story:written,api,esc,t,toast,startAt:back,bridge:state.state.narration,priorPath}).then(resolve);return;}
+          draw();}catch(error){toast(error.message,true);busy=false;f.querySelector('button').disabled=false;}};
+      for(const b of el.querySelectorAll('[data-option]'))b.onclick=()=>{f.text.value=state.state.options[Number(b.dataset.option)];f.text.focus();};
+      f.text.oninput=()=>{key=null;};el.querySelector('.ps-body').scrollTop=1e9;f.text.focus();
+    }draw();
   });
 }

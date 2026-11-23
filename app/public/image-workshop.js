@@ -5,7 +5,7 @@ import {sortNames} from './name-picker.js';
 // Képműhely: one screen for getting pictures ready for use (server: app/image-workshop.mjs).
 // Tabs: Új képek (inbox with steps), Képgyártás (Grok queue with briefs), Ellenőrzés (verdicts
 // on generated pictures), Javaslatok (carry-over and paid-tagging priority), Készültség.
-// Keyboard in the inbox: ← → select, 1 2 3 content level, N nobody on it, Enter open.
+// Keyboard in the inbox: ← → select, 1 2 3 content level (F félmeztelen), N nobody on it, Enter open.
 // In Ellenőrzés: A accept, R reject, G ask again, F / B cycle the face / body verdict.
 import {t} from './i18n.js';
 import {createSignalsWorker} from './media-signals.js';
@@ -13,7 +13,7 @@ import {createSignalsWorker} from './media-signals.js';
 const TABS=['inbox','generation','checks','suggestions','readiness','ideas'];
 const IDEA_KINDS=['comic','inspiration'];
 const STEPS=['signals','duplicate','people','content','tagged'];
-const LEVELS=[['non_intimate','☀','1'],['nudity','🔥','2'],['sexual_activity','🔞','3']];
+const LEVELS=[['non_intimate','☀','1'],['shirtless','🩳','f'],['nudity','🔥','2'],['sexual_activity','🔞','3']];
 const MARKS=['none','match','mismatch','unsure'],MARK_ICON={none:'·',match:'✓',mismatch:'✗',unsure:'?'};
 const STARTER='Use the Living Universe connector. First call get_generation_instructions and follow it exactly for this whole chat. Then start: list_generation_needs, open a batch of 3 jobs and make them one by one. Reply to me in Hungarian.';
 
@@ -48,7 +48,7 @@ export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfi
     attachKeys(root,e=>{const item=inbox.items[inbox.sel];
       if(e.key==='ArrowRight'||e.key==='j'){e.preventDefault();select(inbox.sel+1);}
       else if(e.key==='ArrowLeft'||e.key==='k'){e.preventDefault();select(inbox.sel-1);}
-      else if(item&&LEVELS.some(l=>l[2]===e.key)){e.preventDefault();setLevel(item,LEVELS.find(l=>l[2]===e.key)[0]);}
+      else if(item&&LEVELS.some(l=>l[2]===e.key.toLowerCase())){e.preventDefault();setLevel(item,LEVELS.find(l=>l[2]===e.key.toLowerCase())[0]);}
       else if(item&&(e.key==='n'||e.key==='N')){e.preventDefault();nobody(item);}
       else if(item&&e.key==='Enter'){e.preventDefault();mediaDialog(item.media_id);}});
   }
@@ -90,7 +90,7 @@ export function installImageWorkshopUI({$,$$,esc,api,toast,mediaDialog,openProfi
 
     const steps=STEPS.map(s=>`<span class="iw-step ${it.steps[s]?'ok':it.next===s?'next':'todo'}" title="${t('iw.step.'+s)}">${it.steps[s]?'✓':'•'} ${t('iw.stepShort.'+s)}</span>`).join('');
     const action=it.next==='people'?`<form class="iw-assign"><input list="iw-names" placeholder="${t('iw.who')}" aria-label="${t('iw.who')}"><button>${t('iw.link')}</button><button type="button" class="subtle" data-iw-nobody>${t('iw.nobody')} <kbd>N</kbd></button></form>`
-      :it.next==='content'?`<div class="iw-levels">${LEVELS.map(([l,icon,k])=>`<button data-iw-level="${l}" title="${t('ml.level.'+l)}">${icon} <kbd>${k}</kbd></button>`).join('')}</div>`
+      :it.next==='content'?`<div class="iw-levels">${LEVELS.map(([l,icon,k])=>`<button data-iw-level="${l}" title="${t('ml.level.'+l)}">${icon} <kbd>${k.toUpperCase()}</kbd></button>`).join('')}</div>`
       :it.next==='duplicate'?`<button class="subtle" data-iw-dup>${t('iw.openDuplicates')}</button>`
       :it.next==='tagged'?`<button class="subtle" data-iw-tagq>${t('iw.toTagging')}</button>`
       :it.next==='signals'?`<span class="muted">${t('iw.needsSignals')}</span>`:`<span class="muted">${t('iw.ready')}</span>`;

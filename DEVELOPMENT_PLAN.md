@@ -103,3 +103,17 @@ compression (1.1, 1.2); memory recall, running summaries, promises (2.1–2.3); 
 face identity suggestions and reference checks in the app (toward 5.1). Open: profile storage split
 (1.3), lazy i18n (1.6), schedules (3.2), story threads (3.4), timelines (3.6), body identity method,
 benchmark lock-in of the auto-canon gates (owner).
+
+## 2026-11-22: Five living-character follow-ups
+
+Implemented the 30-situation offline conversation matrix; six evidence-bound social experience classes with personality-specific readings; six separately tracked directed relationship changes; a fully tested news/relay/later-scene consequence chain; and three synthetic free-text narrative pilots with nine paths. Group prompts now recall each participant's memories. Private hidden events, dimension/knowledge conditions, attributed receipts, migration backup, export/restore and rewind/undo are included. Details and limits: docs/LIVING_CHARACTERS_FOLLOWUP_2026-11-22.md. The complete legacy story-engine replacement and paid-provider reply-quality measurement remain later work. Windows validation: 576/578 tests, the same two pre-existing image-related failures.
+
+
+## 2026-11-23: Directed NPC relationships
+
+Applied/accepted world events can now produce evidence-bound NPC-to-NPC changes across the existing six dimensions, using the shared fact gate. Own intention prompts, GM context, Creator pair/evidence display, optional pair-targeted hidden conditions, rewind/undo and export/restore are covered. No new provider call or historical backfill. Details and conservative recognition limits: docs/NPC_RELATIONSHIPS.md.
+
+
+## 2026-11-23: Schedule and clock consistency review
+
+Reviewed all 74 active NPCs, applied 44 source-backed additions without replacing existing schedule cells, and retained an explicit flexible routine where the owner requested it. Added stale-source/version protection and transactional approval. Clock follows committed/restored state; explicit rewind and safe undo now move the actual clock consistently. Real-response baseline completed with documented relevance failures; reliable automatic body identity remains unproven after the bounded local trial. Perception uncertainty/imperfect recall is deferred by the owner. Details: docs/REMAINING_TASKS_REVIEW_2026-11-23.md.

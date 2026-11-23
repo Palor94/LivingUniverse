@@ -22,7 +22,8 @@ async function world({respond,at}){
   const base=await fs.mkdtemp(path.join(os.tmpdir(),'lu-audit-')),root=path.join(base,'media'),dataDir=path.join(base,'data');await fs.mkdir(root,{recursive:true});
   const requests=[];let now=new Date(at);
   const provider=createMockProvider(r=>{requests.push(r);return respond(r);});
-  const app=await createApp({root,dataDir,mcpWrites:null,mobile:null,imageGeneration:{},grokConfig:null,worldProvider:provider,worldClock:()=>now});
+  // This fixture injects logical game days; real-time break capping is tested separately.
+  const app=await createApp({root,dataDir,mcpWrites:null,mobile:null,imageGeneration:{},grokConfig:null,worldProvider:provider,clockBreakCap:false,worldClock:()=>now});
   await new Promise(r=>app.server.listen(0,'127.0.0.1',r));
   const origin='http://127.0.0.1:'+app.server.address().port;
   const call=async(route,body)=>{const r=await fetch(origin+route,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json().catch(()=>null)};};

@@ -15,7 +15,8 @@ test('a whisper becomes his own thought (prompt + memory), only his, withdrawabl
   const provider=createMockProvider(req=>{requests.push(req);
     if(req.system.includes('Egy beszélgetést foglalsz össze'))return {title:'x',summary:'x',character_memory:'x',level_delta:0,mentioned_places:['Kocsma']};
     return {reply:'Szia!'};});
-  const app=await createApp({root,dataDir,mcpWrites:null,mobile:null,imageGeneration:{},grokConfig:null,worldProvider:provider,worldClock:()=>now});
+  // This fixture injects logical game days; real-time break capping is tested separately.
+  const app=await createApp({root,dataDir,mcpWrites:null,mobile:null,imageGeneration:{},grokConfig:null,worldProvider:provider,clockBreakCap:false,worldClock:()=>now});
   t.after(async()=>{await app.close();await fs.rm(base,{recursive:true,force:true});});
   await new Promise(r=>app.server.listen(0,'127.0.0.1',r));
   const call=async(route,body)=>{const r=await fetch('http://127.0.0.1:'+app.server.address().port+route,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json()};};

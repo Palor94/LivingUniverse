@@ -116,7 +116,7 @@ mappája, az első mentett képnél a program létrehozza.
 ## Mi hova kerül, milyen néven
 
 A fájlnevek az „Új képek” szabályát követik (`docs/UJ_KEPEK_UTMUTATO.md`). A jelölés a fájlnévben:
-hétköznapi = `hetkoznapi`, félmeztelen = `meztelen`, intim = `szex`.
+hétköznapi = `hetkoznapi`, félmeztelen = `felmeztelen`, meztelen = `meztelen`, intim = `szex`.
 
 | Mi | Hova | Példa |
 |---|---|---|

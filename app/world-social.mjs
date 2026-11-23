@@ -23,7 +23,7 @@ const clip=(s,n)=>{s=String(s??'').replace(/\s+/g,' ').trim();return s.length>n?
 const addDays=(day,n)=>{const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);};
 const parse=s=>{try{return JSON.parse(s||'{}')||{};}catch{return {};}};
 
-export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()}){
+export function installWorldSocial({db,one,all,run,remember,onHeard=null,now=()=>new Date()}){
   db.exec(readFileSync(new URL('./migrations/031-world-beliefs-knowledge.up.sql',import.meta.url),'utf8'));
   const iso=()=>now().toISOString();
   const name=id=>one('SELECT name FROM characters WHERE id=?',id)?.name||'?';
@@ -34,11 +34,11 @@ export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()})
   function knownEvents(cid,day){
     const from=addDays(day,-FRESH_DAYS);
     const own=all(`SELECT id,world_day,title,summary,payload_json,created_at FROM world_events WHERE ${LIVE} AND world_day BETWEEN ? AND ? AND EXISTS(SELECT 1 FROM json_each(payload_json,'$.character_ids') WHERE value=?)`,from,day,cid);
-    const told=all(`SELECT e.id,e.world_day,e.title,e.summary,e.payload_json,e.created_at FROM world_knowledge k JOIN world_events e ON e.id=k.event_id WHERE k.character_id=? AND k.rewound_at IS NULL AND e.rewound_at IS NULL AND e.status IN ('applied','accepted') AND e.world_day>=?`,cid,from);
+    const told=all(`SELECT e.id,e.world_day,e.title,e.summary,e.payload_json,e.created_at FROM world_knowledge k JOIN world_events e ON e.id=k.event_id WHERE k.character_id=? AND k.rewound_at IS NULL AND e.rewound_at IS NULL AND e.status IN ('applied','accepted') AND e.world_day BETWEEN ? AND ? AND k.world_day<=?`,cid,from,day,day);
     return [...own,...told];
   }
   const knows=(cid,eventId,payload)=>(payload.character_ids||[]).includes(cid)||!!one('SELECT 1 FROM world_knowledge WHERE event_id=? AND character_id=? AND rewound_at IS NULL',eventId,cid);
-  const shareable=e=>{const p=parse(e.payload_json);return !p.intimate&&p.intimate_scene!==true;};
+  const shareable=e=>{const p=parse(e.payload_json);return !p.private&&!p.intimate&&p.intimate_scene!==true;};
 
   // meetings: [{id, character_ids}] events of this round, already written. palorId is left out:
   // Palor's own knowledge is the player's.
@@ -46,20 +46,22 @@ export function installWorldSocial({db,one,all,run,remember,now=()=>new Date()})
   // → {miss:0..1, extra:bool}. An upset or inattentive listener may not take a story in (a
   // deterministic draw per meeting, story and listener); an attentive one may hear a second one.
   const draw=key=>{let h=2166136261;for(const ch of key){h^=ch.codePointAt(0);h=Math.imul(h,16777619)>>>0;}return h/4294967296;};
-  function spread(meetings,day,{palorId=null,attention=null}={}){
+  function spread(meetings,day,{palorId=null,attention=null,priority=null}={}){
     const told=[];
+    const priorities=new Map(),rank=e=>{if(!priorities.has(e.id))priorities.set(e.id,priority?.(e)||0);return priorities.get(e.id);};
     for(const m of meetings){
       const ids=[...new Set(m.character_ids||[])].filter(id=>id&&id!==palorId);
       for(const a of ids)for(const b of ids){
         if(a===b||told.length>=MAX_TOLD)continue;
         // Newest first; one thing per direction per meeting.
         const att=attention?.(b)||{miss:0,extra:false};
-        const picks=knownEvents(a,day).filter(e=>e.id!==m.id&&shareable(e)&&!knows(b,e.id,parse(e.payload_json))).sort((x,y)=>y.created_at.localeCompare(x.created_at)).slice(0,att.extra?2:1);
+        const picks=knownEvents(a,day).filter(e=>e.id!==m.id&&shareable(e)&&!knows(b,e.id,parse(e.payload_json))).sort((x,y)=>rank(y)-rank(x)||y.created_at.localeCompare(x.created_at)).slice(0,att.extra?2:1);
         for(const pick of picks){
         if(told.length>=MAX_TOLD)break;
         if(att.miss>0&&draw(m.id+'|'+pick.id+'|'+b)<att.miss)continue;
         run('INSERT INTO world_knowledge(event_id,character_id,via_character_id,meeting_event_id,world_day,created_at,rewound_at) VALUES(?,?,?,?,?,?,NULL) ON CONFLICT(event_id,character_id) DO UPDATE SET via_character_id=excluded.via_character_id,meeting_event_id=excluded.meeting_event_id,world_day=excluded.world_day,created_at=excluded.created_at,rewound_at=NULL',pick.id,b,a,m.id,day,iso());
-        remember(b,`${name(a)} mesélte (${pick.world_day}): ${clip(pick.title,120)} – ${clip(pick.summary,240)}`,m.id);
+        const memoryId=remember(b,`${name(a)} mesélte (${pick.world_day}): ${clip(pick.title,120)} – ${clip(pick.summary,240)}`,m.id);
+        onHeard?.({cid:b,eventId:pick.id,via:a,memoryId,day});
         told.push({event_id:pick.id,from:a,to:b});
         }
       }

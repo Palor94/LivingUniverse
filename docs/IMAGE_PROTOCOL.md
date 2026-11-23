@@ -84,8 +84,8 @@ provider refusals and separate external-upload/cost approval remain in force.
 ## 4. Content gate (intimacy protocol)
 
 Content level per picture: world-review analysis (`non_intimate` / `nudity` /
-`sexual_activity`), else the owner's mark (☀ 🔥 🔞 in the photo viewer, or `hetkoznapi` /
-`meztelen` / `szex` in the file name). Unanalysed and unmarked pictures and all videos count
+`sexual_activity`), else the owner's mark (☀ 🩳 🔥 🔞 in the photo viewer, or `hetkoznapi` /
+`felmeztelen` / `meztelen` / `szex` in the file name; `shirtless` = félmeztelen, 2026-11-22). Unanalysed and unmarked pictures and all videos count
 as intimate.
 
 | Stage | When | Allowed |

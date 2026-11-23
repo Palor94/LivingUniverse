@@ -5,7 +5,7 @@
 // to "where is he usually" – the world never invents a routine on its own.
 import {SLOTS} from '../world-common.mjs';
 import {readFileSync} from 'node:fs';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 // Routine batches written outside the app (2026-11-22) live in <project>/30_IMPORTS/rutin-*/.
 const IMPORTS=new URL('../../30_IMPORTS/',import.meta.url);
 const KEY='world:schedule:',PREV='world:schedule-prev:',PROP='world:schedule-proposal:';
@@ -21,15 +21,18 @@ export function cellOf(v){
   return {location_id:v.location_id,activity:cleanText(v.activity,200),privacy:PRIVACY.includes(v.privacy)?v.privacy:'public'};
 }
 
-export function createSchedules({one,run,fail,w,iso=()=>new Date().toISOString()}){
+export function createSchedules({one,run,fail,w,transaction=fn=>fn(),iso=()=>new Date().toISOString()}){
   const read=key=>{try{return JSON.parse(one('SELECT value FROM application_settings WHERE key=?',key)?.value||'null');}catch{return null;}};
   const write=(key,value)=>run('INSERT INTO application_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',key,JSON.stringify(value));
   const drop=key=>run('DELETE FROM application_settings WHERE key=?',key);
+  const fingerprint=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const version=cid=>fingerprint(read(KEY+cid));
   const person=cid=>{const c=one('SELECT id,name FROM characters WHERE id=?',cid);if(!c)throw fail('A szereplő nem található.',404);
     if(c.id===w.palor()?.id)throw fail('Palort a játékos viszi, neki nincs heti rutinja.',400);return c;};
   const ghostValue=(cid,field)=>{const g=read('ghost:character:'+cid);const v=g?.values?.[field];return String((v&&typeof v==='object'?v.value:v)||'').trim();};
   const places=cid=>{const ids=new Set((w.knownPlaces?.known(cid)||[]).map(p=>p.id));for(const p of w.placesOf(cid))ids.add(p.location_id);
     return [...ids].map(id=>one('SELECT id,name FROM locations WHERE id=?',id)).filter(Boolean).sort((a,b)=>a.name.localeCompare(b.name,'hu'));};
+  const basis=cid=>fingerprint({profile:read('ghost:character:'+cid)?.values||{},schedule:read(KEY+cid),places:places(cid).map(p=>({id:p.id,name:p.name})).sort((a,b)=>a.id.localeCompare(b.id))});
   // grid: {"<day 0-6>|<slot id>": location_id}; entries with months stay as they are, ahead of the grid.
   function toEntries(grid,keep=[]){
     const groups=new Map();
@@ -44,9 +47,12 @@ export function createSchedules({one,run,fail,w,iso=()=>new Date().toISOString()
     return s.entries.find(e=>e.slot===slotId&&Array.isArray(e.days)&&e.days.includes(weekday)&&(!Array.isArray(e.months)||e.months.includes(month)))||null;}
   function get(cid){const c=person(cid),s=read(KEY+cid),entries=Array.isArray(s?.entries)?s.entries:[];
     return {character:c,slots:SLOTS.map(s=>({id:s.id,label:s.label})),grid:toGrid(entries),seasonal:entries.filter(e=>Array.isArray(e.months)),places:places(cid),
-      routine:ghostValue(cid,'weekly_routine'),has_previous:!!read(PREV+cid),proposal:read(PROP+cid)};}
-  function save(cid,body,{actor='owner'}={}){person(cid);const cur=read(KEY+cid),keep=(cur?.entries||[]).filter(e=>Array.isArray(e.months));
-    const entries=toEntries(body?.grid,keep);if(cur)write(PREV+cid,cur);write(KEY+cid,{entries,updated_at:iso(),actor});return get(cid);}
+      routine:ghostValue(cid,'weekly_routine'),flexible:s?.flexible===true,version:version(cid),has_previous:!!read(PREV+cid),proposal:read(PROP+cid)?{...read(PROP+cid),stale:read(PROP+cid).basis!==basis(cid)}:null};}
+  function save(cid,body,{actor='owner'}={}){return transaction(()=>{person(cid);
+    if(!body?.grid||typeof body.grid!=='object'||Array.isArray(body.grid))throw fail('A napirendrács hiányzik vagy hibás.',400);
+    if(body.expected_version!==undefined&&body.expected_version!==version(cid))throw fail('A napirend közben megváltozott. Töltsd újra.',409);
+    const cur=read(KEY+cid),keep=(cur?.entries||[]).filter(e=>Array.isArray(e.months));
+    const entries=toEntries(body.grid,keep);if(cur)write(PREV+cid,cur);write(KEY+cid,{entries,updated_at:iso(),actor,...(body.flexible===true||body.flexible===undefined&&cur?.flexible===true?{flexible:true}:{})});return get(cid);});}
   function undo(cid){person(cid);const prev=read(PREV+cid);if(!prev)throw fail('Nincs korábbi napirend.',409);write(KEY+cid,prev);drop(PREV+cid);return get(cid);}
   async function propose(cid){
     const c=person(cid),routine=ghostValue(cid,'weekly_routine'),habits=ghostValue(cid,'habits'),job=ghostValue(cid,'occupation'),list=places(cid);
@@ -60,11 +66,11 @@ export function createSchedules({one,run,fail,w,iso=()=>new Date().toISOString()
       +'Csak JSON: {"cells":[{"day":1,"slot":"delutan","place":"pontos helynév","activity":"","privacy":"public","why":"melyik mondatból"}]}';
     const LABEL={sexuality:'SZEXUALITÁS ÉS INTIMITÁS',intimacy:'INTIMITÁSHOZ VALÓ HOZZÁÁLLÁS',attraction:'MEGÉLT VONZALMAK',presented_sexuality:'MÁSOK FELÉ MUTATOTT ÖNKÉP',secrets:'TITKAI'};
     const user=[`SZEREPLŐ: ${c.name}`,routine&&'HETI RUTIN:\n'+routine,habits&&'SZOKÁSOK:\n'+habits,job&&'FOGLALKOZÁS:\n'+job,...intimate.map(([f,v])=>LABEL[f]+':\n'+v.slice(0,2500)),'ISMERT HELYEI: '+list.map(p=>p.name).join(', ')].filter(Boolean).join('\n\n');
-    const out=await w.ask(sys,user,1200,{purpose:'world'}),byName=new Map(list.map(p=>[p.name.toLocaleLowerCase('hu').trim(),p.id])),grid={},why={};
+    const sourceBasis=basis(cid),out=await w.ask(sys,user,1200,{purpose:'world'}),byName=new Map(list.map(p=>[p.name.toLocaleLowerCase('hu').trim(),p.id])),grid={},why={};
     for(const x of Array.isArray(out?.cells)?out.cells.slice(0,28):[]){const d=Number(x?.day),loc=byName.get(String(x?.place||'').toLocaleLowerCase('hu').trim());
       if(!Number.isInteger(d)||d<0||d>6||!SLOTS.some(s=>s.id===x?.slot)||!loc)continue;grid[d+'|'+x.slot]=cellOf({location_id:loc,activity:x.activity,privacy:x.privacy});why[d+'|'+x.slot]=String(x.why||'').slice(0,200);}
     if(!Object.keys(grid).length)throw fail('A javaslatból nem maradt használható cella.',502);
-    write(PROP+cid,{grid,why,created_at:iso()});return get(cid);
+    write(PROP+cid,{grid,why,basis:sourceBasis,created_at:iso()});return get(cid);
   }
   // A proposal from outside the app (owner-run assistant): only his known places, never applied here.
   function storeProposal(cid,body,{source='external'}={}){
@@ -72,7 +78,7 @@ export function createSchedules({one,run,fail,w,iso=()=>new Date().toISOString()
     for(const [k,raw] of Object.entries(body?.grid||{})){const c=cellOf(raw);const [d,slot]=k.split('|');
       if(!c||!known.has(c.location_id)||!/^[0-6]$/.test(d)||!SLOTS.some(s=>s.id===slot))continue;grid[k]=c;if(body.why?.[k])why[k]=cleanText(body.why[k],200);}
     if(!Object.keys(grid).length)throw fail('A javaslatból nem maradt használható cella.',400);
-    write(PROP+cid,{grid,why,source:cleanText(source,60),created_at:iso()});return get(cid);
+    write(PROP+cid,{grid,why,basis:basis(cid),source:cleanText(source,60),created_at:iso()});return get(cid);
   }
   // A batch file: {links:[{character_id,location_id,role,note}], people:[{character_id,grid,why}]}.
   // Links are added as suggested place links first (so the places become his), then every grid is
@@ -89,7 +95,8 @@ export function createSchedules({one,run,fail,w,iso=()=>new Date().toISOString()
       catch(e){result.failed.push({id:p?.character_id,name:p?.name,error:e.message});}}
     return result;
   }
-  function decide(cid,accept){person(cid);const p=read(PROP+cid);if(!p)throw fail('Nincs függő javaslat.',409);drop(PROP+cid);
-    return accept?save(cid,{grid:p.grid},{actor:'proposal-accepted'}):get(cid);}
+  function decide(cid,accept){return transaction(()=>{person(cid);const p=read(PROP+cid);if(!p)throw fail('Nincs függő javaslat.',409);
+    if(accept){if(p.basis!==basis(cid))throw fail('A javaslat forrása, helyei vagy napirendje megváltozott. Készíts új javaslatot.',409);save(cid,{grid:p.grid},{actor:'proposal-accepted'});}
+    drop(PROP+cid);return get(cid);});}
   return {get,save,undo,propose,storeProposal,importFile,decide,toEntries,toGrid,entryAt};
 }

@@ -8,7 +8,7 @@
 //   2. place      – tagged with this place, or somewhere in the same town;
 //   3. level      – owner label > AI analysis (picture, or the analysed stills of a video) >
 //                   "unknown counts as intimate"; never above allow, the panel and the adult
-//                   switch. An intimate scene escalates: early on nudity fits best, later
+//                   switch. An intimate scene escalates: early on shirtless/nude fits best, later
 //                   explicit media (progress 0..1);
 //   4. form       – shape (landscape/portrait) and framing (close-up, full body…) per panel;
 //   5. story      – the AI description matches what is being said, and the time of day;
@@ -22,10 +22,12 @@
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {SIGNALS_SQL} from './media-signals.mjs';
+import {LEVELS,RANK,aiLevelSql} from './content-levels.mjs';
 
-export const LEVELS=['non_intimate','nudity','sexual_activity'];
-const RANK={non_intimate:0,nudity:1,sexual_activity:2};
+export {LEVELS};
 const MOOD_MAX={everyday:'non_intimate',flirt:'nudity',intimate:'sexual_activity'};
+// What each mood wants most (owner, 2026-11-22): a flirt picture is shirtless first; nude stays allowed.
+const MOOD_WANT={everyday:'non_intimate',flirt:'shirtless',intimate:'sexual_activity'};
 // cast: exact = all of them and nobody else known; focus = the first one must be in it;
 // solo = only that one person; together = all of them (others allowed).
 export const PANELS={
@@ -51,7 +53,7 @@ const fold=s=>String(s||'').normalize('NFD').replace(/\p{M}/gu,'').toLocaleLower
 const words=s=>new Set(fold(s).split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>3).map(w=>w.slice(0,7)));
 const castKey=ids=>[...new Set(ids)].sort().join(',');
 const seqOf=p=>{const m=path.basename(String(p||'')).match(/(\d{3,})(?!.*\d{3,})/);return m?Number(m[1]):null;};
-const levelOf=(owner,ai,video)=>LEVELS.includes(owner)?owner:ai==='non_intimate'||ai==='nudity'||ai==='sexual_activity'?ai:video;
+const levelOf=(owner,ai,video)=>LEVELS.includes(owner)?owner:LEVELS.includes(ai)?ai:video;
 
 // Width/height from an image header (PNG, JPEG, GIF, WebP); null when unknown.
 export function imageSize(b){
@@ -124,9 +126,11 @@ export function createMediaDirector({db,one,all,run,root,adult=()=>true,palorId=
     // The ceiling: allow (or the mood), the panel and the adult switch, whichever is lowest.
     let max=LEVELS.includes(allow)?allow:MOOD_MAX[mood]||'non_intimate';if(rule.max&&RANK[rule.max]<RANK[max])max=rule.max;if(!adult())max='non_intimate';
     // What fits best: an intimate scene starts with nudity and becomes explicit as it goes on.
-    let want=RANK[MOOD_MAX[mood]||'non_intimate'];if(mood==='intimate'&&Number.isFinite(progress)&&progress<0.34)want=1;
-    // An explicit wanted level (a scene beat: 0 everyday, 1 nudity, 2 explicit) beats the mood.
-    if([0,1,2].includes(wanted))want=wanted;want=Math.min(want,RANK[max]);
+    let want=RANK[MOOD_WANT[mood]||'non_intimate'];if(mood==='intimate'&&Number.isFinite(progress)&&progress<0.34)want=RANK.nudity;
+    // An explicit wanted level (a scene beat, a rank of LEVELS: 0 everyday, 1 shirtless, 2 nudity,
+    // 3 explicit, or the level's name) beats the mood.
+    if(typeof wanted==='string'&&LEVELS.includes(wanted))wanted=RANK[wanted];
+    if(Number.isInteger(wanted)&&wanted>=0&&wanted<LEVELS.length)want=wanted;want=Math.min(want,RANK[max]);
     const notMoments=all(`SELECT st.id FROM structured_tags st JOIN tag_groups g ON g.id=st.group_id WHERE g.name='Kép típusa' AND st.name IN (${NOT_MOMENTS.map(()=>'?').join(',')})`,...NOT_MOMENTS).map(r=>r.id);
     const rows=all(`SELECT m.id,m.kind,m.relative_path,sg.group_id,sg.captured_at,sg.width sig_w,sg.height sig_h,
         (SELECT group_concat(d.character_id) FROM depictions d WHERE d.media_id=m.id) cast_ids,
@@ -136,13 +140,13 @@ export function createMediaDirector({db,one,all,run,root,adult=()=>true,palorId=
         (SELECT json_array_length(d.document_json,'$.participants') FROM world_review_documents d WHERE d.source_id=ws.source_id) people,
         (SELECT count(*) FROM media_video_frames f WHERE f.media_id=m.id) frames,
         (SELECT count(*) FROM media_video_frames f WHERE f.media_id=m.id AND f.level IS NOT NULL) frames_done,
-        (SELECT max(CASE f.level WHEN 'sexual_activity' THEN 2 WHEN 'nudity' THEN 1 WHEN 'non_intimate' THEN 0 END) FROM media_video_frames f WHERE f.media_id=m.id) frame_rank,
+        (SELECT max(CASE f.level ${LEVELS.map((l,i)=>`WHEN '${l}' THEN ${i}`).join(' ')} END) FROM media_video_frames f WHERE f.media_id=m.id) frame_rank,
         (SELECT verdict FROM play_media_feedback f WHERE f.media_id=m.id AND f.panel=? AND f.cast_key=?) verdict,
         (SELECT sum(verdict) FROM play_media_feedback f WHERE f.media_id=m.id AND f.cast_key=? AND f.panel<>?) other_verdict,
         (SELECT at FROM play_media_shown sh WHERE sh.media_id=m.id AND sh.panel=? AND sh.cast_key=?) shown_at
       FROM active_media m
         LEFT JOIN media_signals sg ON sg.media_id=m.id
-        LEFT JOIN (SELECT s.media_id,s.id source_id,json_extract(s.raw_json,'$.world_details.content.level') ai_level,json_extract(s.raw_json,'$.description.hu') description,json_extract(s.raw_json,'$.world_details.camera.framing') framing
+        LEFT JOIN (SELECT s.media_id,s.id source_id,${aiLevelSql('s.raw_json')} ai_level,json_extract(s.raw_json,'$.description.hu') description,json_extract(s.raw_json,'$.world_details.camera.framing') framing
           FROM world_review_sources s WHERE s.rowid IN (SELECT max(rowid) FROM world_review_sources GROUP BY media_id)) ws ON ws.media_id=m.id
       WHERE m.id IN (SELECT media_id FROM depictions WHERE character_id IN (SELECT value FROM json_each(?)))
         AND m.kind IN (SELECT value FROM json_each(?))
@@ -179,7 +183,7 @@ export function createMediaDirector({db,one,all,run,root,adult=()=>true,palorId=
       if(atPlace){score+=5;reasons.push('ezen a helyen');}else if([...tags].some(t=>town.has(t))){score+=2;reasons.push('ugyanebben a városban');}
       // The mood: the closer the level to what the moment wants, the better.
       const gap=Math.abs(want-RANK[level]);score+=4-3*gap;
-      if(!gap&&known)reasons.push(mood==='intimate'&&want===1?'a jelenet elejéhez illik':'illik a hangulathoz');
+      if(!gap&&known)reasons.push(mood==='intimate'&&want<RANK.sexual_activity?'a jelenet elejéhez illik':'illik a hangulathoz');
       // "Unknown counts as intimate" is a safety rule, not evidence: a confirmed level ranks higher.
       else if(!known&&level!=='non_intimate'){score-=5;reasons.push('tartalma nincs megállapítva');}
       const fr=FRAMING[panel]?.[r.framing]||0;if(fr){score+=fr;if(fr>0)reasons.push('jó képkivágás');}

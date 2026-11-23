@@ -47,7 +47,7 @@ export function scenePrompt({palor,name,place,path,stage,activity,folder,useRefe
     lines.length?`Their latest lines (Hungarian). Use them for the situation, mood, clothing, gestures, objects and the details they mention; never write any of this text into the image:\n${lines.map(l=>`${l.who}: ${clean(l.text).slice(0,260)}`).join('\n')}`:'',
     'Composition: both men clearly visible, natural poses, candid camera at eye level, believable light for the place; no text, no watermark. Both are adults.'].filter(Boolean).join('\n'),
     save_as:`${folder}\\${place} - 1.png`,folder,
-    howto:`Save the image into ${folder} with a name that starts with the place ("${place} - 1.png"). Add "hetkoznapi", "meztelen" or "szex" to the file name to mark its content; otherwise it counts as intimate until you mark it in the game.`};
+    howto:`Save the image into ${folder} with a name that starts with the place ("${place} - 1.png"). Add "hetkoznapi", "felmeztelen", "meztelen" or "szex" to the file name to mark its content; otherwise it counts as intimate until you mark it in the game.`};
 }
 
 export function figurePrompt({name,appearance,referenceCount,folder,useReferences=true,folderOnly=false}){

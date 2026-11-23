@@ -2,6 +2,7 @@ import {appearanceFieldGuidance} from './public/profile-appearance-guide.js';
 import {normalizeGhostValues,MANUAL_SOURCE} from './public/ghost-import.js';
 // True when the owner saved this field by hand after the proposal was made.
 export const overridesProposal=(record,id,p)=>(record.manual?.[id]??-1)>(p.base_version??-1);
+export const profileProposalVersion=g=>digest({version:g.version,profile_version:g.profile_version,template:g.template,manual:g.manual||{},proposals:g.proposals.filter(p=>p.status==='pending')});
 import {randomUUID} from 'node:crypto';
 import {digest,profileVersion} from './character-edit.mjs';
 import {validateTemplatePatch,applyTemplatePatch} from './profile-template.mjs';
@@ -164,7 +165,16 @@ export function installGhostProfiles({one,all=()=>[],run,transaction,characterPo
     record.history.push({version:current.version,values:current.values,actor,proposal_ids:pending.map(p=>p.id),at});record.values={...record.values,...merged};record.version++;
     for(const p of pending){p.status='accepted';p.decided_at=at;p.actor=actor;p.accepted_values=applied.get(p.id);}
     write('ghost:character:'+cid,record);return {...get(cid),accepted:pending.length,skipped_fields};});}
-  return {get,template,saveTemplate,updateTemplate,propose,decide,saveManual,readiness,acceptAll,handle({p,req,body,json}){
+  function mergeProposals(cid,{expected_hash,values,model,provenance},actor='local-creator'){return transaction(()=>{
+    const current=get(cid);if(profileProposalVersion(current)!==expected_hash)throw error('A profil, sablon vagy javaslatok közben megváltoztak. Az eredmény nem került mentésre.',409);
+    const pending=current.proposals.filter(p=>p.status==='pending');
+    const proposal=propose(cid,{expected_version:current.version,profile_version:current.profile_version,template_version:current.template.version,values,model});
+    const {template,character_id,profile_version,legacy,...record}=get(cid),at=new Date().toISOString();
+    for(const p of record.proposals)if(pending.some(old=>old.id===p.id)){p.status='superseded';p.decided_at=at;p.actor=actor;p.superseded_by=proposal.id;}
+    const result=record.proposals.find(p=>p.id===proposal.id);result.merge={...provenance,proposal_ids:pending.map(p=>p.id),actor,at};
+    write('ghost:character:'+cid,record);return result;
+  });}
+  return {get,template,saveTemplate,updateTemplate,propose,decide,saveManual,readiness,acceptAll,mergeProposals,handle({p,req,body,json}){
     const manual=p.match(/^\/api\/characters\/([a-f0-9-]{36})\/ghost\/manual$/i);if(manual){if(req.method!=='POST')throw error('Nem támogatott művelet.',405);json(saveManual(manual[1],body));return true;}
     if(p==='/api/ghost-template'){if(req.method==='GET'){json(template());return true;}if(req.method==='PUT'){json(saveTemplate(body));return true;}}
     const all=p.match(/^\/api\/characters\/([a-f0-9-]{36})\/ghost\/accept-all$/i);if(all){if(req.method!=='POST')throw error('Nem támogatott művelet.',405);json(acceptAll(all[1]));return true;}

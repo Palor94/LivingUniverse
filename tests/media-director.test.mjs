@@ -67,6 +67,30 @@ test('media director: levels — everyday never shows nudity, unknown counts as 
   assert.ok(portrait.items.every(i=>i.level==='non_intimate'&&i.kind==='image'),'portraits are always everyday pictures');
 });
 
+test('media director: félmeztelen is its own level between everyday and nude (2026-11-22)',async()=>{
+  const {d,media}=setup();
+  media('a-shirtless',['A'],{owner:'shirtless'});
+  media('a-shirtless-ai',['A'],{ai:'nudity',owner:'shirtless'});
+  const everyday=await d.pick({panel:'phone',characters:['A'],mood:'everyday',limit:20});
+  assert.ok(!everyday.items.some(i=>i.level==='shirtless'),'everyday never shows a shirtless picture');
+  const flirt=await d.pick({panel:'phone',characters:['A'],mood:'flirt',limit:20});
+  assert.ok(flirt.items.some(i=>i.media_id==='a-shirtless'&&i.level==='shirtless'),'flirt allows shirtless');
+  assert.equal(flirt.items.find(i=>i.media_id==='a-shirtless-ai').level,'shirtless','the owner label wins over the AI level');
+  assert.equal(flirt.want_level,'shirtless','a flirt wants shirtless first');
+  // AI "bare chest" evidence counts as shirtless (owner, 2026-11-22); a nude AI result stays nude.
+  const {d:d2,media:m2,run}=setup();
+  m2('a-bare',['A']);m2('a-bare-nude',['A']);
+  run('INSERT INTO world_review_sources VALUES(?,?,?)','sb','a-bare',JSON.stringify({world_details:{content:{level:'non_intimate',evidence:'A bare chest is visible, with no exposed genitals.'}}}));
+  run('INSERT INTO world_review_sources VALUES(?,?,?)','sn','a-bare-nude',JSON.stringify({world_details:{content:{level:'nudity',evidence:'Bare torso and exposed genitals.'}}}));
+  assert.ok(!(await d2.pick({panel:'phone',characters:['A'],mood:'everyday',limit:20})).items.some(i=>i.media_id==='a-bare'),'a bare chest is not everyday');
+  const fl=await d2.pick({panel:'phone',characters:['A'],mood:'flirt',limit:20});
+  assert.equal(fl.items.find(i=>i.media_id==='a-bare').level,'shirtless');assert.equal(fl.items.find(i=>i.media_id==='a-bare-nude').level,'nudity');assert.equal(flirt.items[0].level,'shirtless');
+  const capped=await d.pick({panel:'scene',characters:['A'],mood:'intimate',allow:'shirtless',limit:20});
+  assert.equal(capped.max_level,'shirtless');assert.ok(capped.items.every(i=>['non_intimate','shirtless'].includes(i.level)),'a shirtless ceiling never shows nudity');
+  const wanted=await d.pick({panel:'scene',characters:['A'],mood:'intimate',want:'shirtless',limit:20});
+  assert.equal(wanted.want_level,'shirtless','a wanted level can be named');assert.equal(wanted.items[0].level,'shirtless','and it ranks first');
+});
+
 test('media director: a talk picture shows only the people of the talk, from this place (2026-11-13)',async()=>{
   const {d,media}=setup();
   media('a-kitchen',['A'],{ai:'non_intimate',tags:['t-town']});

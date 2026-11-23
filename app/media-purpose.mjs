@@ -15,6 +15,16 @@ export const notPlanningSQL='NOT ('+planningSQL+')';
 export const notPlayAssetSQL='NOT EXISTS(SELECT 1 FROM play_asset_sources pa WHERE pa.media_id=m.id)';
 /** The same, but harmless before Play mode created its table (standalone use): pass the db helper `one`. */
 export const playAssetFilter=one=>one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='play_asset_sources'")?notPlayAssetSQL:'1';
+/** Expression variants are intentional assets, not near-duplicate removal candidates. Alias `m`.
+ * Check the source marker too: imported figure originals can live in ordinary catalogue folders.
+ * Exact byte-duplicate checks remain separate and available.
+ */
+export function figureSimilarityFilter(one){
+  const folder="instr('/' || lower(replace(m.relative_path,'\\','/')), '/szereplő-alakok/')=0";
+  const source=one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='play_asset_sources'")
+    ?"NOT EXISTS(SELECT 1 FROM play_asset_sources pa WHERE pa.media_id=m.id AND pa.target='figure')":'1';
+  return `(${folder} AND ${source})`;
+}
 export function describeMediaPurpose(relativePath,result){
   if(!isPlanningSource(relativePath))return {kind:'catalogue_media',realization_state:'unspecified',simulation_role:'scene_or_reference_candidate',basis:'default_media_scope',uses:[]};
   const uses=['generation_plan'];

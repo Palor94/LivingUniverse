@@ -10,7 +10,7 @@ const CHATGPT_PROMPT='Use the Living Universe connector. Call list_character_ord
 // Gallery scenes (server: GALLERY_SCENES in app/character-orders.mjs); content per picture or scene.
 const SCENES=[['portrait','solo'],['waist_up','solo'],['selfie','solo'],['own_place','solo'],['morning','solo'],['evening','solo'],['work_hobby','solo'],
   ['meeting','palor'],['coffee','palor'],['walk','palor'],['shared_selfie','palor'],['activity','palor']].map(([key,set])=>({key,set}));
-const CONTENTS=['non_intimate','nudity','sexual_activity'];
+const CONTENTS=['non_intimate','shirtless','nudity','sexual_activity'];
 
 export function installCharacterFactoryUI({$,$$,esc,api,toast,heading,openProfile}){
   let host=null,files=[],notes=[],levels=[],busy=false;const selectedLife=new Set();let lifeCandidates=[];

@@ -16,6 +16,10 @@ results keep model/method/version in provenance. Never reword a request to get a
 | ~~Identity sort via cloud~~ | OpenAI | `gpt-6.1-sol` identity-v1 | kept for reference | | refused by the provider; not used |
 | **Auto-canon** | chosen identity method + local gates | n/a | writes only via existing `saveCanon` / crop approve shape | immutable machine-attributed revision | gates unset until owner lock-in |
 
+2026-11-22: separate quality-review workflow (`app/identity-quality.mjs`, Identity page) measures face and body independently, using the installed models, exact current approved-reference hashes/crops and an explicit per-person visible-body scope. Its body method is `local-dinov2-small-crop-letterbox-v1`: aspect-preserving input, never an automatic identity verdict. Old running identity methods and thresholds are unchanged. Human face/body output reviews are separate, attributed and never canon promotion. A changed source/reference/revision invalidates pending review.
+
+Bounded local benchmark (12 approved body references selected, 11 usable; original-source duplicates excluded): 7 positive and 47 negative pairs. At similarity 0.8, hit rate 0.286 and false-alarm rate 0.085; at 0.9, no hits. This sample does **not** establish reliable body identity or anatomical proportions. No threshold is selected and no auto-canon gate is enabled. Private report: `%LOCALAPPDATA%/LivingUniverse/reports/body-quality-2026-11-22.json`. A stronger body method and a larger reviewed benchmark remain open; a new model installation requires separate owner authorization.
+
 Settings for tagging match the already-approved library plan: `image_detail: high`, `reasoning_effort: medium`, `max_output_tokens: 8192`, `result_contract: world-v1`. Env key: `OPENAI_API_KEY` (app process only; never Git / MCP tunnel).
 
 Why this stack: the collection already has a paused/partial **Sol world-v1** tagging contract and review UI. Reusing it avoids a second incompatible label schema. Grok remains fine for chat/MCP; it is **not** the catalogue tagger here.

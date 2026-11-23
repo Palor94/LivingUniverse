@@ -2,6 +2,7 @@
 // in a picture (Igen links him through the ordinary link route, Nem hides it), pictures whose link
 // looks wrong, and a check of every character's approved face references. Never canon.
 import {t} from './i18n.js';
+import {renderQuality} from './identity-quality.js';
 
 export function installIdentityUI({$,$$,esc,api,toast,heading,openMedia=null}){
   let poll=null;
@@ -42,6 +43,8 @@ export function installIdentityUI({$,$$,esc,api,toast,heading,openMedia=null}){
       card.querySelector('[data-id-no]')?.addEventListener('click',async()=>{try{await api('/api/identity/feedback',{media_id:media,character_id:character,verdict:'no'});card.remove();}catch(e){toast(e.message,true);}});
       card.querySelector('[data-id-open]')?.addEventListener('click',()=>openMedia(media));
     }
+    const quality=document.createElement('section');quality.className='we-section';root.append(quality);
+    await renderQuality(quality,{api,esc,toast});
     // While a scan runs, refresh every few seconds (only while this view is open).
     if(running)poll=setTimeout(()=>{if(root.isConnected&&document.body.contains(root))render(root).catch(()=>{});},4000);
   }

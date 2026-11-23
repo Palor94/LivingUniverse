@@ -25,10 +25,11 @@ import {catalogueFolder} from './storage-layout.mjs';
 import {FIGURE_EXPRESSIONS} from './figure-prompts.mjs';
 import {MINOR,FEMALE} from './play-stories.mjs';
 import {readName} from './new-images.mjs';
+import {CONTENT_WORD,LEVELS} from './content-levels.mjs';
 
 // Gallery file names follow the "Új képek" naming rule (2026-11-12, docs/UJ_KEPEK_UTMUTATO.md),
 // like the connector's target picture: "<Név> - <Helyszín> - <címke> - hetkoznapi - 2026-11-14-1.png".
-export const CONTENT_WORD={non_intimate:'hetkoznapi',nudity:'meztelen',sexual_activity:'szex'};
+export {CONTENT_WORD};
 export function galleryStem({name,place='',label='',content='non_intimate',date}){
   const clean=s=>String(s||'').replace(/[\\/:*?"<>|\x00-\x1f]/g,'-').replace(/\s+/g,' ').trim();
   return [clean(name),clean(place),clean(label),CONTENT_WORD[content]||CONTENT_WORD.non_intimate,date].filter(Boolean).join(' - ');
@@ -95,7 +96,7 @@ export function lifeScenes({daily=true,palor=true,shirtless=true,relation=null}=
     for(let i=0;i<n;i++){const e=relation.events[i];out.push({key:'palor_'+(i+1),set:'palor',label:'közös pillanat',purpose:'shared photos, diary',content:'non_intimate',
       idea:e?`the recorded event "${e.title}": ${e.summary}`:'a moment of their relationship exactly as recorded (relationship notes and events); never closer than recorded'});}}
   if(shirtless)for(const s of SHIRTLESS_SCENES){const together=!!s.together&&!!relation;
-    out.push({key:s.key,set:together?'palor':'solo',label:s.label,purpose:together?'shared shirtless moment':'shirtless moment of his own life',content:'nudity',
+    out.push({key:s.key,set:together?'palor':'solo',label:s.label,purpose:together?'shared shirtless moment':'shirtless moment of his own life',content:'shirtless',
       idea:`shirtless (bare upper body, trousers on), ${s.idea}${together?', together with Palor in a way their recorded relationship supports':', alone'}`});}
   return out;
 }
@@ -209,10 +210,10 @@ export function installCharacterOrders({db,one,all,run,transaction,fail,root,dat
     const decoded=pictures.map(p=>{const m=String(p?.data_url||'').match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/);if(!m)throw fail('Attach PNG, JPEG or WebP pictures.');
       const bytes=Buffer.from(m[2],'base64'),ext=sniff(bytes);if(!ext||bytes.length>20*1024*1024)throw fail('Attach PNG, JPEG or WebP pictures.');
       const note=typeof p.note==='string'?p.note.trim().normalize('NFC').replace(/\s+/g,' ').slice(0,200):'';
-      // The owner marks each picture (hétköznapi / félmeztelen / intim = non_intimate / nudity /
-      // sexual_activity); it is named and marked by it. Older callers send one source_content.
+      // The owner marks each picture (hétköznapi / félmeztelen / meztelen / szex = non_intimate /
+      // shirtless / nudity / sexual_activity); it is named and marked by it. Older callers send one source_content.
       const content=p.content??body.source_content??'non_intimate';
-      if(!CONTENT_WORD[content])throw fail('source_content is non_intimate, nudity or sexual_activity.');
+      if(!CONTENT_WORD[content])throw fail('source_content is non_intimate, shirtless, nudity or sexual_activity.');
       return {bytes,ext,note,content};});
     for(const d of decoded)if(d.note){assertAdultMan(d.note,fail);characterPolicy?.assertPrompt?.(d.note);}
     // Gallery: the ticked scene sets (base set alone, shared set with Palor). The older free count
@@ -222,7 +223,7 @@ export function installCharacterOrders({db,one,all,run,transaction,fail,root,dat
     const scenes=GALLERY_SCENES.filter(s=>sets.includes(s.set));
     // Each scene's content level is the owner's choice (default everyday).
     const sceneContent=body.scene_content&&typeof body.scene_content==='object'?body.scene_content:{};
-    for(const s of scenes)if(sceneContent[s.key]!==undefined&&!CONTENT_WORD[sceneContent[s.key]])throw fail('source_content is non_intimate, nudity or sexual_activity.');
+    for(const s of scenes)if(sceneContent[s.key]!==undefined&&!CONTENT_WORD[sceneContent[s.key]])throw fail('source_content is non_intimate, shirtless, nudity or sexual_activity.');
     const want={profile:body.profile!==false,avatars:body.avatars!==false,gallery:scenes.length>0||body.gallery===true};
     const gallery=scenes.length||Math.max(1,Math.min(20,Number(body.gallery_count)||6));
     const cid=randomUUID();
@@ -385,7 +386,7 @@ export function installCharacterOrders({db,one,all,run,transaction,fail,root,dat
     const sc=o.steps.gallery.scenes,scene=sc&&typeof a.scene==='string'?defOf(o,a.scene):null;
     if(sc&&!scene)throw fail('scene is one of the open scenes of this order: '+sceneKeys(o).filter(k=>sc[k].state==='open').join(', ')+'.');
     if(scene&&sc[scene.key].state!=='open')throw fail('This scene is already done.',409);    if(a.outcome==='refused'){o.steps.gallery.refused++;o.steps.gallery.rejected.push({at:iso(),...(scene?{scene:scene.key}:{}),reason:'Elutasítva: '+String(a.note||'').slice(0,300)});if(scene)sc[scene.key].state='refused';save(o);await refresh(o);return {saved:false,refused_recorded:true,gallery:view(o).gallery};}
-    const content=scene?sc[scene.key].content:['non_intimate','nudity','sexual_activity'].includes(a.content)?a.content:'non_intimate';
+    const content=scene?sc[scene.key].content:LEVELS.includes(a.content)?a.content:'non_intimate';
     const withPalor=scene?.set==='palor'?palor():null;if(scene?.set==='palor'&&!withPalor)throw fail('Palor is not in the world yet, so shared pictures cannot be saved.',409);    if(typeof a.prompt==='string'){assertAdultMan(a.prompt,fail);characterPolicy?.assertPrompt?.(a.prompt);}
     // Name parts (checked before any download): his name, an optional place from the location tree,
     // an optional short label; the label must not read as a person or a content word.

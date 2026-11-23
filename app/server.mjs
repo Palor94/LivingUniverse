@@ -10,6 +10,7 @@ import {installCharacterPolicy} from './character-policy.mjs';
 import {resourceRoot,characterFolder,characterParent} from './storage-layout.mjs';
 import {forgetRemovedReferences} from './reference-retention.mjs';
 import {installGhostProfiles} from './ghost-profile.mjs';
+import {installProfileProposalMerge} from './profile-proposal-merge.mjs';
 import {installLocationCanvas} from './location-canvas.mjs';
 import {installPermanentMediaDelete} from './permanent-media-delete.mjs';
 import http from 'node:http';
@@ -21,6 +22,9 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 import {installEnhancements,extraTables} from './enhancements.mjs';
+import {backupBeforeSocialExperiences} from './social-experiences.mjs';
+import {backupBeforeIdentityQuality,installIdentityQuality} from './identity-quality.mjs';
+import {backupBeforeWorldFactGate} from './world-fact-gate.mjs';
 import {installCatalogueActions} from './catalogue-actions.mjs';
 import {installReconciliation} from './reconciliation.mjs';
 import {installDuplicates} from './duplicates.mjs';
@@ -117,7 +121,7 @@ export async function createApp(options={}) {
   await fs.mkdir(dataDir,{recursive:true});
   const db = new DatabaseSync(path.join(dataDir,'universe.sqlite'));
   let storyMigrationBackup,characterCropMigrationBackup;
-  try{characterCropMigrationBackup=await backupBeforeCharacterCrops(db,dataDir);storyMigrationBackup=await backupBeforeStoryMigration(db,dataDir);}catch(e){db.close();throw e;}
+  try{characterCropMigrationBackup=await backupBeforeCharacterCrops(db,dataDir);storyMigrationBackup=await backupBeforeStoryMigration(db,dataDir);await backupBeforeSocialExperiences(db,dataDir);await backupBeforeIdentityQuality(db,dataDir);await backupBeforeWorldFactGate(db,dataDir);}catch(e){db.close();throw e;}
   db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;
     CREATE TABLE IF NOT EXISTS characters(id TEXT PRIMARY KEY,name TEXT NOT NULL,aliases TEXT NOT NULL DEFAULT '',biography TEXT NOT NULL DEFAULT '',personality TEXT NOT NULL DEFAULT '',appearance TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',cover_id TEXT,created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY,relative_path TEXT NOT NULL UNIQUE,folder TEXT NOT NULL,kind TEXT NOT NULL,size INTEGER,modified_at TEXT,created_at TEXT NOT NULL);
@@ -247,6 +251,7 @@ export async function createApp(options={}) {
   // One local face analyser (child process) for identity suggestions and the Szereplőgyár checks.
   const faceAnalyser=options.identityAnalyser||workerAnalyser();
   const identity=installIdentitySuggest({db,one,all,run,transaction,safeFile,fail,analyse:faceAnalyser});
+  const identityQuality=installIdentityQuality({db,one,all,run,safeFile,...(options.qualityAnalyser?{analyse:options.qualityAnalyser}:{})});
   const mediaReview=installMediaReview({db,one,all,run,fail,regroupIfStale:()=>mediaSignals.regroupIfStale()});
   // Hot lookups found missing by the 2026-11-10 audit (media director, Play photo queries).
   db.exec('CREATE INDEX IF NOT EXISTS depictions_character ON depictions(character_id)');
@@ -287,15 +292,17 @@ export async function createApp(options={}) {
   const currentProvider=(purpose='play')=>{if(worldProvider!==undefined)return worldProvider;if(purpose==='world'&&worldEngine.settings().world_provider==='ollama')return ollama;if(!xaiKey)return null;let model=DEFAULT_MODEL;try{const s=worldEngine.settings();model=(purpose==='world'?s.world_model:s.model)||DEFAULT_MODEL;}catch{}if(!xaiProviders.has(model))xaiProviders.set(model,createXaiProvider({key:xaiKey,model}));return xaiProviders.get(model);};
   const locationTree=createLocationTree(dataDir);
   // Game time: real time plus what Palor's actions added (game-clock.mjs); costs keep real days.
-  const gameClock=createGameClock({one,run,realNow:options.worldClock||(()=>new Date())});
-  const worldEngine=installWorldEngine({db,one,all,run,transaction,fail,ghostProfiles,provider:purpose=>aiTrace.wrap(currentProvider(purpose)),locationTree,now:gameClock.now,realNow:gameClock.realNow});
+  // Break cap (2026-11-23): held at the next morning during a break unless the engine runs all the time.
+  const gameClock=createGameClock({one,run,realNow:options.worldClock||(()=>new Date()),capBreaks:()=>{if(options.clockBreakCap===false)return false;try{return !worldEngine.settings().enabled;}catch{return true;}}});
+  const worldEngine=installWorldEngine({db,one,all,run,transaction,fail,ghostProfiles,characterPolicy,provider:purpose=>aiTrace.wrap(currentProvider(purpose)),locationTree,now:gameClock.now,realNow:gameClock.realNow});
+  const profileProposalMerge=installProfileProposalMerge({one,run,transaction,ghostProfiles,provider:currentProvider,settings:worldEngine.settings,ask:worldEngine.internals.ask});
   // Collection-origin declaration; approval, content and provider rules remain separate.
   const characterOrigin=createCharacterOrigin({one,all,root});
   const sprites=installCharacterSprites({db,root,one,all,run,transaction,fail,castIds:()=>[...worldEngine.internals.meetable().map(c=>c.id),worldEngine.internals.palor()?.id].filter(Boolean),mayUseReferences:characterOrigin.mayUseEverydayReferences,allowedReferences:characterOrigin.everydayReferences});
   // First meeting with Palor → proposed story event + relationship lines (owner decides).
   const firstMeetings=installFirstMeetings({db,transaction,storyEvents,palorId:()=>enhancements.protagonist()?.id||null});
   const playMode=installPlayMode({db,one,all,run,transaction,fail,dataDir,root,worldEngine,characterPolicy,sprites,onMeeting:firstMeetings.afterMeeting,locationTree,now:gameClock.now,gameClock,mayUseReferences:characterOrigin.mayUseReferences,mayUseEverydayReferences:characterOrigin.mayUseEverydayReferences,intimateAllowed:characterOrigin.intimateAllowed,...(options.playRandom?{random:options.playRandom}:{})});
-  const rewinds=installWorldRewind({db,one,all,run,transaction,fail,worldEngine,now:gameClock.now});
+  const rewinds=installWorldRewind({db,one,all,run,transaction,fail,worldEngine,gameClock,now:gameClock.now});
   let zipReceiving=false; // a background ZIP body is being received (owner, 2026-11-14)
   const backgrounds=installLocationBackgrounds({root,one,all,run,transaction,fail,authenticate:h=>mcpChanges.authenticate(h),approvalMode:()=>mcpWriteConfig?.approval_mode??'review',figures:()=>sprites.overview(),prompts:a=>playMode.prompts(a),extraOps:()=>{const town=playMode.townOps(playAssets.imageBytes),orders=characterOrders.ops(playAssets.imageBytes);return {...playAssets.ops,...ideaBox.ops,...playMode.storyOps,...town,...orders,
     // "nézd meg a nyitott rendeléseket" (2026-11-14): ChatGPT also hears about the map and background orders.
@@ -312,7 +319,7 @@ export async function createApp(options={}) {
   // Developer tools (dev-tools.mjs): doctor, logs and the explicit restart. Restart is enabled
   // only for the real service (installProcessGuards), never for tests, sandboxes or copies.
   const requestLog=createRequestLog();let restartLauncher=options.devRestart||null;
-  const busyLabel=()=>scanning?'beolvasás':folderSync.isBusy()?'mappaszinkron':reconciliation.isRelinking()?'fájlok újrakapcsolása':mediaImports.isBusy()?'import':imageGeneration.isBusy()?'képgenerálás':permanentDelete.isBusy()?'végleges törlés':characterRename.isBusy()?'átnevezés':moving.size?'áthelyezés':null;
+  const busyLabel=()=>worldEngine.internals.narrative?.isBusy()?'szabadjelenet':identityQuality.isBusy()?'arc/test ellenorzes':scanning?'beolvasás':folderSync.isBusy()?'mappaszinkron':reconciliation.isRelinking()?'fájlok újrakapcsolása':mediaImports.isBusy()?'import':imageGeneration.isBusy()?'képgenerálás':permanentDelete.isBusy()?'végleges törlés':characterRename.isBusy()?'átnevezés':moving.size?'áthelyezés':null;
   // Background job ledger (job-ledger.mjs): busy stretches and world rounds become jobs.
   const jobs=createJobLedger({dataDir,all,worldEngine,systemStatus,...(options.jobLedger||{})});
   jobs.watch('world_round',()=>worldEngine.roundState().running);
@@ -434,6 +441,7 @@ export async function createApp(options={}) {
       if(await autoSnapshots.handle({p,req,json}))return;
       if(await thumbnails.handle({p,req,res}))return;
       if(await identity.handle({p,req,body,json}))return;
+      if(await identityQuality.handle({p,req,body,json}))return;
       if(await mediaReview.handle({p,req,url,body,json}))return;
       if(await characterGroups.handle({p,body,req,json}))return;
       if(await worldEngine.handle({p,body,req,json}))return;
@@ -516,6 +524,7 @@ export async function createApp(options={}) {
         }catch(e){return json({code:e.code||'GHOST_CHANGE_REJECTED',error:e.status?e.message:'The ghost-profile operation could not be completed.'},e.status||500);}
       }
       if(p==='/api/characters/readiness'&&req.method==='GET'){const tree=await locationTree.load();return json(ghostProfiles.readiness({palorId:worldEngine.internals.palor()?.id||null,placedLocationIds:new Set(tree.nodes.filter(node=>node.placed!==false&&node.location_id).map(node=>node.location_id))}));}
+      if(await profileProposalMerge.handle({p,body,req,json}))return;
       if(ghostProfiles.handle({p,body,req,json}))return;
       if(storyEvents.handle({p,body,req,url,json}))return;
       if(firstMeetings.handle({p,body,req,json}))return;
@@ -687,7 +696,7 @@ export async function createApp(options={}) {
         const headers={'Content-Type':types[path.extname(full).toLowerCase()]||'application/octet-stream','Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':m.kind==='image'?'private, no-cache':'private, max-age=60','ETag':etag,'X-Content-Type-Options':'nosniff'};if(status===206)headers['Content-Range']=`bytes ${start}-${end}/${s.size}`;
         res.writeHead(status,headers);if(req.method==='HEAD')return res.end();const stream=createReadStream(full,{start,end});stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);return;
       }
-      if(req.method==='GET'&&['/generation-queue.js','/studio-reads.js','/dev-tasks.js','/generation-jobs.js','/interactions.js','/interactions.css','/manifest.webmanifest','/play.webmanifest','/app-icon.svg','/app-icon-192.png','/app-icon-512.png','/app-install.js','/service-worker.js','/app-routes.js','/world-review.js','/world-review.css','/character-rename.html','/character-rename.js','/character-rename.css','/','/style.css','/theme.css','/i18n.js','/quick-tag.js','/media-signals.js','/media-review.js','/image-workshop.js','/world-engine.js','/play.js','/command-palette.js','/upload-image.js','/asset-generation.js','/picture-order.js','/play-scene.js','/play-dialog.js','/talk-transcript.js','/play-travel.js','/play-map.js','/play-map-layout.js','/play-story.js','/place-tools.js','/play-town-map.js','/play-icons.js','/character-factory.js','/debug-trail.js','/layout-check.js','/play-debug.js','/sprite-cutout.js','/sprite-cutout-worker.js','/sprite-cutout-pixels.js','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/profile-autosave.js','/client.js','/api-json.js','/system-error-summary.js','/character-options.js','/character-readiness.js','/enhancements.js','/picture-crop.js','/character-reference-crops.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/name-picker.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/location-editor.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-hub.js','/location-canvas-model.js','/location-canvas.css','/permanent-media-delete.js','/dev-tools.js','/identity.js'].includes(p)){
+      if(req.method==='GET'&&['/generation-queue.js','/studio-reads.js','/dev-tasks.js','/generation-jobs.js','/interactions.js','/interactions.css','/manifest.webmanifest','/play.webmanifest','/app-icon.svg','/app-icon-192.png','/app-icon-512.png','/app-install.js','/service-worker.js','/app-routes.js','/world-review.js','/world-review.css','/character-rename.html','/character-rename.js','/character-rename.css','/','/style.css','/theme.css','/i18n.js','/quick-tag.js','/media-signals.js','/media-review.js','/image-workshop.js','/world-engine.js','/play.js','/command-palette.js','/upload-image.js','/asset-generation.js','/picture-order.js','/play-scene.js','/play-dialog.js','/talk-transcript.js','/play-travel.js','/play-map.js','/play-map-layout.js','/play-story.js','/place-tools.js','/play-town-map.js','/play-icons.js','/character-factory.js','/debug-trail.js','/layout-check.js','/play-debug.js','/sprite-cutout.js','/sprite-cutout-worker.js','/sprite-cutout-pixels.js','/profile-appearance-guide.js','/ghost-import.js','/ghost-profile.js','/profile-autosave.js','/client.js','/api-json.js','/system-error-summary.js','/character-options.js','/character-readiness.js','/enhancements.js','/picture-crop.js','/character-reference-crops.js','/crop-selection.js','/sorting.js','/sorting-pickers.js','/name-picker.js','/reconciliation.js','/duplicates.js','/image-hash.js','/taxonomy.js','/suggestions.js','/locations.js','/location-editor.js','/story-events.js','/media-form.js','/character-generation.js','/location-canvas.js','/location-hub.js','/location-canvas-model.js','/location-canvas.css','/permanent-media-delete.js','/dev-tools.js','/identity.js','/identity-quality.js','/fact-proposals.js'].includes(p)){
         const version=url.searchParams.get('v'),name=p==='/'?'index.html':p.slice(1);
         if(version&&version!==publicAssets.version&&!p.endsWith('.html')&&p!=='/'){res.writeHead(307,{'Location':p+'?v='+publicAssets.version,'Cache-Control':'no-store'});return res.end();}
         const immutable=version===publicAssets.version&&!name.endsWith('.html'),cacheControl=immutable?'public, max-age=31536000, immutable':'no-cache';
@@ -710,11 +719,11 @@ export async function createApp(options={}) {
     let grokConnections=null;try{grokConnections=mobileConfig?.enabled===true?createGrokConnections(grokConfig,mobileConfig):null;}catch{console.error('Grok approval disabled: invalid gateway configuration. Existing mobile access remains available.');}
     previewMedia=async mediaId=>{const reader=await openMcpCatalogue({database:path.join(dataDir,'universe.sqlite'),mediaRoot:root,availability:options.mobileAvailability,makeThumbnail:options.mobileThumbnail});try{const result=await reader.call('get_media',{media_id:mediaId,include_image:true,image_quality:'reference'});if(!result.image)throw fail('No verified media preview is available.',404);return {bytes:Buffer.from(result.image.data,'base64'),mimeType:result.image.mimeType};}finally{reader.close();}};
     const referencePreview=async(characterId,mediaId,runId,referenceId)=>{if(runId)return imageGeneration.previewReference(runId,characterId,mediaId,referenceId);const reader=await openMcpCatalogue({database:path.join(dataDir,'universe.sqlite'),mediaRoot:root,availability:options.mobileAvailability,makeThumbnail:options.mobileThumbnail,maxInlineImageBytes:20*1024*1024});try{const hasCrop=characterId&&(await reader.call('get_approved_references',{character_id:characterId,media_id:mediaId,...(referenceId?{reference_id:referenceId}:{})})).data.references[0]?.crop;const result=await reader.call(characterId?'get_approved_references':'get_media',{...(characterId?{character_id:characterId}:{}),media_id:mediaId,...(referenceId?{reference_id:referenceId}:{}),include_image:true,image_quality:hasCrop?'reference':'original'});if(!result.image)throw fail('No verified original image is available.',404);return {bytes:Buffer.from(result.image.data,'base64'),mimeType:result.image.mimeType,sha256:result.data.image_info.sha256};}finally{reader.close();}};
-    mobileServer=createMobileServer({config:mobileConfig,all,one,run,transaction,characterCrops:approveMcp?characterCrops:null,desktopOrigin:()=>server.listening?'http://127.0.0.1:'+server.address().port:null,characterRename:approveMcp?characterRename:null,ghostProfiles,mcpChanges:approveMcp,mediaImports:approveMcp?mediaImports:null,imageGeneration:approveMcp?imageGeneration:null,grokConnections,referencePreview,locationEditor:locations.editor,sorting,scan,scanRunning:()=>scanning,reconciliation,createCharacter:folderSync.createCharacterWithFolder,isBusy:()=>mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking()});
+    mobileServer=createMobileServer({config:mobileConfig,all,one,run,transaction,characterCrops:approveMcp?characterCrops:null,desktopOrigin:()=>server.listening?'http://127.0.0.1:'+server.address().port:null,characterRename:approveMcp?characterRename:null,ghostProfiles,profileProposalMerge,mcpChanges:approveMcp,mediaImports:approveMcp?mediaImports:null,imageGeneration:approveMcp?imageGeneration:null,grokConnections,referencePreview,locationEditor:locations.editor,sorting,scan,scanRunning:()=>scanning,reconciliation,createCharacter:folderSync.createCharacterWithFolder,isBusy:()=>mediaImports.isBusy()||folderSync.isBusy()||scanning||moving.size>0||reconciliation.isRelinking()});
   }catch(e){console.error('Mobile access disabled: '+e.message);}
   if(mobileServer&&mcpWriteConfig?.enabled===true&&mobileConfig.login.toLowerCase()===mcpWriteConfig.login&&mobileConfig.origin===mcpWriteConfig.origin)characterCrops.setAdminOrigin(mobileConfig.origin);
   const closeServer=s=>new Promise(resolve=>{if(!s?.listening)return resolve();s.close(()=>resolve());s.closeIdleConnections();});
-  return {devTools,enableRestart:()=>{restartLauncher??=windowsRestartLauncher({projectRoot:path.resolve(appDir,'..'),dataDir});sandboxLauncher??=processSandboxLauncher({projectRoot,dir:bugReports.dir});},bugReports,worldReview,worldReviewMigrationBackup,autoSnapshots,server,mobileServer,characterRename,characterCropMigrationBackup,storyMigrationBackup,imageMigrationBackup,mediaUploadMigrationBackup,mobilePort:mobileConfig?.port??4318,db,root,dataDir,folderSync,imageGeneration,generationSessions,playImageWorker,assetGeneration,worldEngine,backgrounds,sprites,thumbnails,identity,jobs,close:async()=>{devTools.close();jobs.close();thumbnails.close();identity.close();worldEngine.stopScheduler();autoSnapshots.stop();backgrounds.stopWatcher();sprites.stopWatcher();await playImageWorker.settle();await imageGeneration.settle();await assetGeneration.settle();await Promise.all([closeServer(server),closeServer(mobileServer)]);db.close();}};
+  return {devTools,enableRestart:()=>{restartLauncher??=windowsRestartLauncher({projectRoot:path.resolve(appDir,'..'),dataDir});sandboxLauncher??=processSandboxLauncher({projectRoot,dir:bugReports.dir});},bugReports,worldReview,worldReviewMigrationBackup,autoSnapshots,server,mobileServer,characterRename,characterCropMigrationBackup,storyMigrationBackup,imageMigrationBackup,mediaUploadMigrationBackup,mobilePort:mobileConfig?.port??4318,db,root,dataDir,folderSync,imageGeneration,generationSessions,playImageWorker,assetGeneration,worldEngine,backgrounds,sprites,thumbnails,identity,jobs,close:async()=>{devTools.close();jobs.close();thumbnails.close();identity.close();identityQuality.close();worldEngine.stopScheduler();autoSnapshots.stop();backgrounds.stopWatcher();sprites.stopWatcher();await playImageWorker.settle();await imageGeneration.settle();await assetGeneration.settle();await Promise.all([closeServer(server),closeServer(mobileServer)]);db.close();}};
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

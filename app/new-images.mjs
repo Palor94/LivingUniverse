@@ -6,7 +6,7 @@
 //   20_SHARED_MEDIA/Új képek/Norbi + Péter/bármi.png            (folder gives the people)
 // Parts are separated by " - ". The people part lists existing character names joined by "+"
 // (accents and case do not matter). Optional parts: a place from the location tree and a
-// content level (hetkoznapi / meztelen / szex). Everything else is free text.
+// content level (hetkoznapi / felmeztelen / meztelen / szex). Everything else is free text.
 // One owner click links the people (+ place tag + content level) and moves the file by the
 // placement rule (one character → his folder, more → Scenes\A + B; Palor not counted), with
 // the journaled mover. Unreadable names stay in the folder and are reported. Nothing creates
@@ -16,10 +16,11 @@ import {randomUUID} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 import {organized,catalogueFolder} from './storage-layout.mjs';
 import {folderFor,createMediaMover,MAX_PER_RUN} from './media-placement.mjs';
+import {WORD_LEVEL} from './content-levels.mjs';
 
 export const INTAKE_FOLDER='Új képek';
 const KIND={'.png':'image','.jpg':'image','.jpeg':'image','.webp':'image','.mp4':'video','.mov':'video'};
-const CONTENT={hetkoznapi:'non_intimate',meztelen:'nudity',szex:'sexual_activity',szexualis:'sexual_activity'};
+const CONTENT=WORD_LEVEL;
 export const fold=s=>String(s).normalize('NFD').replace(/\p{M}/gu,'').toLocaleLowerCase('hu').replace(/\s+/g,' ').trim();
 
 // Pure reading of one file. tokens: sub-folder names then the file name's " - " parts.

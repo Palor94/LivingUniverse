@@ -1,4 +1,5 @@
 import {cloudAvailabilityMany} from './duplicates.mjs';
+import {figureSimilarityFilter} from './media-purpose.mjs';
 // Local media signals: free, offline facts about the creator's own media that help the media
 // director choose well. Nothing here is uploaded or paid for.
 //   - dHash (64-bit "difference hash") per picture → near-duplicate groups ("same moment").
@@ -148,6 +149,7 @@ export function installMediaSignals({db,one,all,run,transaction,fail,root,dataDi
   function regroup(){
     const rows=all(`SELECT s.media_id,s.dhash,(SELECT group_concat(character_id) FROM (SELECT character_id FROM depictions d WHERE d.media_id=s.media_id ORDER BY character_id)) cast_ids
       FROM media_signals s JOIN active_media m ON m.id=s.media_id WHERE s.dhash IS NOT NULL AND m.kind='image'
+        AND ${figureSimilarityFilter(one)}
         AND NOT EXISTS(SELECT 1 FROM media_signal_distinct x WHERE x.media_id=s.media_id)`);
     const parent=rows.map((_,i)=>i),find=i=>{while(parent[i]!==i)i=parent[i]=parent[parent[i]];return i;};
     // Only pictures of the same people can be duplicates: compare within each cast bucket,
@@ -157,7 +159,7 @@ export function installMediaSignals({db,one,all,run,transaction,fail,root,dataDi
     rows.forEach((r,i)=>{hi[i]=parseInt(r.dhash.slice(0,8),16);lo[i]=parseInt(r.dhash.slice(8),16);const k=r.cast_ids||'';if(!buckets.has(k))buckets.set(k,[]);buckets.get(k).push(i);});
     for(const b of buckets.values())for(let x=0;x<b.length;x++)for(let y=x+1;y<b.length;y++){const i=b[x],j=b[y];if(bits(hi[i]^hi[j])+bits(lo[i]^lo[j])<=DUPLICATE_BITS)parent[find(j)]=find(i);}
     const size=new Map();rows.forEach((_,i)=>size.set(find(i),(size.get(find(i))||0)+1));
-    transaction(()=>{rows.forEach((r,i)=>{const g=find(i);run('UPDATE media_signals SET group_id=? WHERE media_id=?',size.get(g)>1?rows[g].media_id:null,r.media_id);});});
+    transaction(()=>{run('UPDATE media_signals SET group_id=NULL WHERE group_id IS NOT NULL');rows.forEach((r,i)=>{const g=find(i);run('UPDATE media_signals SET group_id=? WHERE media_id=?',size.get(g)>1?rows[g].media_id:null,r.media_id);});});
     groupedAt=Date.now();
     return {groups:[...size.values()].filter(n=>n>1).length};
   }

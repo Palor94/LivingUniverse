@@ -24,6 +24,10 @@ test('file names: people, place and content are read; typos are reported, not gu
   const long=read('Palor + Dávid - ikea mellizmos srác - Kávézó - 1.png');
   assert.deepEqual(long.people.map(p=>p.id),['p','d'],'a full name containing " - "');assert.equal(long.location_id,'k');
   assert.deepEqual(read('Dávid - meztelen.png').people.map(p=>p.id),['d'],'short form of a long name');
+  assert.equal(read('Attila - felmeztelen - 1.png').content,'shirtless','félmeztelen is its own level');
+  assert.equal(read('Attila - Félmeztelen - 1.png').content,'shirtless','accents and case do not matter');
+  assert.equal(read('Attila - meztelen - 1.png').content,'nudity');
+  assert.equal(read('kep.png',['Attila','felmeztelen']).content,'shirtless','a félmeztelen folder marks its pictures');
   assert.equal(read('Gábor - 1.png').problem.code,'ambiguous','a short form two characters share is reported, not guessed');
   assert.deepEqual(read('Gábor - rendőr - 1.png').people.map(p=>p.id),['g1']);
 });
@@ -83,9 +87,9 @@ test('ChatGPT "picture" target: saved into Új képek under a readable name, the
   const one=(await mcp('place_asset',{image,target:'picture',character_ids:[norbi.id,palor.id]})).data;
   assert.equal(one.file,'Palor + Norbi - hetkoznapi - '+new Date().toISOString().slice(0,10)+'-1.png','Palor first, everyday by default');
   assert.equal((await mcp('place_asset',{image,target:'picture',character_ids:[norbi.id,peter.id]})).status,200);
-  const shirtless=(await mcp('place_asset',{image,target:'picture',character_ids:[norbi.id,peter.id],label:'felmeztelen'})).data;
-  assert.match(shirtless.file,/^Norbi \+ Péter - felmeztelen - hetkoznapi - /,'label goes into the name');
-  for(const label of ['Norbi','szex','bad/label'])assert.equal((await mcp('place_asset',{image,target:'picture',character_ids:[norbi.id],label})).status,400,'label "'+label+'" refused');
+  const labelled=(await mcp('place_asset',{image,target:'picture',character_ids:[norbi.id,peter.id],label:'strand'})).data;
+  assert.match(labelled.file,/^Norbi \+ Péter - strand - hetkoznapi - /,'label goes into the name');
+  for(const label of ['Norbi','szex','felmeztelen','bad/label'])assert.equal((await mcp('place_asset',{image,target:'picture',character_ids:[norbi.id],label})).status,400,'label "'+label+'" refused');
   assert.equal((await mcp('place_asset',{image,target:'picture',character_ids:[norbi.id],content:'nudity'})).status,403,'no collection media: everyday only');
   assert.equal((await mcp('place_asset',{image,target:'picture',character_ids:[]})).status,400);
   const plan=(await call('/api/new-images')).data;assert.equal(plan.ready,3);

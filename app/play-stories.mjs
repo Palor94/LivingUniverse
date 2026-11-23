@@ -107,7 +107,7 @@ export function validateStory(s){
   return errors;
 }
 
-export function installPlayStories({db,one,all,run,transaction,fail,settings,characterPolicy=null,random=Math.random,now=()=>new Date(),root=null}){
+export function installPlayStories({db,one,all,run,transaction,fail,settings,characterPolicy=null,random=Math.random,now=()=>new Date(),root=null,narrative=null}){
   db.exec(`CREATE TABLE IF NOT EXISTS play_stories(id TEXT PRIMARY KEY,setting TEXT NOT NULL,title TEXT NOT NULL,content TEXT NOT NULL,story_json TEXT NOT NULL,source TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS play_story_runs(id TEXT PRIMARY KEY,story_id TEXT NOT NULL,setting TEXT NOT NULL,world_day TEXT,started_at TEXT NOT NULL,finished_at TEXT,ending_id TEXT,ending_kind TEXT,path_json TEXT);
     CREATE INDEX IF NOT EXISTS play_story_runs_story ON play_story_runs(story_id,started_at);`);
@@ -168,7 +168,10 @@ export function installPlayStories({db,one,all,run,transaction,fail,settings,cha
     }
     return out;
   }
-  function startRun(story,worldDay){const id=randomUUID();run('INSERT INTO play_story_runs(id,story_id,setting,world_day,started_at) VALUES(?,?,?,?,?)',id,story.id,story.setting,worldDay||null,iso());return {run_id:id,story:{...story,pictures:picturesFor(story)}};}
+  function startRun(story,worldDay){const id=randomUUID();run('INSERT INTO play_story_runs(id,story_id,setting,world_day,started_at) VALUES(?,?,?,?,?)',id,story.id,story.setting,worldDay||null,iso());const archived={...story,pictures:picturesFor(story)};
+    // Owner, 2026-11-22: random pop-up stories are the written A–D stories again; the free-text
+    // narrative director runs them only when story_mode is set to 'narrative' (pilots, tests).
+    return narrative&&settings().story_mode==='narrative'?narrative.start({id,story:archived,worldDay}):{run_id:id,story:archived};}
   function servePicture(storyId,file,res){
     const own=String(file).match(PICTURE_NAME),flat=String(file).match(FLAT_NAME),sub=pictureDir(storyId);
     if(!sub||!res||!(own||flat&&flat[1]===storyId))throw fail('Picture not found.',404);
@@ -244,12 +247,35 @@ export function installPlayStories({db,one,all,run,transaction,fail,settings,cha
     const chosen=pool[Math.min(pool.length-1,Math.floor(random()*pool.length))];
     return startRun(chosen.story,worldDay);
   }
+  // Free answer (owner, 2026-11-22): the written A–D story stays the default; at any block the
+  // player may type his own answer instead, and from there the free-text scene continues the story.
+  async function freeAnswer(runId,body){
+    if(!narrative)throw fail('A szabad válasz most nem elérhető.',409);
+    const r=one('SELECT * FROM play_story_runs WHERE id=?',runId);if(!r)throw fail('Story run not found',404);
+    if(r.finished_at)throw fail('Ez a sztori már véget ért.',409);
+    if(one('SELECT 1 FROM narrative_runs WHERE id=?',runId))throw fail('Ez a sztori már szabad jelenetként folytatódik.',409);
+    const story=storyOf(r.story_id);if(!story)throw fail('Story not found',404);
+    const text=String(body.text||'').trim();if(!text||text.length>2000)throw fail('Írd be a saját válaszodat (legfeljebb 2000 karakter).',400);
+    const path=(Array.isArray(body.path)?body.path:[]).filter(id=>typeof id==='string'&&story.nodes[id]).slice(0,60);
+    if(!path.length||path[0]!==story.start)throw fail('A sztori eddigi útja hiányzik.',400);
+    const soFar=[story.title,story.summary||'',...path.map((id,i)=>{const n=story.nodes[id],next=path[i+1],c=next&&n.choices?.find(x=>x.to===next);return n.text+(c?'\nPalor választása: '+c.text:'');})].filter(Boolean).join('\n\n');
+    // First try to stay on the written path: the free answer may match a choice or a later block.
+    const match=await narrative.matchWritten({story,path,text});
+    if(match)return {run_id:runId,rejoin:match.node,bridge:match.bridge};
+    const started=narrative.start({id:runId,story:{...story,pictures:picturesFor(story)},worldDay:r.world_day,soFar,path});
+    const scene=await narrative.turn(runId,{text,request_key:typeof body.request_key==='string'?body.request_key:randomUUID(),expected_version:started.story.narrative.version});
+    return {run_id:runId,story:{...started.story,opening:story.nodes[path.at(-1)].text,narrative:scene}};
+  }
   function finish(runId,body){
     const r=one('SELECT * FROM play_story_runs WHERE id=?',runId);if(!r)throw fail('Story run not found',404);
     if(r.finished_at)return {run_id:runId,finished:true};
     const story=storyOf(r.story_id);if(!story)throw fail('Story not found',404);
     const path=Array.isArray(body.path)?body.path.filter(id=>typeof id==='string'&&story.nodes[id]).slice(0,60):[];
     const ending=typeof body.ending==='string'&&story.nodes[body.ending]?.ending?body.ending:null;
+    if(narrative&&one('SELECT 1 FROM narrative_runs WHERE id=? AND rewound_at IS NULL',runId)){
+      // A free scene that led back to the written story was closed first; that run finishes normally.
+      const scene=narrative.view(runId);if(scene.status!=='finished'){if(scene.turns.length)throw fail('A szabadjelenetet az aktuális verziójával zárd le.',409);narrative.finish(runId,scene.version);}
+    }
     run('UPDATE play_story_runs SET finished_at=?,ending_id=?,ending_kind=?,path_json=? WHERE id=?',iso(),ending,ending?story.nodes[ending].ending:'skipped',JSON.stringify(path),runId);
     return {run_id:runId,finished:true,ending:ending?story.nodes[ending].ending:'skipped'};
   }
@@ -258,13 +284,15 @@ export function installPlayStories({db,one,all,run,transaction,fail,settings,cha
     const pic=p.match(/^\/api\/play\/story-pictures\/([a-z0-9-]{2,60})\/([^/]{1,240})$/);
     if(pic&&m==='GET'){let file;try{file=decodeURIComponent(pic[2]);}catch{throw fail('Picture not found.',404);}servePicture(pic[1],file,res);return true;}
     // Finished stories for the journal (2026-11-13): title, day and how it ended.
-    if(p==='/api/play/story-runs'&&m==='GET'){json({runs:all("SELECT r.id,r.world_day,r.finished_at,r.ending_kind,s.title,s.setting FROM play_story_runs r JOIN play_stories s ON s.id=r.story_id WHERE r.finished_at IS NOT NULL ORDER BY r.finished_at DESC LIMIT 100")});return true;}
+    if(p==='/api/play/story-runs'&&m==='GET'){json({runs:all("SELECT r.id,r.world_day,r.finished_at,r.ending_kind,s.title,s.setting FROM play_story_runs r JOIN play_stories s ON s.id=r.story_id WHERE r.finished_at IS NOT NULL "+(narrative?"AND NOT EXISTS(SELECT 1 FROM narrative_runs n WHERE n.id=r.id AND (n.rewound_at IS NOT NULL OR n.status<>'finished')) ":'')+"ORDER BY r.finished_at DESC LIMIT 100")});return true;}
     if(p==='/api/play/stories/import'&&m==='POST'){json(importStories(body||{}));return true;}
     let x=p.match(/^\/api\/play\/stories\/([a-z0-9-]{2,60})$/);
     if(x&&m==='GET'){const s=storyOf(x[1]);if(!s)throw fail('Story not found',404);json(s);return true;}
     if(x&&m==='POST'){if(typeof body?.enabled!=='boolean')throw fail('Choose on or off.');if(!one('SELECT 1 FROM play_stories WHERE id=?',x[1]))throw fail('Story not found',404);run('UPDATE play_stories SET enabled=?,updated_at=? WHERE id=?',body.enabled?1:0,iso(),x[1]);json(list());return true;}
     x=p.match(/^\/api\/play\/stories\/([a-z0-9-]{2,60})\/play$/);
     if(x&&m==='POST'){const s=storyOf(x[1]);if(!s)throw fail('Story not found',404);json(startRun(s,null));return true;}
+    x=p.match(/^\/api\/play\/story-runs\/([0-9a-f-]{36})\/free$/i);
+    if(x&&m==='POST'){json(await freeAnswer(x[1],body||{}));return true;}
     x=p.match(/^\/api\/play\/story-runs\/([0-9a-f-]{36})\/finish$/i);
     if(x&&m==='POST'){json(finish(x[1],body||{}));return true;}
     return false;

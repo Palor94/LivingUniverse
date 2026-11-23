@@ -1,6 +1,7 @@
 // Prompt texts and answer validation for the world engine. Pure functions: no database,
 // no network. Keeping them here makes the engine readable and the rules testable.
 import {LEVELS,clip,pairKey} from './world-common.mjs';
+import {WORLD_EXPERIENCE_INSTRUCTION} from './social-experiences.mjs';
 
 // Anything sounding like a death is never applied automatically: it becomes a proposal.
 const DEATH=/(meghal|halál|halott|megöl|gyilkol|gyilkos|öngyilk|elhuny)/iu;
@@ -11,7 +12,7 @@ export const LEVELS_SYSTEM='Kapcsolati jegyzetekből becsülsz kezdő közelség
 // Agent turn: one character decides what he wants in this day part, from his own view.
 // Fixed rules first and the changing day last (2026-11-12), so the provider's prompt cache can
 // reuse the unchanged start of the system message between rounds.
-export function agentPrompt({name,when,profile,places,relations,known,memories,doneToday=[],palorTalk='',threads={open:[],lapsed:[]},messaging=true,canInvite=false}){
+export function agentPrompt({name,when,profile,places,relations,known,memories,relationshipChanges='',doneToday=[],palorTalk='',threads={open:[],lapsed:[]},messaging=true,canInvite=false}){
   const palorRule=messaging?'Palorral most nem találkozhatsz ebben a körben, de írhatsz neki üzenetet, ha a kapcsolatotok indokolja (ritkán).'+(canInvite?' Ha szeretnéd látni, meg is hívhatod egy saját helyedre egy későbbi napszakra ("invite_palor"; ritkán, csak ha tényleg kedved van hozzá).':''):'Ebben a körben Palornak nem írsz.';
   const shape=`{"intention":"1-2 mondat","location_id":"azonosító vagy null","wants_to_meet":["azonosító"],"message_to_palor":"szöveg vagy null"${canInvite?',"invite_palor":{"location_id":"a helyeid egyike","slot":"reggel|delutan|este|ejszaka","text":"a meghívás szövege"} vagy null':''}}`;
   // The same rules start every character's call; his name and the variable parts come last
@@ -24,6 +25,7 @@ export function agentPrompt({name,when,profile,places,relations,known,memories,d
     'KAPCSOLATAID:\n'+(relations.map(r=>`${r.target_id} = ${r.name} [${LEVELS[r.level??0]}]: ${clip(r.description,300)}`).join('\n')||'nincs'),
     'ISMERT SZEREPLŐK:\n'+[...known].map(([id,n])=>`${id} = ${n}`).join('\n'),
     'LEGUTÓBBI EMLÉKEID:\n'+(memories.map(m=>'- '+clip(m,300)).join('\n')||'nincs'),
+    ...(relationshipChanges?[relationshipChanges]:[]),
     ...(palorTalk?['LEGUTÓBBI BESZÉLGETÉSED PALORRAL: '+clip(palorTalk,300)]:[]),
     ...(threadLines.length?['TERVEK ÉS ÍGÉRETEK PALORRAL:\n'+threadLines.join('\n')]:[]),
     when,
@@ -32,10 +34,12 @@ export function agentPrompt({name,when,profile,places,relations,known,memories,d
 }
 
 // Game-master turn: resolves the intentions into what actually happens.
-export function gmPrompt({when,slotLabel,pacing,today,knownList,intentions,cast,levels,extras,places,recent}){
+export function gmPrompt({when,slotLabel,pacing,today,knownList,intentions,cast,levels,extras,places,recent,relationshipChanges=''}){
   // The system message is the same in every round (prompt cache); day part and pacing go last.
   const system=`Te vagy a játékmester egy élő világban. A szereplők szándékaiból döntöd el, mi történik a megadott napszakban. Ne ismételd a ma már megtörtént vagy korábbi eseményeket; legyen változatos (munka, találkozás, apró konfliktus, váratlan apróság, érzelmi pillanat), és illeszkedjen a napszakhoz. Ha két olyan szereplő találkozik, aki még nem ismeri egymást, az esemény az első találkozásuk legyen, és vedd fel a párt a "new_acquaintances" listába; enélkül ismeretlenek nem szerepelhetnek együtt. Az élet gyorsabban és érdekesebben halad, mint a valóságban (drámai sűrítés), de hihetően, a szereplők saját céljaiból és konfliktusaiból. Szabályok: senki nem hal meg; ne találj ki új megnevezett szereplőt, csak a listában szereplő azonosítókat használd; Palor otthon van és nem vesz részt, róla és a kapcsolatairól ne állíts új tényt (titok, viszony, múltbeli esemény). Ne találj ki új tényt a meglévő kapcsolatokról sem: csak a megadott célokból, szándékokból és a korábbi eseményekből dolgozz. Két szereplő csak akkor ismeri egymást, ha a szintek között szerepelnek, vagy ma ismerkednek meg. Minden szereplőnek legyen legalább egy (akár hétköznapi) eseménye; komoly esemény legfeljebb egy legyen naponta. Komoly esemény (szakítás, bűncselekmény, súlyos konfliktus vagy sérülés, munkahely elvesztése, titok kiderülése, költözés) kind="serious". Ez egy felnőtt, szexuálisan nyílt világ: a flört, a titkos vágyak, a testi kapcsolatok és a szex a hétköznapok része lehet, ha a szereplők profilja, vágyai és kapcsolata indokolja; írd nyíltan, és az ilyen eseménynél legyen "intimate":true. Az ütemet a felhasználói üzenet végén kapod. Csak JSON, magyarul: {"events":[{"kind":"everyday|meeting|serious","title":"rövid cím","summary":"2-4 mondat","intimate":false,"character_ids":["azonosító"],"location_id":"azonosító vagy null","memories":[{"character_id":"azonosító","text":"egy mondat a szereplő szemszögéből"}],"level_changes":[{"source_id":"azonosító","target_id":"azonosító","delta":1,"reason":"miért"}],"new_acquaintances":[["azonosító","azonosító"]]}]}`;
   const user=[when,
+    WORLD_EXPERIENCE_INSTRUCTION,
+    ...(relationshipChanges?['IRÁNYÍTOTT KAPCSOLATVÁLTOZÁSOK (nem kölcsönösek):\n'+relationshipChanges]:[]),
     'MA EDDIG TÖRTÉNT:\n'+(today.map(e=>`- ${e.title}: ${clip(e.summary,200)}`).join('\n')||'semmi'),
     'ISMERIK EGYMÁST:\n'+(knownList.join('\n')||'senki'),
     'SZEREPLŐK ÉS SZÁNDÉKAIK:\n'+intentions.map(i=>`${i.id} = ${i.name}: ${i.intention||'nincs külön terv'}${i.place?' | hely: '+i.place.id+' ('+i.place.name+')':''}${i.wants_to_meet.length?' | találkozna: '+i.wants_to_meet.join(', '):''}`).join('\n'),
@@ -98,6 +102,7 @@ export function normalizeEvents(plan,{allowed,knownPairs,locationExists,slotId,s
     const payload={slot:slotId,acquaintances:[...declared].map(k=>k.split('|')),character_ids:ids,
       location_id:typeof raw.location_id==='string'&&locationExists(raw.location_id)?raw.location_id:null,
       memories:(Array.isArray(raw.memories)?raw.memories:[]).filter(m=>ids.includes(m?.character_id)&&typeof m.text==='string'&&m.text.trim()).slice(0,6).map(m=>({character_id:m.character_id,text:clip(m.text,1000)})),
+      ...(Array.isArray(raw.interactions)?{interactions:raw.interactions.filter(x=>x&&ids.includes(x.actor_id)&&ids.includes(x.recipient_id)&&x.actor_id!==x.recipient_id&&typeof x.quote==='string'&&x.quote.length<=600).slice(0,6).map(x=>({actor_id:x.actor_id,recipient_id:x.recipient_id,kind:x.kind,quote:x.quote}))}:{}),
       // A level moves only for someone who took part, towards another participant or someone he
       // already knows (2026-11-12): before, any two people could get a level from any event,
       // which also made strangers count as acquainted from then on.

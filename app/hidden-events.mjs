@@ -6,7 +6,7 @@
 import {readFileSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 
-export const LEAVES=['day_gte','day_lte','weekday_in','slot_in','level','thread','revealed','with'];
+export const LEAVES=['day_gte','day_lte','weekday_in','slot_in','level','thread','revealed','with','dimension','knowledge'];
 const dayNo=d=>Math.round(Date.parse(d+'T00:00:00Z')/864e5);
 
 // Validates the tree's shape; returns a Hungarian problem or null.
@@ -33,6 +33,13 @@ export function evaluate(node,state,issues=[]){
     if(Array.isArray(n.weekday_in))return n.weekday_in.includes(state.weekday);
     if(Array.isArray(n.slot_in))return n.slot_in.includes(state.slot);
     if(typeof n.with==='string')return state.partner===n.with;
+    if(typeof n.dimension==='string'){
+      const v=state.dimensionOf?.(n.character_id,n.dimension,n.target_id);
+      if(!Number.isFinite(v)){issues.push('ismeretlen kapcsolatdimenzió');return null;}
+      if(!Number.isFinite(n.gte)&&!Number.isFinite(n.lte))return null;
+      return !(Number.isFinite(n.gte)&&v<n.gte||Number.isFinite(n.lte)&&v>n.lte);
+    }
+    if(typeof n.knowledge==='string')return state.knows?.(n.character_id,n.knowledge)??null;
     if(typeof n.level==='string'){const l=state.levelOf(n.level);if(l===null||l===undefined){issues.push('ismeretlen szint: '+n.level);return null;}
       if(Number.isInteger(n.gte)&&l<n.gte)return false;if(Number.isInteger(n.lte)&&l>n.lte)return false;return true;}
     if(typeof n.thread==='string'){const s=state.threadStatus(n.thread);if(!s){issues.push('ismeretlen szál: '+n.thread);return null;}return Array.isArray(n.in)?n.in.includes(s):s===(n.status||'kept');}
@@ -44,11 +51,12 @@ export function evaluate(node,state,issues=[]){
   return visit(node);
 }
 
-export function installHiddenEvents({db,one,all,run,now=()=>new Date(),slots,levelOf,palorId}){
+export function installHiddenEvents({db,one,all,run,now=()=>new Date(),slots,levelOf,palorId,dimensionOf=null,knows=null}){
   db.exec(readFileSync(new URL('./migrations/037-hidden-events.up.sql',import.meta.url),'utf8'));
+  if(!all('PRAGMA table_info(hidden_events)').some(c=>c.name==='private'))db.exec('ALTER TABLE hidden_events ADD COLUMN private INTEGER NOT NULL DEFAULT 0');
   const iso=()=>now().toISOString();
   const parse=(s,d)=>{try{return JSON.parse(s);}catch{return d;}};
-  const shape=r=>r&&({id:r.id,title:r.title,brief:r.brief,condition:parse(r.condition_json,{}),character_ids:parse(r.character_ids_json,[]),priority:r.priority,status:r.status,actor:r.actor,created_at:r.created_at,updated_at:r.updated_at,
+  const shape=r=>r&&({id:r.id,title:r.title,brief:r.brief,private:!!r.private,condition:parse(r.condition_json,{}),character_ids:parse(r.character_ids_json,[]),priority:r.priority,status:r.status,actor:r.actor,created_at:r.created_at,updated_at:r.updated_at,
     revealed:one('SELECT world_day,slot,character_id FROM hidden_event_reveals WHERE event_id=? AND rewound_at IS NULL ORDER BY created_at LIMIT 1',r.id)||null});
   const list=()=>all('SELECT * FROM hidden_events ORDER BY created_at').map(shape);
   const slotIndex=id=>slots.findIndex(s=>s.id===id);
@@ -60,11 +68,12 @@ export function installHiddenEvents({db,one,all,run,now=()=>new Date(),slots,lev
     const ids=Array.isArray(body?.character_ids)?body.character_ids.map(String).slice(0,6):[];
     for(const id of ids){if(id===palorId?.())throw Object.assign(new Error('Palort a játékos viszi, neki nem adható rejtett esemény.'),{status:400});
       if(!one('SELECT 1 FROM characters WHERE id=?',id))throw Object.assign(new Error('Ismeretlen szereplő.'),{status:400});}
-    return {title,brief,condition:body.condition,ids,priority:Number.isInteger(body?.priority)?Math.max(-10,Math.min(10,body.priority)):0};
+    if(body.private!==undefined&&typeof body.private!=='boolean')throw Object.assign(new Error('A privát jelölés logikai érték legyen.'),{status:400});
+    return {title,brief,condition:body.condition,ids,private:body.private===true,priority:Number.isInteger(body?.priority)?Math.max(-10,Math.min(10,body.priority)):0};
   }
   function create(body,{actor='owner',status='draft'}={}){
     const x=check(body),id=randomUUID(),t=iso();
-    run('INSERT INTO hidden_events VALUES(?,?,?,?,?,?,?,?,?,?)',id,x.title,x.brief,JSON.stringify(x.condition),JSON.stringify(x.ids),x.priority,status,actor,t,t);
+    run('INSERT INTO hidden_events(id,title,brief,condition_json,character_ids_json,priority,status,actor,created_at,updated_at,private) VALUES(?,?,?,?,?,?,?,?,?,?,?)',id,x.title,x.brief,JSON.stringify(x.condition),JSON.stringify(x.ids),x.priority,status,actor,t,t,x.private?1:0);
     return shape(one('SELECT * FROM hidden_events WHERE id=?',id));
   }
   function setStatus(id,status){
@@ -75,18 +84,18 @@ export function installHiddenEvents({db,one,all,run,now=()=>new Date(),slots,lev
   // The event open for this character in this day part; opens one when none opened yet this part.
   function openFor(cid,{day,weekday,slot},{open=true}={}){
     const current=one('SELECT r.*,e.title,e.brief,e.character_ids_json FROM hidden_event_reveals r JOIN hidden_events e ON e.id=r.event_id WHERE r.world_day=? AND r.slot=? AND r.rewound_at IS NULL ORDER BY r.created_at LIMIT 1',day,slot);
-    if(current)return current.character_id===cid?{id:current.event_id,title:current.title,brief:current.brief}:null;
-    const state={day,weekday,slot,slotIndex:slotIndex(slot),slots,partner:cid,levelOf:id=>one('SELECT 1 FROM characters WHERE id=?',id)?(levelOf(id,palorId?.())??0):null,
+    if(current)return current.character_id===cid?{id:current.event_id,title:current.title,brief:current.brief,private:!!one('SELECT private FROM hidden_events WHERE id=?',current.event_id)?.private}:null;
+    const state={day,weekday,slot,slotIndex:slotIndex(slot),slots,partner:cid,dimensionOf,knows,levelOf:id=>one('SELECT 1 FROM characters WHERE id=?',id)?(levelOf(id,palorId?.())??0):null,
       threadStatus:id=>one('SELECT status FROM world_threads WHERE id=? AND rewound_at IS NULL',id)?.status||null,revealed:revealedRec};
     const candidates=all("SELECT * FROM hidden_events WHERE status='approved' ORDER BY priority DESC,id")
       .filter(e=>!revealedRec(e.id)).filter(e=>{const ids=parse(e.character_ids_json,[]);return !ids.length||ids.includes(cid);})
       .filter(e=>evaluate(parse(e.condition_json,{}),state)===true);
-    const e=candidates[0];if(!e||!open)return e?{id:e.id,title:e.title,brief:e.brief}:null;
+    const e=candidates[0];if(!e||!open)return e?{id:e.id,title:e.title,brief:e.brief,private:!!e.private}:null;
     run('INSERT INTO hidden_event_reveals VALUES(?,?,?,?,?,?,NULL)',randomUUID(),e.id,day,slot,cid,iso());
-    return {id:e.id,title:e.title,brief:e.brief};
+    return {id:e.id,title:e.title,brief:e.brief,private:!!e.private};
   }
   // Already open for him in this day part (the narrator uses this; it never opens one).
-  function currentFor(cid,{day,slot}){const r=one('SELECT e.id,e.title,e.brief FROM hidden_event_reveals r JOIN hidden_events e ON e.id=r.event_id WHERE r.world_day=? AND r.slot=? AND r.character_id=? AND r.rewound_at IS NULL LIMIT 1',day,slot,cid);return r||null;}
+  function currentFor(cid,{day,slot}){const r=one('SELECT e.id,e.title,e.brief,e.private FROM hidden_event_reveals r JOIN hidden_events e ON e.id=r.event_id WHERE r.world_day=? AND r.slot=? AND r.character_id=? AND r.rewound_at IS NULL LIMIT 1',day,slot,cid);return r||null;}
   function promptLine(ev){return ev?'MOST TÖRTÉNIK VELED (rejtett fordulat, csak vázlat: a saját szavaiddal, a természeted szerint hozd elő ebben a beszélgetésben, fokozatosan, ne egyszerre mindent; ne mondd, hogy ez egy esemény):\n'+ev.brief:'';}
   function rewindAfter(time,at){const ids=all('SELECT id FROM hidden_event_reveals WHERE rewound_at IS NULL AND created_at>?',time).map(r=>r.id);
     for(const id of ids)run('UPDATE hidden_event_reveals SET rewound_at=? WHERE id=?',at,id);return ids;}

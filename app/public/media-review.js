@@ -7,7 +7,7 @@ import {confirmBox} from './interactions.js';
 //     others to the recoverable Removed items; "Not duplicates" splits the group for good.
 import {t} from './i18n.js';
 
-const LEVELS=[['non_intimate','☀','1'],['nudity','🔥','2'],['sexual_activity','🔞','3']];
+const LEVELS=[['non_intimate','☀','1'],['shirtless','🩳','f'],['nudity','🔥','2'],['sexual_activity','🔞','3']];
 
 export function installMediaReviewUI({$,$$,esc,api,toast}){
   let tab='content',kind='all',queue=[],idx=0,total=0,history=[],busy=false,keyHandler=null;
@@ -33,7 +33,7 @@ export function installMediaReviewUI({$,$$,esc,api,toast}){
       if($('#mr-restart'))$('#mr-restart').onclick=()=>{idx=0;paintContent();};bindKind();return;}
     box.innerHTML=filter+`<div class="mr-stage">${item.kind==='video'?`<video src="${src(item.media_id)}" muted loop autoplay playsinline></video>`:`<img src="${src(item.media_id)}" alt="${esc(item.file)}">`}</div>
       <p class="mr-meta"><b>${esc(item.people.join(', ')||t('mr.nobody'))}</b> · ${esc(item.file)}${item.duration?` · ${Math.round(item.duration)} mp`:''}</p>
-      <div class="mr-keys">${LEVELS.map(([l,icon,key])=>`<button class="mr-level" data-mr-level="${l}"><span>${icon}</span>${t('ml.level.'+l)}<kbd>${key}</kbd></button>`).join('')}
+      <div class="mr-keys">${LEVELS.map(([l,icon,key])=>`<button class="mr-level" data-mr-level="${l}"><span>${icon}</span>${t('ml.level.'+l)}<kbd>${key.toUpperCase()}</kbd></button>`).join('')}
         <button class="subtle" id="mr-skip">${t('mr.skip')} <kbd>S</kbd></button><button class="subtle" id="mr-undo"${history.length?'':' disabled'}>${t('mr.undo')} <kbd>⌫</kbd></button></div>`;
     const v=box.querySelector('video');if(v){v.playbackRate=2;v.play?.().catch(()=>{});}
     // Preload the next picture so the queue feels instant.
@@ -57,7 +57,7 @@ export function installMediaReviewUI({$,$$,esc,api,toast}){
     keyHandler=e=>{
       if(!root.isConnected||!$('#mr-body')){detachKeys();return;}
       if(e.target.closest?.('input,textarea,select')||e.ctrlKey||e.metaKey||e.altKey)return;
-      const l=LEVELS.find(x=>x[2]===e.key);
+      const l=LEVELS.find(x=>x[2]===e.key.toLowerCase());
       if(l){e.preventDefault();label(l[0]);}else if(e.key==='s'||e.key==='S'||e.key==='ArrowRight'){e.preventDefault();advance();}else if(e.key==='Backspace'){e.preventDefault();undo();}
     };
     document.addEventListener('keydown',keyHandler);

@@ -73,10 +73,10 @@ export async function createLocalIdentity(dir=localDir()){
     return normalize(out[arc.outputNames[0]].data);
   }
   // DINOv2 CLS embedding of a region (normalised 0..1) or of the whole picture.
-  async function bodyEmbedding(img,region=null){
+  async function bodyEmbedding(img,region=null,{preserveAspect=false}={}){
     let left=0,top=0,width=img.width,height=img.height;
     if(region){left=Math.max(0,Math.floor(region.x*img.width));top=Math.max(0,Math.floor(region.y*img.height));width=Math.max(8,Math.min(img.width-left,Math.round(region.width*img.width)));height=Math.max(8,Math.min(img.height-top,Math.round(region.height*img.height)));}
-    const px=await sharp(img.data,{raw:{width:img.width,height:img.height,channels:3}}).extract({left,top,width,height}).resize(224,224,{fit:'fill'}).raw().toBuffer();
+    const px=await sharp(img.data,{raw:{width:img.width,height:img.height,channels:3}}).extract({left,top,width,height}).resize(224,224,preserveAspect?{fit:'contain',background:{r:124,g:116,b:104}}:{fit:'fill'}).raw().toBuffer();
     const mean=[0.485,0.456,0.406],std=[0.229,0.224,0.225],input=new Float32Array(3*224*224);
     for(let i=0;i<224*224;i++)for(let c=0;c<3;c++)input[c*224*224+i]=(px[i*3+c]/255-mean[c])/std[c];
     const out=await dino.run({[dino.inputNames[0]]:new ort.Tensor('float32',input,[1,3,224,224])}),h=out[dino.outputNames[0]];

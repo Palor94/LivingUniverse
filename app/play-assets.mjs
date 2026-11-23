@@ -21,9 +21,10 @@ import {GENERATION_PLAYBOOK} from './generation-playbook.mjs';
 import {INTAKE_FOLDER,readName} from './new-images.mjs';
 import {organized} from './storage-layout.mjs';
 import {BACKDROP_OK_SQL} from './play/backdrops.mjs';
+import {LEVELS,CONTENT_WORD} from './content-levels.mjs';
 
 const MAX_BYTES=20*1024*1024,TIMES=['nappal','este','ejjel'],TARGETS=['figure','background','scene'];
-const CONTENT=['non_intimate','nudity','sexual_activity'];
+const CONTENT=LEVELS,GATED=['nudity','sexual_activity'];
 const safeName=s=>String(s).replace(/[\\/:*?"<>|\x00-\x1f]/g,'-').replace(/[. ]+$/,'').trim().slice(0,80);
 const uuid=/^[0-9a-f-]{36}$/i;
 
@@ -204,15 +205,17 @@ export function installPlayAssets({db,root,one,all,run,transaction,fail,worldEng
     if(args.character_id!==undefined)throw fail('Use character_ids for target picture.');
     const people=ids.map(id=>one('SELECT id,name FROM characters WHERE id=?',id));if(people.some(p=>!p))throw fail('Unknown character.',404);
     if(people.some(p=>/[\\/:*?"<>|+&\x00-\x1f]/.test(p.name)))throw fail('A character name cannot be used in a file name. Save this picture by hand.');
-    const content=args.content??'non_intimate';if(!CONTENT.includes(content))throw fail('content is non_intimate, nudity or sexual_activity.');
-    if(content!=='non_intimate'&&people.some(p=>!origin.intimateAllowed(p.id)))throw fail('Only everyday pictures (content "non_intimate") can be placed for these characters: no assigned media is covered by the collection origin declaration.',403);
+    const content=args.content??'non_intimate';if(!CONTENT.includes(content))throw fail('content is non_intimate, shirtless, nudity or sexual_activity.');
+    // Owner, 2026-11-22: a shirtless picture is placed like an everyday one; only nude and explicit
+    // pictures need assigned in-scope collection media.
+    if(GATED.includes(content)&&people.some(p=>!origin.intimateAllowed(p.id)))throw fail('Only everyday or shirtless pictures (content "non_intimate" or "shirtless") can be placed for these characters: no assigned media is covered by the collection origin declaration.',403);
     const loc=args.location_id!==undefined?one('SELECT name FROM locations WHERE id=?',String(args.location_id)):null;if(args.location_id!==undefined&&!loc)throw fail('location_id is required.',404);
     if(!organized(root))throw fail('The Új képek folder needs the organized storage layout.',409);
     const got=args.url!==undefined?await bytesFromUrl(args.url):await bytesOf(args.media_id);
     const pid=w.palor()?.id,ordered=[...people.filter(p=>p.id===pid),...people.filter(p=>p.id!==pid)];
-    const word={non_intimate:'hetkoznapi',nudity:'meztelen',sexual_activity:'szex'}[content];
+    const word=CONTENT_WORD[content];
     const place=loc?String(loc.name).replace(/[\\/:*?"<>|\x00-\x1f]/g,'-').trim():'';
-    // label: a short free word for the owner ("felmeztelen", "reggel"); the intake ignores it.
+    // label: a short free word for the owner ("strand", "reggel"); the intake ignores it.
     if(args.label!==undefined&&(typeof args.label!=='string'||!/^[\p{L}\p{N} ]{1,40}$/u.test(args.label.trim())))throw fail('label is up to 40 letters, digits or spaces.');
     const label=args.label?.trim().replace(/\s+/g,' ')||'';
     // It must not read as a person or a content level, or the intake would act on it.
@@ -246,9 +249,9 @@ export function installPlayAssets({db,root,one,all,run,transaction,fail,worldEng
     }
     const c=one('SELECT id,name FROM characters WHERE id=?',args.character_id||'');if(!c)throw fail('character_id is required.',404);
     if(args.target==='scene'){
-      const content=args.content??null;if(content!==null&&!CONTENT.includes(content))throw fail('content is non_intimate, nudity or sexual_activity.');
+      const content=args.content??null;if(content!==null&&!CONTENT.includes(content))throw fail('content is non_intimate, shirtless, nudity or sexual_activity.');
       // Without assigned in-scope fictional collection media: everyday pictures only.
-      if(!origin.intimateAllowed(c.id)&&content!=='non_intimate')throw fail('Only everyday pictures (content "non_intimate") can be placed for '+c.name+': no assigned media is covered by the collection origin declaration.',403);
+      if(!origin.intimateAllowed(c.id)&&GATED.includes(content))throw fail('Only everyday or shirtless pictures (content "non_intimate" or "shirtless") can be placed for '+c.name+': no assigned media is covered by the collection origin declaration.',403);
       const up=await scenes.upload({character_id:c.id,location_id:args.location_id||null,data_url:`data:image/${type.extension==='png'?'png':'jpeg'};base64,`+bytes.toString('base64'),...(content?{content}:{})});
       if(args.media_id&&up.media_id!==args.media_id)noteSource(args.media_id,'Játék: közös jelenetként elhelyezve ('+c.name+').','scene');
       return {target:'scene',placed_media_id:up.media_id,duplicate:up.duplicate,file:up.file||null,canon_changed:false};

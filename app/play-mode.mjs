@@ -22,6 +22,8 @@ import {voiceReminder,groupVoiceReminder} from './voice-reminder.mjs';
 import {checkInvariants} from './invariants.mjs';
 import {innerInstruction} from './inner-state.mjs';
 import {appraisalLines,appraiseEvent} from './appraisal.mjs';
+import {EXPERIENCE_INSTRUCTION,DIMENSIONS} from './social-experiences.mjs';
+import {installNarrativeDirector} from './narrative-director.mjs';
 import {agendaFor} from './agenda.mjs';
 import {stanceLines} from './stance.mjs';
 // Fact rules for save-point summaries (E6, 2026-11-21), after Covel plugins/world-ir (MIT): only
@@ -89,7 +91,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   const PLAY_SETTINGS='play:settings';
   // The game is adult from the start (owner decision 2026-11-10). Owner 2026-11-22: the on/off switch is
   // removed (it only censored); what may happen is still decided by the relationship stages below.
-  const playSettings=()=>({adult:true,text_speed:'normal',auto_scene:true,story_rate:'normal',quick_send:false,travel_always_ask:false,guest_image_provider:'openai',talk_view:'vn',...(()=>{try{return JSON.parse(one('SELECT value FROM application_settings WHERE key=?',PLAY_SETTINGS)?.value||'{}');}catch{return {};}})(),adult:true});
+  const playSettings=()=>({adult:true,story_mode:'graph',text_speed:'normal',auto_scene:true,story_rate:'normal',quick_send:false,travel_always_ask:false,guest_image_provider:'openai',talk_view:'vn',...(()=>{try{return JSON.parse(one('SELECT value FROM application_settings WHERE key=?',PLAY_SETTINGS)?.value||'{}');}catch{return {};}})(),adult:true});
   function savePlaySettings(body){
     const s=playSettings();
     if(body.auto_scene!==undefined){if(typeof body.auto_scene!=='boolean')throw fail('Choose on or off.');s.auto_scene=body.auto_scene;}
@@ -98,6 +100,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(body.guest_image_provider!==undefined){if(!['openai','sogni'].includes(body.guest_image_provider))throw fail('Choose a supported portrait provider.');s.guest_image_provider=body.guest_image_provider;}
     if(body.talk_view!==undefined){if(!['vn','chat'].includes(body.talk_view))throw fail('Válassz párbeszéd- vagy csevegő nézetet.');s.talk_view=body.talk_view;}
     if(body.text_speed!==undefined){if(!['slow','normal','fast','instant'].includes(body.text_speed))throw fail('Unknown text speed.');s.text_speed=body.text_speed;}
+    if(body.story_mode!==undefined){if(!['graph','narrative'].includes(body.story_mode))throw fail('Válassz: megírt sztori vagy szabad jelenet.');s.story_mode=body.story_mode;}
     if(body.story_rate!==undefined){if(!Object.hasOwn(STORY_RATES,body.story_rate))throw fail('Unknown story frequency.');s.story_rate=body.story_rate;}
     run('INSERT INTO application_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',PLAY_SETTINGS,JSON.stringify(s));return s;
   }
@@ -331,7 +334,10 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
         ...(!only||only==='map'?{map_orders:o.map_orders}:{}),...(!only||only==='background'?{background_orders:lim(o.background_orders)}:{}),...(!only||only==='doors'?{door_orders:lim(o.door_orders)}:{}),
         order_of_work:who==='grok'?'Backgrounds first (Káloz, Káloz határa, then the rest), then doors of pictures already in.':'Maps first (Káloz, Káloz határa, Székesfehérvár, Budapest, then the rest), then backgrounds, then doors.',how};}}});
   // Branching pop-up stories on the road and in the three home towns (play-stories.mjs).
-  const stories=installPlayStories({db,one,all,run,transaction,fail,settings:playSettings,characterPolicy,random,now,root});
+  const narrative=installNarrativeDirector({db,one,all,run,transaction,ask:(...args)=>w.ask(...args),policy:characterPolicy,now,
+    context:()=>{const nodes=treeCache?.nodes||[],here=currentNode(nodes),k=clock(),pos=nodes.length?positions():new Map();return {day:k.day,slot:SLOTS[k.slot_index].id,location_id:here?.location_id||null,place:here?.path||here?.name||'',cast:here?.location_id?w.meetable().filter(c=>c.id!==w.palor()?.id&&pos.get(c.id)===here.location_id).slice(0,3).map(c=>({id:c.id,name:c.name,voice:clip(w.profileText(c.profile,{use:'group',explicit:false,secrets:false}),1800),activity:activityOf(c.id,here.location_id),memories:w.recallMemories(c.id,{about:['Palor'],place:here.name}).slice(-3).map(m=>clip(m,300))})):[]};},
+    onFinish:scene=>w.factGate?.commitNarrative(scene)});
+  const stories=installPlayStories({db,one,all,run,transaction,fail,settings:playSettings,characterPolicy,random,now,root,narrative});
   // Which pictures Palor has already seen with whom (fresh ones come first next time).
   db.exec('CREATE TABLE IF NOT EXISTS play_seen(media_id TEXT NOT NULL,character_id TEXT NOT NULL,seen_at TEXT NOT NULL,PRIMARY KEY(media_id,character_id))');
   // A picture or video a character sent with a phone message (chosen by the media director).
@@ -404,9 +410,12 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const pid=w.palor()?.id;return !!pid&&(w.levelOf(cid,pid)??0)<=-2;
   }
   const w=worldEngine.internals;
+  w.narrative=narrative;
   const iso=()=>now().toISOString();
   // World day, weekday and day part: after midnight it is still the previous day's night.
-  function clock(){const d=now(),index=slotIndexAt(d),day=worldDayAt(d),wd=weekdayOf(day);return {day,weekday:WEEKDAYS[wd],slot:SLOTS[index].label,slot_index:index,workday:wd>=1&&wd<=5,time:`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`};}
+  // A break that ended in the last 10 real minutes (break cap, 2026-11-23): the play screen says it once.
+  const recentAway=()=>{const a=gameClock?.info?.().away;return a&&gameClock.realNow().getTime()-Date.parse(a.at)<10*60_000?a:null;};
+  function clock(){const d=now(),index=slotIndexAt(d),day=worldDayAt(d),wd=weekdayOf(day);return {day,weekday:WEEKDAYS[wd],slot:SLOTS[index].label,slot_index:index,workday:wd>=1&&wd<=5,time:`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,away:recentAway()};}
 
   const clockHour=()=>Number(String(clock().time||'').slice(0,2));
   // Approved location tree with short names and full paths (shared, cached module).
@@ -431,7 +440,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   // same cast, and no write since (total_changes() counts this connection's writes, data_version
   // another connection's). Any write (appointment, invitation, wait, rewind…) recomputes.
   // S2 (2026-11-22): weekly schedule editor and owner-approved proposals.
-  const schedules=createSchedules({one,run,fail,w:worldEngine.internals});
+  const schedules=createSchedules({one,run,fail,w:worldEngine.internals,transaction});
   // Secret and private routines (owner 2026-11-22): Palor can catch a character at one by being
   // there. The discovery is a memory of his and a record Palor's later talks build on; rewindable.
   db.exec(readFileSync(new URL('./migrations/038-secret-discoveries.up.sql',import.meta.url),'utf8'));
@@ -487,8 +496,9 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const events=all("SELECT payload_json FROM world_events WHERE rewound_at IS NULL AND world_day=? AND status IN ('applied','accepted') AND json_extract(payload_json,'$.slot')=? ORDER BY rowid",c.day,slotId).map(e=>{try{return JSON.parse(e.payload_json);}catch{return null;}}).filter(p=>p&&Array.isArray(p.character_ids));
     for(const c2 of cast){
       // An accepted meeting with Palor wins over everything else at that time.
-      let loc=one("SELECT location_id FROM play_appointments WHERE character_id=? AND world_day=? AND slot=? AND status='accepted' ORDER BY created_at DESC LIMIT 1",c2.id,c.day,slotId)?.location_id||null;
-      if(loc){out.set(c2.id,keepInWardrobe(c2,loc));why.set(c2.id,{kind:'appointment'});continue;}
+      const appt=one("SELECT a.location_id,(SELECT source FROM play_appointment_sources WHERE appointment_id=a.id) source FROM play_appointments a WHERE a.character_id=? AND a.world_day=? AND a.slot=? AND a.status='accepted' ORDER BY a.created_at DESC LIMIT 1",c2.id,c.day,slotId);
+      let loc=appt?.location_id||null;
+      if(loc){out.set(c2.id,keepInWardrobe(c2,loc));why.set(c2.id,{kind:'appointment',source:appt.source||null});continue;}
       for(const p of events)if(p.location_id&&p.character_ids.includes(c2.id))loc=p.location_id;
       if(loc)why.set(c2.id,{kind:'event'});
       // Weekly schedule (plan 3.2, 2026-11-15): a fixed place per weekday and day part.
@@ -524,6 +534,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   function reasonOf(cid){const r=positions().why?.get(cid);const k=reasonKey(r);if(k==='day_plan'&&r.reason)return 'Mára ezt tervezted: '+r.reason;
     if(k==='schedule'&&r.privacy==='secret')return REASON_TEXT.schedule+' Ez a titkod: rajtad kívül senki nem tud róla.';
     if(k==='schedule'&&r.privacy==='private')return REASON_TEXT.schedule+' Erről csak a hozzád legközelebb állók tudnak.';
+    if(k==='appointment'&&r.source==='encounter')return 'Útközben összefutottatok Palorral, és veled jött ide.';
+    if(k==='appointment'&&r.source==='ride')return 'Te vitted Palort ide autóval.';
     return k?REASON_TEXT[k]||null:null;}
   // His routine's activity here and now (when the weekly routine put him here and it says one).
   const routineActivity=(cid,locationId)=>{const r=positions().why?.get(cid);return r?.kind==='schedule'&&r.activity&&(!locationId||r.location_id===locationId)?r:null;};
@@ -567,7 +579,10 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     return entry.location_id;
   }
   // Who is exactly at a tree node now (same rule as place(): his position is that location).
-  const presentAt=node=>{if(!node?.location_id)return [];const pos=positions();return w.meetable().filter(c=>pos.get(c.id)===node.location_id).map(c=>c.id);};
+  // Someone who stopped Palor on a town street to talk (owner, 2026-11-23) is there with him for
+  // this day part, until Palor walks on.
+  const streetMeet=()=>{const m=playState().street_meet,k=clock();return m&&m.day===k.day&&m.slot===SLOTS[k.slot_index].id?m:null;};
+  const presentAt=node=>{const sm=streetMeet(),met=sm&&node?.id===sm.node_id&&w.meetable().some(c=>c.id===sm.character_id)?[sm.character_id]:[];if(!node?.location_id)return met;const pos=positions();return w.meetable().filter(c=>pos.get(c.id)===node.location_id).map(c=>c.id);};
   const isHere=(cid,node)=>presentAt(node).includes(cid);
   function playState(){const row=one('SELECT value FROM application_settings WHERE key=?',STATE_KEY);return row?JSON.parse(row.value):{node_id:null};}
   function savePlayState(s){run('INSERT INTO application_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',STATE_KEY,JSON.stringify(s));}
@@ -682,6 +697,12 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     // picture of himself (media director, portrait panel), cropped to where he stands.
     for(const p of here)if(!p.sprites.length)p.stand_in=await director.standIn(p.id).catch(()=>null);
     const countIn=id=>{const sub=new Set(locationsUnder(id));return cast.filter(c=>sub.has(pos.get(c.id))).length;};
+    // People inside the building but not in this very room (owner, 2026-11-22: the map showed Norbi
+    // at home, the entry room was empty because he is in his own room at night). From an entry
+    // room the whole building counts. Presentation only: the map badge and this list now agree.
+    const parentNode=byId.get(node.parent_id),scopeNode=parentNode&&originChild(nodes,parentNode.id,origins(nodes))?.id===node.id?parentNode:node;
+    const inside=(()=>{const names=new Map(descendants(nodes,scopeNode.id).map(x=>byId.get(x)).filter(x=>x?.location_id).map(x=>[x.location_id,x.short_name||x.name]));
+      return cast.filter(c=>{const l=pos.get(c.id);return l&&l!==node.location_id&&names.has(l)&&c.id!==pid;}).map(c=>({id:c.id,name:c.name,room:names.get(pos.get(c.id))}));})();
     // A picture with people on it is only a blurred backdrop; empty location shots stay sharp.
     // Among this place's own location shots, one that matches the time of day is preferred.
     const night=k.slot_index>=2;
@@ -691,7 +712,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     // The same chain in other towns (other branch, other staff) and who works at this branch.
     const kind=kindOf(node),branches=chains(nodes).get(node.id)||[];
     const staff=node.location_id?all("SELECT DISTINCT c.id,c.name FROM world_places p JOIN characters c ON c.id=p.character_id WHERE p.location_id=? AND p.role='work'",node.location_id):[];
-    return {node:{...node,place_kind:kind,kind_label:KIND_LABEL[kind]},room_exits:savedExits(node.id),town:townOf(byId,node.id)?.short_name||null,branches,staff,image_id:imageId,image_busy:imageBusy,people:here,today:todayHere,level_labels:LEVELS,children:childrenOf(node.id).map(n=>({...n,place_kind:kindOf(n),people_count:countIn(n.id)})),parent:byId.get(node.parent_id)||null};
+    return {node:{...node,place_kind:kind,kind_label:KIND_LABEL[kind]},room_exits:savedExits(node.id),town:townOf(byId,node.id)?.short_name||null,branches,staff,image_id:imageId,image_busy:imageBusy,people:here,inside,today:todayHere,level_labels:LEVELS,children:childrenOf(node.id).map(n=>({...n,place_kind:kindOf(n),people_count:countIn(n.id)})),parent:byId.get(node.parent_id)||null};
   }
   // A location shot of this place that matches the time of day (night: evening and night).
   function timedImage(locationId,night){
@@ -717,7 +738,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const e=one("SELECT title,summary FROM world_events WHERE rewound_at IS NULL AND world_day=? AND status IN ('applied','accepted') AND json_extract(payload_json,'$.slot')=? AND EXISTS(SELECT 1 FROM json_each(payload_json,'$.character_ids') WHERE value=?) ORDER BY rowid DESC LIMIT 1",k.day,slotId,cid);
     if(e)return clip(e.summary||e.title,220);
     // Here because of a meeting with Palor: say so, not "Éppen itt van."
-    if(locationId&&one("SELECT 1 FROM play_appointments WHERE character_id=? AND world_day=? AND slot=? AND status='accepted' AND location_id=? LIMIT 1",cid,k.day,slotId,locationId))return 'Palorral beszélt meg itt találkozót, rá vár.';
+    {const ap=locationId&&one("SELECT a.id,(SELECT source FROM play_appointment_sources WHERE appointment_id=a.id) source FROM play_appointments a WHERE a.character_id=? AND a.world_day=? AND a.slot=? AND a.status='accepted' AND a.location_id=? LIMIT 1",cid,k.day,slotId,locationId);
+      if(ap)return ap.source==='encounter'?'Útközben összefutott Palorral, és vele jött ide.':ap.source==='ride'?'Palort fuvarozta ide.':'Palorral beszélt meg itt találkozót, rá vár.';}
     const link=locationId?one("SELECT wp.role,wp.note,l.name place FROM world_places wp JOIN locations l ON l.id=wp.location_id WHERE wp.character_id=? AND wp.location_id=? ORDER BY CASE wp.role WHEN 'work' THEN 0 WHEN 'routine' THEN 1 WHEN 'home' THEN 2 ELSE 3 END LIMIT 1",cid,locationId):null;
     {const ra=routineActivity(cid,locationId);if(ra&&(ra.privacy==='public'||isDiscovered(cid,ra.activity)))return ra.activity;}
     let routine='';try{routine=JSON.parse(one('SELECT value FROM application_settings WHERE key=?','ghost:character:'+cid)?.value||'{}').values?.weekly_routine?.value||'';}catch{}
@@ -729,6 +751,10 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
   // Invitations from characters (appointment status 'invited', 2026-11-12): which phone message
   // carried each one. A separate table, so positional inserts into play_appointments stay valid.
   db.exec('CREATE TABLE IF NOT EXISTS play_invitations(appointment_id TEXT PRIMARY KEY,message_id TEXT NOT NULL,created_at TEXT NOT NULL)');
+  // Why an accepted appointment exists when it was not a date (owner, 2026-11-22: Feri "waited for Palor"
+  // in Norbi's house although Palor met him on the road): 'encounter' = met on the way and came along,
+  // 'ride' = drove Palor. No row = a real arrangement. A separate table, like the invitations.
+  db.exec('CREATE TABLE IF NOT EXISTS play_appointment_sources(appointment_id TEXT PRIMARY KEY,source TEXT NOT NULL,created_at TEXT NOT NULL)');
   // Talk history (2026-11-15): shared read model with the MCP catalogue (app/talk-history.mjs).
   const talkHistory=createTalkHistory({one,all});
   const sharedHistoryOf=talkHistory.sharedHistoryOf;
@@ -749,7 +775,9 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       friends:all('SELECT target_id,level FROM world_relationship_levels WHERE source_id=? AND target_id<>? ORDER BY level DESC LIMIT 4',cid,pid).filter(r=>r.level>=2).map(r=>({name:names.get(r.target_id)||'?',label:LEVELS[r.level]})),
       appointments:all("SELECT a.id,a.world_day,a.slot,a.status,l.name place FROM play_appointments a JOIN locations l ON l.id=a.location_id WHERE a.character_id=? AND a.world_day>=? AND a.status<>'rewound' ORDER BY a.world_day,a.created_at",cid,clock().day).map(a=>({...a,slot:SLOTS.find(s=>s.id===a.slot)?.label||a.slot})),
       // Promises and plans between them (newest first).
-      threads:w.threadsOf(cid)
+      threads:w.threadsOf(cid),
+      dimensions:{...w.experiences.state(cid,pid),labels:DIMENSIONS},
+      reverse_dimensions:w.experiences.state(pid,cid)
     };
   }
   function knownCharacter(cid){
@@ -848,6 +876,25 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const roadText=(playSettings().story_rate||'normal')!=='off'?rollRoadside({mode,crossTown,story,rand:random}):null;
     const roadside=roadText?{text:roadText,token:randomUUID()}:null;
     if(roadside&&encounter?.kind==='event'&&/stoppol|integet/i.test(encounter.text))encounter=null;
+    // Met on a town street (owner, 2026-11-23): Palor stops right there, on that town's street,
+    // instead of the person coming along to the destination; a window on the town map asks
+    // whether to talk. Walking on afterwards goes to the original destination.
+    // Someone whose routine puts him on this town's street (owner, 2026-11-23): walking in the town,
+    // Palor runs into him there, once per day part each, and the same street window opens. Replaces
+    // a random happening, never a person already met.
+    const STREET_NAME=/^(utca|street)$/i;
+    const streetLocs=!crossTown&&from&&from!==nodeId&&townB&&nodeId!==townB.id&&isPlaceNode(townB)
+      ?new Set(nodes.filter(n=>n.parent_id===townB.id&&n.location_id&&!n.archived&&isPassage(n)&&STREET_NAME.test(String(n.short_name||n.name).trim())).map(n=>n.location_id)):new Set();
+    const seenSlot=s.street_seen&&s.street_seen.day===k.day&&s.street_seen.slot===SLOTS[k.slot_index].id?s.street_seen.ids||[]:[];
+    let streetSeen=s.street_seen||null;
+    const onStreetNow=id=>streetLocs.has(people.find(p=>p.id===id)?.location_id);
+    // Already met on the street in this day part: not again (also when the random roll picks him).
+    if(encounter?.kind==='person'&&seenSlot.includes(encounter.character_id)&&onStreetNow(encounter.character_id))encounter=null;
+    if(streetLocs.size&&encounter?.kind!=='person'){const onStreet=people.filter(p=>p.location_id&&streetLocs.has(p.location_id)&&!seenSlot.includes(p.id)&&p.id!==ride?.id);
+      if(onStreet.length){const p=onStreet[Math.floor(random()*onStreet.length)];encounter={kind:'person',character_id:p.id,name:p.name,text:`Az utcán összefutsz vele: ${p.name}.`,on_street:true};}}
+    if(encounter?.kind==='person'&&onStreetNow(encounter.character_id))streetSeen={day:k.day,slot:SLOTS[k.slot_index].id,ids:[...seenSlot,encounter.character_id]};
+    const meetStreet=encounter?.kind==='person'&&townB&&nodeId!==townB.id&&isPlaceNode(townB)?townB:null;
+    const destinationId=nodeId;if(meetStreet){encounter.street_meet={character_id:encounter.character_id,name:w.meetable().find(c=>c.id===encounter.character_id)?.name||'',street_id:meetStreet.id,destination_id:destinationId,destination_name:byId.get(destinationId).short_name||byId.get(destinationId).name};nodeId=meetStreet.id;}
     const arrival=byId.get(nodeId).location_id;
     // The trip takes its travel time on the game clock (owner decision D1).
     const minutes=travelMinutes(byId,from,nodeId,{mode});
@@ -856,12 +903,12 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     transaction(()=>{
       if(vehicle)run('UPDATE play_items SET node_id=?,updated_at=? WHERE id=?',siteOf(byId,nodeId)?.id||nodeId,iso(),vehicle.id);
       // The person met on the way comes along: he is at the destination for this day part.
-      if(encounter?.kind==='person'&&arrival)run("INSERT INTO play_appointments(id,character_id,location_id,world_day,slot,status,created_at) VALUES(?,?,?,?,?,'accepted',?)",randomUUID(),encounter.character_id,arrival,atDay,atSlot,iso());
+      if(encounter?.kind==='person'&&arrival&&!meetStreet){const aid=randomUUID();run("INSERT INTO play_appointments(id,character_id,location_id,world_day,slot,status,created_at) VALUES(?,?,?,?,?,'accepted',?)",aid,encounter.character_id,arrival,atDay,atSlot,iso());run('INSERT INTO play_appointment_sources VALUES(?,?,?)',aid,'encounter',iso());}
       // The friend who drove comes along the same way.
-      if(ride&&arrival)run("INSERT INTO play_appointments(id,character_id,location_id,world_day,slot,status,created_at) VALUES(?,?,?,?,?,'accepted',?)",randomUUID(),ride.id,arrival,atDay,atSlot,iso());
-      savePlayState({...s,node_id:nodeId,previous_id:prev,recent,roadside:roadside?{token:roadside.token,used:false}:null,updated_at:iso()});
+      if(ride&&arrival){const aid=randomUUID();run("INSERT INTO play_appointments(id,character_id,location_id,world_day,slot,status,created_at) VALUES(?,?,?,?,?,'accepted',?)",aid,ride.id,arrival,atDay,atSlot,iso());run('INSERT INTO play_appointment_sources VALUES(?,?,?)',aid,'ride',iso());}
+      savePlayState({...s,street_seen:streetSeen,street_meet:meetStreet?{character_id:encounter.character_id,node_id:meetStreet.id,day:atDay,slot:atSlot}:null,node_id:nodeId,previous_id:prev,recent,roadside:roadside?{token:roadside.token,used:false}:null,updated_at:iso()});
     });
-    if(encounter?.kind==='person'&&!byId.get(nodeId).location_id)encounter.text+=' Itt elváltok.';
+    if(encounter?.kind==='person'&&!meetStreet&&!byId.get(nodeId).location_id)encounter.text+=' Itt elváltok.';
     if(from&&from!==nodeId)gameClock?.advance(minutes,'travel');
     // The street and stairwells walked through, with a picture each (shown for a moment).
     const images=placeImages(),via=passagesOf(nodes,byId,from,nodeId).map(n=>({id:n.id,name:n.short_name||n.name,image_id:n.location_id?images.get(n.location_id)||null:null}));
@@ -979,8 +1026,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       +'Ha jelenetet, látványt, mozdulatot vagy érzést kér, írd meg élénken és részletesen, 4–10 mondatban, harmadik személyben, a beszélgetés eddigi menetének folytatásaként. '
       +'A szereplők külsejét, testét és viselkedését a profilokból, a jóváhagyott megjelenésből, az alkotó javításaiból és a beszélgetés soraiból vedd: ezekből szabadon megfogalmazhatod és kibonthatod a leírást, új szöveget írhatsz. '
       +'Új tényt a múltról, életrajzról, rokonokról ne találj ki, és ami a szereplő külsejéből sehol nincs megadva, azt ne állítsd biztosra. Mindenki felnőtt. '
-      +(explicit?'Intim, testi és szexuális részletek nyíltan, nyers szavakkal is leírhatók.':'Intim, testi részletekről most nem adsz leírást; mondd meg, hogy ez most nem elérhető.')+' Csak JSON: {"answer":"..."}';
-    const user=[`SZEREPLŐ: ${c.name}`,'PROFIL:\n'+w.profileText(c.profile,{explicit}),...(look.length?['JÓVÁHAGYOTT MEGJELENÉS:\n'+look.join('\n')]:[]),...(directorText(cid)?[directorText(cid)]:[]),
+      +(explicit?'Intim, testi és szexuális részletek nyíltan, nyers szavakkal is leírhatók.':'Intim, testi részletekről most nem adsz leírást; mondd meg, hogy ez most nem elérhető.')+' Csak JSON: {"answer":"...","proposed_facts":[]}. Ha tartós változtatást kér a játékos, csak javaslatot adj: {"type":"memory","character_id":"a megadott résztvevő ID-ja","text":"szubjektív emlék"} vagy {"type":"world_event","title":"cím","summary":"javasolt esemény","character_ids":["résztvevő ID"]}. Jóváhagyásig ez nem tény; canon, külső, életrajz és Palor érzése nem írható.';
+    const user=[`SZEREPLŐ: ${c.name}`,`RÉSZTVEVŐ AZONOSÍTÓK: ${c.name} = ${cid}${pid?', Palor = '+pid:''}`,'PROFIL:\n'+w.profileText(c.profile,{explicit}),...(look.length?['JÓVÁHAGYOTT MEGJELENÉS:\n'+look.join('\n')]:[]),...(directorText(cid)?[directorText(cid)]:[]),
       ...(palorProfile||palorLook.length?['PALOR (a játékos szereplője):\n'+[palorProfile,...(palorLook.length?['JÓVÁHAGYOTT MEGJELENÉSE:\n'+palorLook.join('\n')]:[])].filter(Boolean).join('\n')]:[]),
       ...(guests.length?['A JELENETHEZ CSATLAKOZOTT ÚJ SZEREPLŐ(K) (felnőtt férfiak):\n'+guests.map(g=>`- ${g.name}: ${g.description}`).join('\n')]:[]),
       ...(()=>{const ev=w.hiddenEvents?.currentFor(cid,{day:k.day,slot:SLOTS[k.slot_index].id});return ev?['A JELENETBEN MOST KIBONTAKOZÓ FORDULAT (a szereplő ezt hozza elő; ne fedd fel előre, csak ami már elhangzott):\n'+ev.brief]:[];})(),
@@ -989,7 +1036,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(out?.__truncated)out={answer:partialJsonString(out.raw,'answer')||''};
     const answer=clip(String(out?.answer??'').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g,' ').replace(/<[^>]{1,200}>/g,''),2000);
     if(!answer)throw fail('The narrator did not answer. Try again.',502);
-    run('INSERT INTO play_narrations VALUES(?,?,?,?,?,?)',randomUUID(),conv?.id||null,cid,clip(directive,600),answer,iso());
+    const narrationId=randomUUID();run('INSERT INTO play_narrations VALUES(?,?,?,?,?,?)',narrationId,conv?.id||null,cid,clip(directive,600),answer,iso());
+    if(Array.isArray(out?.proposed_facts))w.factGate.stage('narrator',narrationId,out.proposed_facts);
     return {question:directive,answer};
   }
   // ---- scene guests (owner, 2026-11-18) ----------------------------------------------------
@@ -1280,6 +1328,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       // E3 (2026-11-21): how things hit him, from his motives and temperament.
       ...(()=>{const ap=appraisalLines(c.profile);return ap.length?[ap.join('\n')]:[];})(),
       'EMLÉKEID:\n'+(memories.map(m=>'- '+clip(m,300)).join('\n')||'nincs'),
+      ...(w.experiences?.prompt(cid,{targetId:pid})?[w.experiences.prompt(cid,{targetId:pid})]:[]),
       'MA VELED TÖRTÉNT:\n'+(today.map(e=>`- ${e.title}: ${clip(e.summary,200)}`).join('\n')||'semmi különös'),
       ...(gossip.length?['MA HALLOTTAD AZ ISMERŐSEIDRŐL (szóba hozhatod, ha illik):\n'+gossip.map(e=>`- ${e.title}: ${clip(e.summary,160)}`).join('\n')]:[]),
       // E6 (2026-11-21): why your relationship changed lately (newest first), from the level history.
@@ -1417,7 +1466,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const castText=castProfileTexts(people.map(c=>c.profile),{explicit:gIntimate,intimate:gIntimate,secrets:true});
     const block=c=>{const level=w.levelOf(c.id,pid);const note=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,pid)?.description||'';
       const others=people.filter(o=>o.id!==c.id).map(o=>{const r=one('SELECT description FROM relationships WHERE source_id=? AND target_id=?',c.id,o.id)?.description;return r?`${o.name}: ${clip(r,200)}`:'';}).filter(Boolean);
-      const fix=directorText(c.id);
+      const recalled=w.recallMemories(c.id,{about:['Palor'],place:here.name||'',text});
+      const fix=[directorText(c.id),w.experiences?.prompt(c.id,{targetId:pid,person:'ő'}),recalled.length?'SAJÁT EMLÉKEI:\n'+recalled.map(m=>'- '+clip(m,300)).join('\n'):''].filter(Boolean).join('\n');
       return `## ${c.name}\nPROFIL:\n${castText.texts[people.indexOf(c)]}${fix?'\n'+fix:''}${w.inner?w.inner.promptLines(c.id,k.day,c.profile,{person:'ő'}).map(x=>'\n'+x).join(''):''}${appraisalLines(c.profile,{person:'ő'}).map(x=>'\n'+x).join('')}${(()=>{const st=w.inner?.current(c.id);return '\n'+stanceLines(c.profile,{inner:st,effective:effectiveIntensity(st,k.day,c.profile),level:level??0,person:'ő'}).join(' ');})()}${(()=>{const a=agendaFor({lapsed:w.openThreadsFor(c.id,k.day).lapsed,inner:w.inner?.current(c.id),profile:c.profile,person:'ő'});return a?'\n'+a:'';})()}\nKAPCSOLATA PALORRAL [${LEVELS[level??0]}]: ${clip(note,600)||'nincs megadva'}\nMOST ÉPPEN: ${activityOf(c.id,here.location_id)}${others.length?'\nA TÖBBIEKHEZ: '+others.join('; '):''}`;};
     // Same anti-repeat and suggestion inputs as a one-on-one talk (2026-11-15).
     const ownLast=history.filter(l=>l.speaker!=='palor').slice(-4).map(l=>'- '+(l.speaker_name?l.speaker_name+': ':'')+clip(l.text,300));
@@ -1455,7 +1505,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       run('INSERT INTO play_line_meta(line_id,beat,spark,choices_json) VALUES(?,?,?,?)',lastLine,gBeat,0,JSON.stringify(gChoices));
       // Undressing or beyond makes it an intimate scene: its save point is marked intimate (news
       // never carries it), like a one-on-one intimate talk.
-      if(BEAT_WANT[gBeat]>=1)run('INSERT OR IGNORE INTO play_conversation_flags VALUES(?,?)',id,t);
+      // A kiss (shirtless) does not yet make the talk intimate; undressing and beyond do.
+      if(BEAT_WANT[gBeat]>=2)run('INSERT OR IGNORE INTO play_conversation_flags VALUES(?,?)',id,t);
       if(gScene)run('INSERT INTO play_line_scene VALUES(?,?,?,?,?,?,?,?)',lastLine,gScene.media_id,gScene.kind,gScene.level,gBeat,gScene.start_at??null,JSON.stringify(gScene.display),t);
     });
     gameClock?.advance(TALK_MINUTES,'talk');
@@ -1489,20 +1540,24 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     // where things stand with Palor and his opinions (E2/E6/E12), in the same single call.
     const before=w.inner?people.map(c=>{const x=w.inner.summaryContext(c.id);return x?`${c.name} – ${x}`:'';}).filter(Boolean).join('\n'):'';
     const system=`Egy társas jelenetet foglalsz össze Palor és ${people.map(c=>c.name).join(', ')} között. Csak azt írd le, ami ténylegesen elhangzott. ${FACT_RULES} ${RICH_FIELDS_HINT} "inner": résztvevőnként (név szerint) a belső állapota a jelenet UTÁN, az ő szemszögéből, a profilja, a korábbi állapota és ez a jelenet alapján: {"mood":"1-3 szó","intensity":0-3,"reason":"egy mondat","concerns":["legfeljebb 3, a korábbiakat vidd tovább, ha még igazak"],"wants_from_palor":"","palor_view":"1-2 mondat: ahogy ő látja, hol tartanak Palorral"}. "opinions": résztvevőnként legfeljebb 2 vélemény egy szóba került emberről (nem Palorról, nem önmagáról) vagy témáról, egy-egy mondatban, az ő szemszögéből. Csak JSON, magyarul: {"title":"rövid cím","summary":"1-2 mondat","memories":{"<név>":"egy mondat az ő szemszögéből"},"palor_memory":"egy mondat Palor szemszögéből",${RICH_FIELDS_JSON},"inner":{"<név>":{}},"opinions":{"<név>":[{"about":"","text":""}]}}`;
-    const data=await w.ask(system,(before?'KORÁBBI BELSŐ ÁLLAPOTUK:\n'+before+'\n\n':'')+ls.map(l=>(l.speaker==='palor'?'Palor':l.speaker_name||'?')+': '+l.text).join('\n'),1400)||{};
+    const data=await w.ask(system+' Résztvevőnként külön experiences név szerinti objektumként: '+EXPERIENCE_INSTRUCTION,(before?'KORÁBBI BELSŐ ÁLLAPOTUK:\n'+before+'\n\n':'')+ls.map(l=>(l.speaker==='palor'?'Palor':l.speaker_name||'?')+': '+l.text).join('\n'),1400)||{};
     const summary={title:clip(data.title,120)||'Beszélgetés társaságban',summary:clip(data.summary,600),palor_memory:clip(data.palor_memory,1000),group:true,...richFields(data,[...people.map(c=>c.id),pid].filter(Boolean))};
     if(one('SELECT 1 FROM play_conversation_flags WHERE conversation_id=? AND intimate_at IS NOT NULL',conv.id))summary.intimate=true;
+    if(data.private===true||people.some(c=>w.hiddenEvents.currentFor(c.id,{day:conv.world_day,slot:SLOTS.find(s=>s.label===conv.slot)?.id})?.private))summary.private=true;
     const mem=data.memories&&typeof data.memories==='object'?data.memories:{};
+    const memoryOf=c=>mem[c.name]??Object.entries(mem).find(([n])=>matchPerson(people,n)===c.id)?.[1];
+    summary.participant_memories=people.map(c=>({character_id:c.id,text:clip(memoryOf(c),1000)})).filter(m=>m.text);
     transaction(()=>{
       if(!closeOpen(conv.id,summary))return;
       const eventId=randomUUID();
-      run('INSERT INTO world_events(id,world_day,kind,status,title,summary,payload_json,model,seen_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',eventId,conv.world_day,'meeting','applied',summary.title,summary.summary||summary.title,JSON.stringify({slot:SLOTS.find(s=>s.label===conv.slot)?.id||null,character_ids:people.map(c=>c.id),location_id:conv.location_id,memories:[],level_changes:[],play_conversation_id:conv.id,with_palor:true,intimate:!!summary.intimate}),'play',iso(),iso());
+      run('INSERT INTO world_events(id,world_day,kind,status,title,summary,payload_json,model,seen_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',eventId,conv.world_day,'meeting','applied',summary.title,summary.summary||summary.title,JSON.stringify({slot:SLOTS.find(s=>s.label===conv.slot)?.id||null,character_ids:people.map(c=>c.id),location_id:conv.location_id,memories:[],level_changes:[],play_conversation_id:conv.id,with_palor:true,intimate:!!summary.intimate,private:!!summary.private}),'play',iso(),iso());
       const byPerson=(obj,c)=>obj&&typeof obj==='object'?(obj[c.name]??Object.entries(obj).find(([n])=>matchPerson(people,n)===c.id)?.[1]):undefined;
-      for(const c of people){const m=clip(byPerson(mem,c),1000);if(m)w.remember(c.id,m,eventId,{importance:summary.importance});
+      const committed=w.factGate.commitConversation(eventId);
+      for(const c of people){const memoryId=committed.memory_ids[c.id]||null;
+        if(pid)w.experiences?.recordConversation(c.id,pid,eventId,conv.id,byPerson(data.experiences,c),ls,{day:conv.world_day,memoryId,group:true,name:c.name});
         if(w.inner)w.inner.record(c.id,byPerson(data.inner,c),{day:conv.world_day,eventId,conversationId:conv.id});
         if(w.knownPlaces)w.knownPlaces.learn(c.id,data.mentioned_places);
         if(w.social?.addOpinions){const ops=byPerson(data.opinions,c);w.social.addOpinions(c.id,(Array.isArray(ops)?ops:[]).filter(o=>String(o?.about||'').trim().toLocaleLowerCase('hu')!==String(w.palor()?.name||'Palor').toLocaleLowerCase('hu')),{day:conv.world_day,people:w.people().filter(x=>x.id!==pid),eventId});}}
-      if(summary.palor_memory&&pid)w.remember(pid,summary.palor_memory,eventId);
       meetingSaved(eventId);
     });
     return conversationView(conv.id);
@@ -1538,7 +1593,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     const wasDate=!!one('SELECT 1 FROM play_dates WHERE conversation_id=?',id);
     const wd=weekdayOf(conv.world_day);
     const innerBefore=w.inner?w.inner.summaryContext(c.id):'';
-    const data=await w.ask(system,`(A beszélgetés napja: ${conv.world_day}, ${WEEKDAYS[wd]}.)\n`+(innerBefore?innerBefore+'\n\n':'')+'KORÁBBI KÖZÖS MÚLT:\n'+(base||'még nincs, ez az első beszélgetésük')+'\n\n'+(listed.length?'NYITOTT TERVEK:\n'+listed.map((t,i)=>`${i+1}. ${t.promised_by==='palor'?'Palor':c.name}: ${t.text}${t.due_day?' ('+t.due_day+')':''}`).join('\n')+'\n\n':'')+ls.map(l=>(l.speaker==='palor'?'Palor':isGuestLine(l)?l.speaker_name:c.name)+': '+l.text).join('\n')+(chemistry?`\n\n(${c.name} reakciói a beszélgetés során összesen: ${chemistry>0?'+':''}${chemistry}; ezt is vedd figyelembe a level_delta-nál.)`:'')+(wasDate?'\n\n(Ez egy megbeszélt randevú volt.)':''),1200)||{};
+    const data=await w.ask(system+' '+EXPERIENCE_INSTRUCTION,`(A beszélgetés napja: ${conv.world_day}, ${WEEKDAYS[wd]}.)\n`+(innerBefore?innerBefore+'\n\n':'')+'KORÁBBI KÖZÖS MÚLT:\n'+(base||'még nincs, ez az első beszélgetésük')+'\n\n'+(listed.length?'NYITOTT TERVEK:\n'+listed.map((t,i)=>`${i+1}. ${t.promised_by==='palor'?'Palor':c.name}: ${t.text}${t.due_day?' ('+t.due_day+')':''}`).join('\n')+'\n\n':'')+ls.map(l=>(l.speaker==='palor'?'Palor':isGuestLine(l)?l.speaker_name:c.name)+': '+l.text).join('\n')+(chemistry?`\n\n(${c.name} reakciói a beszélgetés során összesen: ${chemistry>0?'+':''}${chemistry}; ezt is vedd figyelembe a level_delta-nál.)`:'')+(wasDate?'\n\n(Ez egy megbeszélt randevú volt.)':''),1200)||{};
     let delta=Math.max(-1,Math.min(1,Math.round(Number(data.level_delta)||0)));
     // Owner decision 2026-11-11: at most three steps closer per character per world day.
     const risesToday=all("SELECT summary_json FROM play_conversations WHERE character_id=? AND world_day=? AND status='closed' AND rewound_at IS NULL AND id<>?",c.id,conv.world_day,id).filter(r=>{try{return JSON.parse(r.summary_json||'{}').level_delta>0;}catch{return false;}}).length;
@@ -1557,16 +1612,16 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     if(after>before&&MILESTONES[after])summary.milestone=`${c.name} és Palor: ${MILESTONES[after]}.`;
     // Intimate if it ever was during this conversation (an intimate scene stopped with "Álljunk meg" still counts).
     if(conv.mode==='intimate'||one('SELECT 1 FROM play_conversation_flags WHERE conversation_id=? AND intimate_at IS NOT NULL',id))summary.intimate=true;
+    if(data.private===true||w.hiddenEvents.currentFor(c.id,{day:conv.world_day,slot:SLOTS.find(s=>s.label===conv.slot)?.id})?.private)summary.private=true;
     transaction(()=>{
       // Closed elsewhere while the summary was written (stale close, another device): save nothing twice.
       if(!closeOpen(id,summary))return;
       const eventId=randomUUID();
       // An intimate save point keeps the intimacy stage open for the next two weeks.
-      run('INSERT INTO world_events(id,world_day,kind,status,title,summary,payload_json,model,seen_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',eventId,conv.world_day,'meeting','applied',summary.title,summary.summary||summary.title,JSON.stringify({slot:SLOTS.find(s=>s.label===conv.slot)?.id||null,character_ids:[c.id],location_id:conv.location_id,memories:[],level_changes:[],play_conversation_id:id,with_palor:true,intimate:!!summary.intimate}),'play',iso(),iso());
+      run('INSERT INTO world_events(id,world_day,kind,status,title,summary,payload_json,model,seen_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',eventId,conv.world_day,'meeting','applied',summary.title,summary.summary||summary.title,JSON.stringify({slot:SLOTS.find(s=>s.label===conv.slot)?.id||null,character_ids:[c.id],location_id:conv.location_id,memories:[],level_changes:[],play_conversation_id:id,with_palor:true,intimate:!!summary.intimate,private:!!summary.private}),'play',iso(),iso());
       // E7: the talk's importance (1–5) goes with both memories, for recall.
-      if(summary.character_memory)w.remember(c.id,summary.character_memory,eventId,{importance:summary.importance});
-      if(summary.palor_memory&&pid)w.remember(pid,summary.palor_memory,eventId,{importance:summary.importance});
-      if(delta&&pid)w.setLevel(c.id,pid,after,{reason:summary.reason||'Beszélgetés',actor:'play',eventId});
+      const committed=w.factGate.commitConversation(eventId),memoryId=committed.memory_ids[c.id]||null;
+      if(pid)w.experiences?.recordConversation(c.id,pid,eventId,id,data.experiences,ls,{day:conv.world_day,memoryId,name:c.name});
       meetingSaved(eventId);
       w.resolveThreads(listed,{kept:data.kept,dropped:data.dropped});
       w.addThreads(c.id,id,data.promises,conv.world_day);
@@ -1611,9 +1666,17 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
 
   async function handle({p,req,res=null,body,json}){
     if(!p.startsWith('/api/play'))return false;
-    // The play screen is open (desktop or phone): in "only while I play" mode the world lives now.
-    if(worldEngine.notePlay?.())worldEngine.maybeRun?.().catch?.(()=>{});
+    // Creator schedule/whereabouts administration is not player activity: merely
+    // inspecting or editing routines must not resume time or wake paid world rounds.
+    const scheduleAdmin=p==='/api/play/whereabouts'||p==='/api/play/schedules'||p.startsWith('/api/play/schedules/');
+    if(!scheduleAdmin){
+      // First the game clock: after a break it continues from the held morning.
+      gameClock?.notePlay?.();
+      if(worldEngine.notePlay?.())worldEngine.maybeRun?.().catch?.(()=>{});
+    }
     const m=req.method;let x;
+    if(await w.factGate.handle({p,req,body,json}))return true;
+    if(p.startsWith('/api/play/narratives/')){await tree();if(await narrative.handle({p,m,body,json}))return true;}
     if(await stories.handle({p,m,body,json,res}))return true;
     // Town plan (2026-11-13): saved pin positions (presentation only) and an optional map picture.
     // Node ids may hold ':' ("proposal:…"), sent URL-encoded.

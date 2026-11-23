@@ -15,6 +15,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {pathToFileURL} from 'node:url';
 import {analyzeWorldImage,VISION_TAG_KEY,VISION_TAG_METHOD} from './vision-engine.mjs';
 import {minimalFrames,MAX_VIDEO_SECONDS} from './media-signals.mjs';
+import {LEVELS,aiLevelOf} from './content-levels.mjs';
 
 const fail=code=>Object.assign(Error(code),{code});
 function parseArgs(argv){
@@ -91,8 +92,8 @@ async function main(){
       try{
         const out=await analyzeWorldImage({bytes:await fs.readFile(file),contentType:'image/jpeg',apiKey});
         const u=out.usage||{};spent+=(((u.input_tokens||0)-(u.cached_input_tokens||0))*2+(u.cached_input_tokens||0)*0.1+(u.output_tokens||0)*10)/1e6;
-        const level=out.raw.world_details?.content?.level;
-        save.run(['non_intimate','nudity','sexual_activity'].includes(level)?level:'nudity',String(out.raw.description?.hu||'').slice(0,600),new Date().toISOString(),v.media_id,s.t);
+        const level=aiLevelOf(out.raw.world_details?.content);
+        save.run(LEVELS.includes(level)?level:'nudity',String(out.raw.description?.hu||'').slice(0,600),new Date().toISOString(),v.media_id,s.t);
         results.push({media_id:v.media_id,t:s.t,status:'ok',level,request_id:out.request_id,usage:out.usage,raw:out.raw});
         if(spent>maxUsd&&!stop){results.push({status:'stopped',reason:'max_usd_reached'});stop=true;}
       }catch(e){

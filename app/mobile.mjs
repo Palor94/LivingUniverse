@@ -32,7 +32,7 @@ function forward(req,res,target,securityHeaders){
     req.pipe(out);
   });
 }
-export function createMobileServer({config,play=true,all,one,run,transaction,characterCrops=null,desktopOrigin=()=>null,characterRename=null,mcpChanges=null,ghostProfiles=null,mediaImports=null,imageGeneration=null,grokConnections=null,referencePreview=null,locationEditor=null,sorting=null,scan=null,scanRunning=()=>false,reconciliation=null,createCharacter=null,isBusy=()=>false}){
+export function createMobileServer({config,play=true,all,one,run,transaction,characterCrops=null,desktopOrigin=()=>null,characterRename=null,mcpChanges=null,ghostProfiles=null,profileProposalMerge=null,mediaImports=null,imageGeneration=null,grokConnections=null,referencePreview=null,locationEditor=null,sorting=null,scan=null,scanRunning=()=>false,reconciliation=null,createCharacter=null,isBusy=()=>false}){
   if(config?.enabled!==true)return null;
   const origin=new URL(config.origin);
   if(origin.protocol!=='https:'||!origin.hostname.endsWith('.ts.net')||origin.port||origin.pathname!=='/'||origin.search||origin.hash||origin.username||origin.password)throw Error('Mobile access requires one exact HTTPS .ts.net origin.');
@@ -94,7 +94,7 @@ export function createMobileServer({config,play=true,all,one,run,transaction,cha
       const importPage=/^\/media-import\/[0-9a-f-]{36}$/i.test(p),connectPage=/^\/grok-connect\/[0-9a-f]{32}$/i.test(p);
       const renamePage=p==='/character-rename.html';
       const ghostPage=/^\/ghost-profile\/[0-9a-f-]{36}$/i.test(p);
-      const ghostApi=/^\/api\/characters\/[0-9a-f-]{36}\/ghost(?:\/manual|\/proposals(?:\/[0-9a-f-]{36}\/decision)?)?$/i.test(p);
+      const ghostApi=/^\/api\/characters\/[0-9a-f-]{36}\/ghost(?:\/manual|\/merge\/(?:prepare|execute)|\/proposals(?:\/[0-9a-f-]{36}\/decision)?)?$/i.test(p);
       const generationPage=/^\/image-generation\/[0-9a-f-]{36}$/i.test(p);
       const previewRoute=p.match(/^\/approved-preview\/([0-9a-f-]{36})\/([0-9a-f-]{36})$/i);
       const originalRoute=/^\/media-original\/([a-fA-F0-9-]{36})$/.exec(p);
@@ -127,6 +127,7 @@ export function createMobileServer({config,play=true,all,one,run,transaction,cha
         if(rename&&req.method==='PUT'&&rename[2]==='undo')return json(await characterRename.prepareUndo({...body,plan_id:rename[1]}));
         if(req.method==='GET'&&(renamePage||p==='/character-rename.js'||p==='/character-rename.css')){const file=renamePage?'character-rename.html':p.slice(1);const content=await fs.readFile(new URL('./public/'+file,import.meta.url));res.writeHead(200,{...headers,'Content-Type':renamePage?'text/html; charset=utf-8':p.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8'});return res.end(content);}
       }
+      if(profileProposalMerge&&await profileProposalMerge.handle({p,req,body,json,actor:login}))return;
       if(ghostProfiles){
         const ghost=p.match(/^\/api\/characters\/([0-9a-f-]{36})\/ghost(?:\/manual|\/proposals(?:\/([0-9a-f-]{36})\/decision)?)?$/i);
         if(ghost){character(ghost[1]);if(req.method==='GET'&&p.endsWith('/ghost'))return json(ghostProfiles.get(ghost[1]));if(req.method==='POST'&&p.endsWith('/manual'))return json(ghostProfiles.saveManual(ghost[1],body,login));if(req.method==='POST'&&p.endsWith('/proposals'))return json(ghostProfiles.propose(ghost[1],body));if(req.method==='POST'&&ghost[2])return json(ghostProfiles.decide(ghost[1],ghost[2],body,login));throw fail('Nem támogatott szellemprofil-művelet.',405);}

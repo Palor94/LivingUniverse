@@ -10,7 +10,7 @@ import {cancelUndoWindows,confirmBox,askText,ask,undoWindow} from './interaction
 import {t,translateServerMessage} from './i18n.js';
 import {cutout} from './sprite-cutout.js';
 import {mapSvg,PLACES} from './play-map.js';
-import {roadTransition,playStory,roadsideChoice} from './play-story.js';
+import {roadTransition,playStory,roadsideChoice,streetMeetChoice} from './play-story.js';
 import {townMapSvg,toMap,KIND_ICON} from './play-town-map.js';
 import {icon} from './play-icons.js';
 import {installPlayDebug} from './play-debug.js';
@@ -130,10 +130,14 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   // reuse: switching between the menu screens keeps the loaded world (no refetch, no flicker);
   // anything that moves time or Palor loads it again. Settings are read once, then kept current.
   let settingsLoaded=false,aiWarned=false;
-  async function render(host,{reuse=false}={}){
+  // "While you were away" (break cap, 2026-11-23): shown once per break, also across reloads.
+function noteAway(clock){const a=clock?.away;if(!a||a.minutes<1)return;let seen=null;try{seen=localStorage.getItem('lu-play-away');}catch{}if(seen===a.at)return;try{localStorage.setItem('lu-play-away',a.at);}catch{}
+  const h=Math.floor(a.minutes/60),m=a.minutes%60,span=h>=24?`${Math.floor(h/24)} nap ${h%24} óra`:h?`${h} óra${m?` ${m} perc`:''}`:`${m} perc`;
+  toast(t(a.held_minutes>0?'play.awayHeld':'play.away',{span,weekday:clock.weekday,slot:clock.slot}));}
+async function render(host,{reuse=false}={}){
     cancelUndoWindows();
     root=host;
-    if(!reuse||!data){const [d,s]=await Promise.all([api('/api/play'),settingsLoaded?Promise.resolve(settings):api('/api/play/settings').catch(()=>settings)]);data=d;settings=s;settingsLoaded=true;buildIndex();}
+    if(!reuse||!data){const [d,s]=await Promise.all([api('/api/play'),settingsLoaded?Promise.resolve(settings):api('/api/play/settings').catch(()=>settings)]);data=d;settings=s;settingsLoaded=true;buildIndex();noteAway(d.clock);}
     // On opening, the screen shows where Palor really is: inside a place → that place; on a
     // town's street → that town (or the map, if it was the map). A remembered view of another
     // town is not where he is.
@@ -392,6 +396,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       ${person.can_talk?`<div class="rel-invite"><b>${t('play.invite')}</b> <select id="ri-town-${cid}" aria-label="${esc(t('play.inviteTown'))}">${inviteTowns.map(tw=>`<option value="${esc(tw.id)}">${esc(label(tw))}</option>`).join('')}</select><select id="ri-place-${cid}" aria-label="${esc(t('play.invitePlace'))}"></select><select id="ri-slot-${cid}" aria-label="${esc(t('play.inviteSlot'))}">${['reggel','délután','este','éjszaka'].map((s,i)=>`<option value="${i}">${s}</option>`).join('')}</select><button class="subtle" id="ri-go-${cid}">${t('play.inviteSend')}</button></div>`:''}
       ${d.appointments.length?`<p><b>${t('play.appointments')}</b> ${d.appointments.map(a=>`${esc(a.world_day)} ${esc(a.slot)} – ${esc(a.place)} (${t('play.appt.'+a.status)})`).join(' · ')}</p>`:''}
       ${d.threads?.length?`<p><b>${t('play.threads')}</b> ${d.threads.map(x=>`${t('play.thread.'+x.promised_by)}: ${esc(x.text)}${x.due_day?' ('+esc(x.due_day)+')':''} – ${t('play.thread.'+x.status)}`).join(' · ')}</p>`:''}
+      ${d.dimensions?.evidence?.length?`<details><summary>${t('play.dimensionChanges')}</summary><p>${Object.entries(d.dimensions.scores).map(([key,value])=>`${esc(d.dimensions.labels[key])}: ${value>0?'+':''}${esc(value)}`).join(' · ')}</p>${d.dimensions.evidence.map(e=>`<p><small>${esc(new Date(e.created_at).toLocaleDateString('hu-HU'))}</small> ${esc(e.quote)}</p>`).join('')}</details>`:''}
       ${d.friends.length?`<p><b>${t('play.friends')}</b> ${d.friends.map(f=>`${esc(f.name)} (${esc(f.label)})`).join(', ')}</p>`:''}
       ${d.memories.length?`<details><summary>${t('play.hisMemories',{count:d.memories.length})}</summary>${d.memories.map(m=>`<p class="muted">– ${esc(m)}</p>`).join('')}</details>`:''}
       ${d.talks.length?`<details><summary>${t('play.talks',{count:d.talks.length})}</summary>${d.talks.map(x=>`<p><small>${esc(x.world_day)} ${x.channel==='phone'?'✆':''}${x.intimate?' ♥':''}</small> <b>${esc(x.title)}</b> ${esc(x.summary)}</p><details class="rel-talk" data-rel-talk="${esc(x.id)}"><summary>${t('play.readTalk')}</summary><div class="talk-lines"></div></details>`).join('')}</details>`:''}
@@ -461,7 +466,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     const lockedCount=Object.values(a.locked).reduce((x,y)=>x+y,0);
     box.innerHTML=`<div class="play-album-inner"><header><b>${esc(t('play.albumOf',{name:person.name}))}</b><span class="muted">${t('play.albumCount',{seen:a.unlocked.length,total:a.total})}</span><button type="button" class="subtle" data-album-close aria-label="${esc(t('common.closeDialog'))}">✕</button></header>
       ${a.unlocked.length?`<div class="play-album-grid">${a.unlocked.map(m=>`<button type="button" class="play-album-item${m.blur?' rel-blur':''}" data-album-item>${m.kind==='video'?`<video src="${img(m.media_id)}" muted loop playsinline preload="metadata"></video><span class="play-album-video">▶</span>`:`<img src="${pic(m.media_id,640)}" alt="" loading="lazy">`}</button>`).join('')}</div>`:`<p class="muted">${t('play.albumEmpty')}</p>`}
-      ${lockedCount?`<p class="play-album-locked">🔒 ${t('play.albumLocked',{count:lockedCount})}${a.locked.sexual_activity?' · 🔞 '+a.locked.sexual_activity:''}${a.locked.nudity?' · 🔥 '+a.locked.nudity:''}${a.locked.non_intimate?' · ☀ '+a.locked.non_intimate:''}</p>`:''}${a.hidden_by_stage?`<p class="muted">${t('play.albumStage',{count:a.hidden_by_stage})}</p>`:''}</div>`;
+      ${lockedCount?`<p class="play-album-locked">🔒 ${t('play.albumLocked',{count:lockedCount})}${a.locked.sexual_activity?' · 🔞 '+a.locked.sexual_activity:''}${a.locked.nudity?' · 🔥 '+a.locked.nudity:''}${a.locked.shirtless?' · 🩳 '+a.locked.shirtless:''}${a.locked.non_intimate?' · ☀ '+a.locked.non_intimate:''}</p>`:''}${a.hidden_by_stage?`<p class="muted">${t('play.albumStage',{count:a.hidden_by_stage})}</p>`:''}</div>`;
     document.body.appendChild(box);
     const close=()=>{box.remove();document.removeEventListener('keydown',esc_);};const esc_=e=>{if(e.key==='Escape')close();};document.addEventListener('keydown',esc_);
     box.onclick=e=>{if(e.target===box||e.target.closest('[data-album-close]'))close();};
@@ -656,7 +661,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     mode='map';await render(root,{reuse:!!r?.merged});
   }
   // ---- level 2: town view ---------------------------------------------------------------
-  let townNote=null;
+  let townNote=null,streetTalkId=null;
   async function openTown(id,{move=true}={}){
     if(studio)move=false;
     // Someone met on the way stays mentioned on the town view until the next step.
@@ -748,7 +753,14 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     // While the place loads, its outline is shown instead of the old screen (2026-11-13).
     const body=$('#play-body');if(move&&body)body.setAttribute('aria-busy','true');
     let merged=false;
-    if(move){let r;try{r=await travelTo(nodeId);}finally{body?.removeAttribute('aria-busy');}if(!r){mode==='place'&&current?showPlace(current):await render(root,{reuse:true});return;}current=r;merged=!!r.merged;}
+    if(move){let r;try{r=await travelTo(nodeId);}finally{body?.removeAttribute('aria-busy');}if(!r){mode==='place'&&current?showPlace(current):await render(root,{reuse:true});return;}current=r;merged=!!r.merged;
+      // Someone stopped Palor on the town street (owner, 2026-11-23): Palor stands on the street;
+      // the town map shows, and a window asks whether to talk to him there or walk on.
+      const sm=r.trip?.encounter?.street_meet;
+      if(sm){townNote=null;await openTown(sm.street_id,{move:false});
+        const v=await streetMeetChoice({text:r.trip.encounter.text,name:sm.name,destination:sm.destination_name,esc,t});
+        if(v==='go')return openPlace(sm.destination_id);
+        streetTalkId=sm.character_id;await startTalk((r.people||[]).find(p=>p.id===sm.character_id)||{id:sm.character_id,name:sm.name},'in_person');return;}}
     else{document.body.classList.add('play-loading');try{current=await api('/api/play/place/'+encodeURIComponent(nodeId));}finally{document.body.classList.remove('play-loading');}}
     mode='place';return render(root,{reuse:merged});
   }
@@ -810,6 +822,28 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     const cs=getComputedStyle(stage),avail=stage.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
     const widths=figs.reduce((s,f)=>s+f.offsetWidth,0),span=figs.at(-1).getBoundingClientRect().right-figs[0].getBoundingClientRect().left,gaps=Math.max(0,span-widths);
     stage.style.setProperty('--fit',span>avail&&widths>0?Math.max(0.4,(avail-gaps)/widths*0.98).toFixed(3):'1');
+    dodgeDoors();
+  }
+  // Nobody stands on a door or exit tag (owner, 2026-11-22): a figure whose body sits under a tag
+  // is nudged sideways to the nearest free spot. Presentation only; reset when the tags are gone.
+  function dodgeDoors(){
+    const figs=$$('.vn-stage .vn-figure'),vn=$('.vn');if(!figs.length||!vn)return;
+    for(const f of figs)f.style.translate='';
+    const tags=$$('#vn-doors [data-door]');if(!tags.length)return;
+    const vr=vn.getBoundingClientRect(),spans=tags.map(b=>{const r=b.getBoundingClientRect();return {l:r.left-10,r:r.right+10,t:r.top,b:r.bottom};});
+    const placed=[];
+    for(const f of figs){
+      const body=f.querySelector('.vn-sprite,.vn-standin,.vn-card')||f,r=body.getBoundingClientRect();if(!r.width)continue;
+      const hits=(d,x=r)=>spans.some(k=>x.right+d>k.l&&x.left+d<k.r&&x.bottom>k.t&&x.top<k.b);
+      const clash=d=>placed.some(q=>r.right+d>q.left+12&&r.left+d<q.right-12);
+      let best=null;
+      if(!hits(0)&&!clash(0)){placed.push({left:r.left,right:r.right});continue;}
+      for(const k of spans)for(const d of [k.l-r.right-1,k.r-r.left+1]){
+        if(r.left+d<vr.left+8||r.right+d>vr.right-8||hits(d)||clash(d))continue;
+        if(best===null||Math.abs(d)<Math.abs(best))best=d;}
+      const d=best??0;if(d)f.style.translate=d.toFixed(0)+'px 0';
+      placed.push({left:r.left+d,right:r.right+d});
+    }
   }
   async function showPlace(p){
     if(studio){placeTools=true;doorsEditing=true;}
@@ -819,6 +853,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       <div class="vn-info"><div class="vn-title-row"><h2 class="vn-title" tabindex="0">${esc(label(p.node))}</h2>
         ${studio?`<button type="button" class="vn-place-tools-btn" id="vn-place-tools" aria-expanded="${placeTools}" title="${esc(t('play.toolsTitle'))}">${placeTools?'✕':'⋯'} ${t('play.tools')}</button>`:''}</div>
         ${p.node.kind_label?`<p class="vn-kind">${esc(p.node.kind_label)}${p.town&&p.town!==label(p.node)?` · ${esc(p.town)}`:''}</p>`:''}
+        ${p.inside?.length?`<p class="vn-kind vn-inside">${esc(t('play.insideHere',{list:p.inside.map(x=>x.name+' – '+x.room).join(', ')}))}</p>`:''}
         ${p.branches?.length?`<div class="play-children"><small>${t('play.branches')}</small>${p.branches.map(b=>`<button data-play-place="${esc(b.id)}">${esc(b.short_name)} · ${esc(b.town)}</button>`).join('')}</div>`:''}
         ${itemsRow()}
         <div class="vn-place-tools"${studio&&placeTools?'':' hidden'}>
@@ -905,6 +940,9 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
   // rooms inside, next rooms of the building, back to the building, out to the street.
   function exitTargets(id){
     const n=id?node(id):null;if(!n)return [];
+    // A car is no place on the map, but someone sitting in it can be visited (owner, 2026-11-22: Norbi
+    // "drives to work" from his own car, with no way to reach it). Only while somebody is inside.
+    const onMap=c=>c.placed!==false&&!c.passage&&(c.place_kind!=='vehicle'||(!!c.location_id&&peopleIn(c.id).length>0));
     const town=townOf(n.id),parent=n.parent_id?node(n.parent_id):null;
     const into=c=>({id:c.id,town:false,relation:'inside',ico:'enter',text:t('play.exitInto',{place:label(c)}),short:label(c),node:c});
     const back=b=>({id:b.id,town:false,relation:'back',ico:'back',text:t('play.exitBack',{place:label(b)}),short:label(b),node:null});
@@ -942,7 +980,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     const layer=$('#vn-doors');if(!layer||!current?.node)return;
     // A picture still loading would place the doors on the whole stage first, then move them.
     const bg=$('.vn > img.vn-bg-current:not([hidden])');if(force!==true&&bg&&!bg.complete)return;
-    if(talkCharacter&&!talkMinimized&&!doorsEditing){layer.innerHTML='';return;}
+    if(talkCharacter&&!talkMinimized&&!doorsEditing){layer.innerHTML='';dodgeDoors();return;}
     const box=pictureBox();if(!box)return;const saved=current.room_exits||{},targets=exitTargets(current.node.id);let auto=0;const stack={};
     const html=targets.map(e=>{const sv=saved[e.id]||{},dir=sv.dir||(['back','street'].includes(e.relation)?'back':AUTO_DIRS[auto++%AUTO_DIRS.length]);
       const placed=Number.isFinite(sv.x)&&Number.isFinite(sv.y);let left,top;
@@ -962,6 +1000,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     // Positions through CSSOM (the page's security policy forbids inline style attributes).
     for(const b of layer.querySelectorAll('[data-door]')){b.style.left=b.dataset.left+'px';b.style.top=b.dataset.top+'px';}
     if(doorsEditing)bindDoorDrag(layer,box);
+    dodgeDoors();
   }
   function bindDoorDrag(layer,box){
     let drag=null;
@@ -1038,6 +1077,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
         ${p.trip?.encounter?`<p class="vn-encounter"><b>${t('play.encounter')}:</b> ${esc(p.trip.encounter.text)}</p>`:''}
         ${p.people.length?p.people.map(x=>`<p class="vn-activity"><button class="vn-link" data-arrival-talk="${esc(x.id)}">${esc(x.name)}</button>${x.mood==="good"?" 🙂":x.mood==="bad"?" 😠":""}${x.level!==null&&p.level_labels?` <span class="vn-rel">${esc(p.level_labels[x.level])}</span>`:''} — ${esc(x.activity||'')}</p>`).join(''):`<p>${t('play.nobody')}</p>`}
         ${p.today?.length?`<details class="vn-today"><summary>${t('play.todayHere',{count:p.today.length})}</summary>${p.today.map(e=>`<p><b>${esc(e.slot)}:</b> ${esc(e.title)} – ${esc(e.summary)}</p>`).join('')}</details>`:''}
+        <div class="vn-arrival-doors">${doorsEditing?`<small>${t('play.doorsDragHint')}</small> <button type="button" class="primary" id="vn-arr-doors-save">${t('play.doorsSave')}</button> <button type="button" class="subtle" id="vn-arr-doors-reset">${t('play.doorsReset')}</button> <button type="button" class="subtle" id="vn-arr-doors-cancel">${t('common.cancel')}</button>`:`<button type="button" class="subtle" id="vn-arr-doors-edit">🚪 ${t('play.doorsEdit')}</button>`}</div>
         ${p.people.length>=2&&!talkCharacter?`<button type="button" class="vn-group-start" id="vn-group-start">👥 ${t('play.groupChoose')}</button>`:''}
         </div></div>`;
       // The ways out are only on the picture now (owner, 2026-11-14): door markers where the door
@@ -1046,6 +1086,11 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
       const exits=$$('#vn-doors [data-door]');etaFor(exits.map(b=>b.dataset.door)).then(eta=>{for(const b of exits){const m=eta[b.dataset.door];if(Number.isFinite(m)&&m>1&&b.isConnected&&!b.title.includes('·'))b.title+=' · '+t('play.minutesShort',{minutes:m});}}).catch(()=>{});
       preloadExits(exits.filter(b=>!b.dataset.town).map(b=>b.dataset.door));
       if($('#vn-group-start'))$('#vn-group-start').onclick=wrap(async()=>{const selected=await chooseGroupParticipants(p.people,esc);if(selected)await startGroup(selected);});
+      // Move the door tags onto the drawn doors from here (owner, 2026-11-22); the box stays open while editing.
+      if($('#vn-arr-doors-edit'))$('#vn-arr-doors-edit').onclick=()=>{doorsEditing=true;arrival.collapsed=false;showPlace(current);};
+      if($('#vn-arr-doors-cancel'))$('#vn-arr-doors-cancel').onclick=()=>{doorsEditing=false;showPlace(current);};
+      if($('#vn-arr-doors-save'))$('#vn-arr-doors-save').onclick=wrap(async()=>{await saveDoors();doorsEditing=false;showPlace(current);});
+      if($('#vn-arr-doors-reset'))$('#vn-arr-doors-reset').onclick=wrap(async()=>{const r=await api('/api/play/room-exits/'+encodeURIComponent(current.node.id),{exits:{},replace:true});current.room_exits=r.saved;doorsEditing=false;showPlace(current);});
       bindArrivalFold(box);
       return;
     }
@@ -1066,7 +1111,7 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
         ${ended?'':`${talk?.choices?.length&&!busy?`<div class="vn-quick vn-choices">${talk.choices.map((x,i)=>`<button type="button" data-quick="${esc(x)}" class="vn-choice vn-choice-${i}">${esc(x)}</button>`).join('')}</div>`:lines.length?`<div class="vn-quick">${['play.gesture1','play.gesture2','play.gesture3'].map(k=>`<button type="button" data-quick="${esc(t(k))}">${esc(t(k))}</button>`).join('')}</div>`:`<div class="vn-quick">${['play.quick1','play.quick2','play.quick3'].map(k=>`<button type="button" data-quick="${esc(t(k))}">${esc(t(k))}</button>`).join('')}</div>`}<form id="play-form" class="vn-form"><textarea id="play-input" rows="1" aria-label="${esc(t('play.inputLabel'))}" maxlength="2000" autocomplete="off" placeholder="${esc(t('play.placeholder'))}" aria-describedby="play-input-help"></textarea><button class="primary" ${busy?'disabled':''}>${t('play.send')}</button></form>`}
         ${showShared&&sharedFor.length?`<div class="vn-shared">${sharedFor.map(s=>`<button type="button" data-show-photo="${esc(s.media_id)}" title="${esc(s.description||'')}"><img src="${pic(s.media_id)}" alt="" loading="lazy" class="${s.intimate?'rel-blur':''}"></button>`).join('')}</div>`:''}
         ${!ended&&!busy&&talk?.mode==='intimate'?`<div class="vn-pace" role="group" aria-label="${esc(t('play.paceLabel'))}">${['slower','continue','stop'].map(p=>`<button type="button" data-pace="${p}" class="vn-pace-${p}">${t('play.pace.'+p)}</button>`).join('')}</div>`:''}
-        <div class="vn-buttons">${showTools?`<button type="button" id="vn-talk-view">${t(settings.talk_view==='chat'?'play.viewVn':'play.viewChat')}</button>`:''}${!ended&&talk?.last_turn?`<button type="button" id="vn-undo-turn" ${busy?'disabled':''}>${t('play.undoTurn')}</button>${talk.last_turn.can_regenerate?`<button type="button" id="vn-regenerate" ${busy?'disabled':''}>${t('play.regenerate')}</button>`:''}`:''}${!ended&&talkChannel==='in_person'&&talk?.mode!=='intimate'?(talkCharacter.stage==='intimate'?`<button type="button" id="vn-closer">💋 ${t('play.closer')}</button>`:''):''}${photoMode?`<button type="button" id="vn-photo-size">${photoSmall?'⛶ '+t('play.photoBig'):'▣ '+t('play.photoSmall')}</button>`:''}${!ended&&showTools&&sharedFor.length?`<button type="button" id="vn-shared">📷 ${t('play.showShared')}</button>`:''}${talkChannel==='in_person'&&(showTools||photoMode)?`<button type="button" id="vn-photo">${photoMode?t('play.photoOff'):t('play.photoOn')}</button>${photoMode&&photoList.length?`<button type="button" id="vn-photo-prev" aria-label="${esc(t('play.prevPhoto'))}">◀</button>${showTools?`<span class="vn-mark">${['non_intimate','nudity','sexual_activity'].map(l=>`<button type="button" data-mark="${l}" title="${esc(t('play.mark.'+l))}">${{non_intimate:'☀',nudity:'🔥',sexual_activity:'🔞'}[l]}</button>`).join('')}</span>`:''}<span class="vn-photo-count">${photoIdx+1}/${photoList.length}${photoList[photoIdx]?.intimate?' 🔞':''}${photoList[photoIdx]?.with_palor?' · Palorral':''}</span><button type="button" id="vn-photo-next" aria-label="${esc(t('play.nextPhoto'))}">▶</button>`:''}`:''}${!ended&&talkChannel==='in_person'&&!photoMode&&talk&&talkCharacter.stage&&talkCharacter.stage!=='none'&&(talk.mood||talk.mode==='intimate')?`<button type="button" id="vn-moment" class="vn-moment">✨ ${t('play.moment')}</button>`:''}${talkChannel==='in_person'&&showTools?`<button type="button" id="vn-snapshot">📸 ${t('picture.snapshot')}</button><button type="button" id="vn-scene-prompt">📋 ${t('play.scenePrompt')}</button>${phone?'':`<label class="vn-add">➕ ${t('play.addScene')}<input type="file" id="vn-add-scene" accept="image/png,image/jpeg" hidden></label>`}`:''}${showTools||talkChannel!=='in_person'?`<button type="button" id="vn-talk-notes" title="${esc(t('play.notesLead'))}">${t('play.notes')}</button>`:''}${talkChannel==='in_person'?`<button type="button" id="vn-tools" class="vn-tools" aria-expanded="${showTools}" title="${esc(t('play.toolsTitle'))}">${showTools?'✕':'⋯'} ${t('play.tools')}</button>`:''}${!ended&&showTools&&talk&&talkChannel==='in_person'&&guests.length<2?`<button type="button" id="vn-guest-add" title="${esc(t('play.guestAddTitle'))}">${t('play.guestAdd')}</button>`:''}<button type="button" id="vn-history">${t('play.history')}</button>${goodbyeButtons(lines,ended)}</div></div></div>
+        <div class="vn-buttons">${showTools?`<button type="button" id="vn-talk-view">${t(settings.talk_view==='chat'?'play.viewVn':'play.viewChat')}</button>`:''}${!ended&&talk?.last_turn?`<button type="button" id="vn-undo-turn" ${busy?'disabled':''}>${t('play.undoTurn')}</button>${talk.last_turn.can_regenerate?`<button type="button" id="vn-regenerate" ${busy?'disabled':''}>${t('play.regenerate')}</button>`:''}`:''}${!ended&&talkChannel==='in_person'&&talk?.mode!=='intimate'?(talkCharacter.stage==='intimate'?`<button type="button" id="vn-closer">💋 ${t('play.closer')}</button>`:''):''}${photoMode?`<button type="button" id="vn-photo-size">${photoSmall?'⛶ '+t('play.photoBig'):'▣ '+t('play.photoSmall')}</button>`:''}${!ended&&showTools&&sharedFor.length?`<button type="button" id="vn-shared">📷 ${t('play.showShared')}</button>`:''}${talkChannel==='in_person'&&(showTools||photoMode)?`<button type="button" id="vn-photo">${photoMode?t('play.photoOff'):t('play.photoOn')}</button>${photoMode&&photoList.length?`<button type="button" id="vn-photo-prev" aria-label="${esc(t('play.prevPhoto'))}">◀</button>${showTools?`<span class="vn-mark">${['non_intimate','shirtless','nudity','sexual_activity'].map(l=>`<button type="button" data-mark="${l}" title="${esc(t('play.mark.'+l))}">${{non_intimate:'☀',shirtless:'🩳',nudity:'🔥',sexual_activity:'🔞'}[l]}</button>`).join('')}</span>`:''}<span class="vn-photo-count">${photoIdx+1}/${photoList.length}${photoList[photoIdx]?.intimate?' 🔞':''}${photoList[photoIdx]?.with_palor?' · Palorral':''}</span><button type="button" id="vn-photo-next" aria-label="${esc(t('play.nextPhoto'))}">▶</button>`:''}`:''}${!ended&&talkChannel==='in_person'&&!photoMode&&talk&&talkCharacter.stage&&talkCharacter.stage!=='none'&&(talk.mood||talk.mode==='intimate')?`<button type="button" id="vn-moment" class="vn-moment">✨ ${t('play.moment')}</button>`:''}${talkChannel==='in_person'&&showTools?`<button type="button" id="vn-snapshot">📸 ${t('picture.snapshot')}</button><button type="button" id="vn-scene-prompt">📋 ${t('play.scenePrompt')}</button>${phone?'':`<label class="vn-add">➕ ${t('play.addScene')}<input type="file" id="vn-add-scene" accept="image/png,image/jpeg" hidden></label>`}`:''}${showTools||talkChannel!=='in_person'?`<button type="button" id="vn-talk-notes" title="${esc(t('play.notesLead'))}">${t('play.notes')}</button>`:''}${talkChannel==='in_person'?`<button type="button" id="vn-tools" class="vn-tools" aria-expanded="${showTools}" title="${esc(t('play.toolsTitle'))}">${showTools?'✕':'⋯'} ${t('play.tools')}</button>`:''}${!ended&&showTools&&talk&&talkChannel==='in_person'&&guests.length<2?`<button type="button" id="vn-guest-add" title="${esc(t('play.guestAddTitle'))}">${t('play.guestAdd')}</button>`:''}<button type="button" id="vn-history">${t('play.history')}</button>${goodbyeButtons(lines,ended)}</div></div></div>
       ${settings.talk_view==='chat'?`<div class="vn-chat-feed" role="log">${lines.slice(-12).map(l=>`<p class="${l.speaker==='palor'?'vn-chat-mine':'vn-chat-theirs'}"><b>${l.speaker==='palor'?'Palor':esc(isGuest(l)?l.speaker_name||'?':talkCharacter.name)}:</b> ${esc(l.text)}</p>`).join('')}</div>`:''}${showHistory?`<div class="vn-history">${lines.map(l=>`<p><b>${l.speaker==='palor'?'Palor':esc(isGuest(l)?l.speaker_name||'?':talkCharacter.name)}:</b> ${esc(l.text)}</p>`).join('')||`<p class="muted">—</p>`}${talk?.revised_turns?.length?`<details class="vn-revisions"><summary>${t('play.earlierVersions')}</summary>${talk.revised_turns.map(revision=>`<article><small>${esc(new Date(revision.created_at).toLocaleString('hu-HU'))} · ${esc(t('play.revision.'+revision.action))}</small>${revision.lines.map(l=>`<p><b>${l.speaker==='palor'?'Palor':esc(talkCharacter.name)}:</b> ${esc(l.text)}</p>`).join('')}</article>`).join('')}</details>`:''}</div>`:''}`;
     bindTalkControls();
     if($('#vn-talk-view'))$('#vn-talk-view').onclick=wrap(async()=>{settings=await api('/api/play/settings',{talk_view:settings.talk_view==='chat'?'vn':'chat'});renderTalk();});
@@ -1388,7 +1433,8 @@ export function installPlayUI({$,$$,esc,api,toast,exit,requestHeaders=()=>({}),p
     if(!talkCharacter){box.innerHTML='';return;}
     // A face-to-face talk while another screen is open (journal, map…): one small reminder that
     // leads back to it, instead of a second chat window (2026-11-13).
-    if(talkChannel==='in_person'&&current?.node){
+    // A talk with someone met on the town street opens as a window over the town map (2026-11-23).
+    if(talkChannel==='in_person'&&current?.node&&!(mode==='town'&&talkCharacter?.id===streetTalkId)){
       paintTalkPill(box);
       return;
     }

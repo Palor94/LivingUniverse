@@ -23,6 +23,8 @@ export async function mapLimit(items,limit,fn){
 }
 import {installWorldSocial} from './world-social.mjs';
 import {installInnerState,effectiveIntensity} from './inner-state.mjs';
+import {installSocialExperiences,DIMENSIONS} from './social-experiences.mjs';
+import {installWorldFactGate} from './world-fact-gate.mjs';
 import {installKnownPlaces} from './known-places.mjs';
 import {installMorning} from './morning.mjs';
 import {installHiddenEvents} from './hidden-events.mjs';
@@ -50,7 +52,7 @@ const TEMPO={calm:{max:3,hint:'Nyugodt ütem: kevés, hétköznapi esemény.'},n
 const titleWords=s=>new Set(String(s).toLocaleLowerCase('hu').match(/\p{L}{4,}/gu)||[]);
 const similar=(a,b)=>{const x=titleWords(a),y=titleWords(b);if(!x.size||!y.size)return false;let n=0;for(const w of x)if(y.has(w))n++;return n/Math.min(x.size,y.size)>=0.6;};
 
-export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfiles,provider=null,locationTree=null,now=()=>new Date(),realNow=now}){
+export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfiles,characterPolicy=null,provider=null,locationTree=null,now=()=>new Date(),realNow=now}){
   // Full place path for prompts ("Káloz › Cigánytelep › Sanyi háza"), else the plain name.
   const placePath=async(id,name)=>locationTree?await locationTree.pathOf(id,name):name;
   db.exec(readFileSync(new URL('./migrations/027-world-engine.up.sql',import.meta.url),'utf8'));
@@ -66,7 +68,8 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     CREATE INDEX IF NOT EXISTS world_places_character ON world_places(character_id);`);
   const hasGroups=!!one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='character_groups'");
   // 031: who heard what from whom, and characters' own beliefs (world-social.mjs).
-  const social=installWorldSocial({db,one,all,run,remember:(...a)=>remember(...a),now});
+  const experiences=installSocialExperiences({db,one,all,run,profile:cid=>profile(cid),now});
+  const social=installWorldSocial({db,one,all,run,remember:(...a)=>remember(...a),onHeard:x=>experiences.heard(x),now});
   // E2 (2026-11-21): each character's inner state, carried between conversations.
   const inner=installInnerState({db,one,all,run,now});
   // Known places (2026-11-22).
@@ -349,10 +352,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   const threadsOf=cid=>all(`SELECT promised_by,text,due_day,status,created_at FROM world_threads WHERE character_id=? AND rewound_at IS NULL ORDER BY created_at DESC LIMIT 12`,cid);
 
   function applyEffects(eventId,payload,actor){
-    // A first meeting makes both sides acquaintances before any other level change.
-    for(const [a,b] of payload.acquaintances||[])for(const [s,t] of [[a,b],[b,a]])if(levelOf(s,t)===undefined)setLevel(s,t,1,{reason:'Első találkozás',actor,eventId});
-    for(const m of payload.memories)remember(m.character_id,m.text,eventId);
-    for(const l of payload.level_changes)setLevel(l.source_id,l.target_id,(levelOf(l.source_id,l.target_id)??0)+l.delta,{reason:l.reason,actor,eventId});
+    return factGate.commitSimulation(eventId,actor);
   }
 
   // ---- round progress (2026-11-13) --------------------------------------------------------
@@ -390,7 +390,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     // Recall: memories about the people closest to him and what is on his mind today.
     const close=relations.filter(r=>(r.level??0)>=2).map(r=>r.name),memories=recallMemories(c.id,{about:[...close,...(pid?['Palor']:[])],text:[...doneToday,palorTalk,clip(c.profile?.values?.goals?.value,300)].join(' ')});
     const threads=openThreadsFor(c.id,day);
-    const prompt=agentPrompt({name:c.name,when,profile:profileText(c.profile,{use:'agent',secrets:true}),places,relations,known,memories,doneToday,palorTalk,threads,messaging:messaging&&!!pid,canInvite:messaging&&roundIndex>=0&&canInvite(c.id,pid,day)});
+    const prompt=agentPrompt({name:c.name,when,profile:profileText(c.profile,{use:'agent',secrets:true}),places,relations,known,memories,relationshipChanges:experiences.pairPrompt(c.id,[...known.keys()]),doneToday,palorTalk,threads,messaging:messaging&&!!pid,canInvite:messaging&&roundIndex>=0&&canInvite(c.id,pid,day)});
     const out=await ask(prompt.system,prompt.user,prompt.maxTokens,{purpose:'world'})||{};
     // An empty or broken answer is not retried (it may be billed): he follows his routine.
     if(typeof out.intention!=='string'||!out.intention.trim())out.intention=filled(c.profile,'weekly_routine')?'A szokásos rutinját követi: '+clip(c.profile.values.weekly_routine.value,200):'A szokásos dolgait intézi.';
@@ -472,6 +472,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
     const prompt=gmPrompt({when,slotLabel:slot.label,pacing:[pacing(day),tempo.hint].filter(Boolean).join(' '),
       today:all(`SELECT title,summary FROM world_events WHERE ${LIVE} AND world_day=? AND status IN ('applied','accepted') ORDER BY rowid`,day),
       knownList,intentions,cast,
+      relationshipChanges:present.map(id=>{const p=experiences.pairPrompt(id,present);return p?byId.get(id).name+' saját nézőpontja:\n'+p:'';}).filter(Boolean).join('\n'),
       levels:all('SELECT source_id,target_id,level FROM world_relationship_levels').filter(l=>castIds.has(l.source_id)&&castIds.has(l.target_id)).map(l=>`${byId.get(l.source_id).name} → ${byId.get(l.target_id).name}: ${LEVELS[l.level]}`),
       extras:[...new Set(intentions.flatMap(i=>i.wants_to_meet))].filter(id=>!castIds.has(id)).map(id=>byId.get(id)).filter(Boolean),
       places:placeRows,
@@ -510,7 +511,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
         meetings.push({id,character_ids:payload.character_ids});offscreen++;
       }
       // News travels only through these meetings (plan step 2.5).
-      told=social.spread(meetings,day,{palorId:pid,attention:attentionOf});
+      told=social.spread(meetings,day,{palorId:pid,attention:attentionOf,priority:e=>experiences.priority(e.id)});
       for(const i of intentions)if(i.message){const mid=randomUUID();run('INSERT INTO world_messages(id,from_character_id,text,world_day,event_id,read_at,created_at) VALUES(?,?,?,?,?,?,?)',mid,i.id,i.message,day,null,null,iso());messages++;
         if(i.invite&&hasTable('play_invitations')){const aid=randomUUID();run("INSERT INTO play_appointments(id,character_id,location_id,world_day,slot,status,created_at) VALUES(?,?,?,?,?,'invited',?)",aid,i.id,i.invite.location_id,i.invite.day,i.invite.slot,iso());run('INSERT INTO play_invitations VALUES(?,?,?)',aid,mid,iso());}}
       run('INSERT INTO world_runs VALUES(?,?,?,?,?,?,?,?)',randomUUID(),day,slot.id,fresh.length,messages,dropped,roundCost(),iso());
@@ -635,7 +636,7 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
       transaction(()=>setLevel(b.source_id,b.target_id,b.level,{reason:'Kézi beállítás',actor:'creator'}));return {ok:true};},
     'POST /api/world-engine/levels/propose':()=>proposeLevels(),
     // Owner only: characters' beliefs and who heard what from whom.
-    'GET /api/world-engine/social':()=>social.overview()
+    'GET /api/world-engine/social':()=>({...social.overview(),dimensions:experiences.pairs({excludeId:palor()?.id}),dimension_labels:DIMENSIONS})
   };
   async function handle({p,req,body,json}){
     if(!p.startsWith('/api/world-engine'))return false;
@@ -652,8 +653,11 @@ export function installWorldEngine({db,one,all,run,transaction,fail,ghostProfile
   }
   // Shared with Play mode and rewind (same cost cap, same memories and levels).
   // N1 (2026-11-22): owner-authored hidden events opened by conditions.
-  const hiddenEvents=installHiddenEvents({db,one,all,run,now,slots:SLOTS,levelOf,palorId:()=>palor()?.id});
-  const internals={inner,knownPlaces,morning,hiddenEvents,attention:cid=>attentionOf(cid),ask,people,palor,profile,profileText,autonomous,meetable,placesOf,levelOf,setLevel,remember,recentMemories,recallMemories,groupIds,openThreadsFor,addThreads,resolveThreads,noteLapsed,threadsOf,social,beliefsFor:social.beliefsFor};
+  const hiddenEvents=installHiddenEvents({db,one,all,run,now,slots:SLOTS,levelOf,palorId:()=>palor()?.id,
+    dimensionOf:(cid,key,targetId)=>experiences.state(cid,targetId??palor()?.id).scores[key]??null,
+    knows:(cid,eventId)=>{if(!one('SELECT 1 FROM characters WHERE id=?',cid)||!one("SELECT 1 FROM world_events WHERE id=? AND rewound_at IS NULL AND status IN ('applied','accepted')",eventId))return null;return social.knownEvents(cid,worldDayAt(now())).some(e=>e.id===eventId);}});
+  const factGate=installWorldFactGate({db,one,all,run,transaction,remember,setLevel,levelOf,palorId:()=>palor()?.id,experiences,policy:characterPolicy,now});
+  const internals={inner,experiences,factGate,knownPlaces,morning,hiddenEvents,attention:cid=>attentionOf(cid),ask,people,palor,profile,profileText,autonomous,meetable,placesOf,levelOf,setLevel,remember,recentMemories,recallMemories,groupIds,openThreadsFor,addThreads,resolveThreads,noteLapsed,threadsOf,social,beliefsFor:social.beliefsFor};
   // Job ledger (2026-11-13): a round whose status says "running" while no round runs in this
   // process was cut off (crash, restart). It is shown as stuck and can be marked interrupted.
   function roundState(){return {running,last:lastRound(),spent_today:spentToday(),cap:settings().daily_cap_usd};}

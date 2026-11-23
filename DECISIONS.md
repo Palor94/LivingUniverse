@@ -1,5 +1,24 @@
 # Decisions
 
+## 2026-11-22: Merge pending profile proposals through Grok
+
+Owner request: one character's pending profile proposals may be consolidated into
+one new pending proposal. Only fields present in multiple eligible proposals go to
+the configured Grok text API, one request per field; unique fields are copied locally.
+The newest field content is authoritative. Grok is instructed to exclude an entire
+older field proposal if any of it contradicts newer retained content, otherwise to
+integrate its nonredundant details without inventing facts. Results remain proposals
+for creator review; approved profiles and visual canon are unchanged.
+
+Use the existing Grok connection and daily AI cost cap, without enabling world
+simulation. Show the frozen model, affected fields, call count and estimated USD cost
+before explicit text-upload/cost confirmation. Preserve manual-edit precedence,
+creator visibility, input snapshots, method/model provenance and per-field source
+decisions. Plans expire after ten minutes and cannot dispatch twice, resume or retry
+automatically after uncertain outcomes. Validate current inputs before dispatch and
+commit; atomically supersede originals only after the complete result is saved.
+Desktop and private mobile creator routes retain their existing access checks.
+
 ## 2026-11-11: Owner-declared fictional AI collection origin
 
 The owner explicitly states that the collection media were AI-generated from fictional
@@ -1652,6 +1671,30 @@ Leaving marker: when a character's reply says he is about to go, the play talk s
 Recall benchmark (tests/recall-benchmark.test.mjs): 200 memories, 20 turning points. Before: topic recall@6 15/20 (misses: inflected short names, lengthened a/e, compounds). Recall words now fold á/é, keep 4-letter words (minus function words), match a short word's inflection and a stem inside a compound: 20/20, unasked 9 of 12 turning points (newest-12: 0), ~6 ms per recall.
 Validation: tests/hidden-events, schedules, recall-benchmark, memory-recall; related tests: no new failures from these changes (play-scenes and server-messages fail on another session's uncommitted "shirtless" work, not included in this commit).
 
+## 2026-11-22: "Félmeztelen" content level
+
+Owner request: besides hétköznapi and meztelen(ség) a separate félmeztelen tag. New level `shirtless`
+between `non_intimate` and `nudity` (order: non_intimate < shirtless < nudity < sexual_activity), one
+list in `app/content-levels.mjs` used by the media director, Play scenes/album, Képműhely, media
+review, Új képek and scene-file intake, Szereplőgyár orders, play-asset placement and the MCP tools.
+- File-name word `felmeztelen` (also `félmeztelen`; checked before `meztelen`); a `felmeztelen` folder
+  in Új képek marks its pictures. It can no longer be a free label.
+- UI marks: 🩳, key F in Képműhely and the content queue (1/2/3 keep their meaning).
+- Stages: everyday (none) shows only everyday; flirt allows shirtless and nude. Beats (owner, same
+  day): a kiss wants shirtless (was everyday only), undress/after nudity, sex explicit; a flirt mood
+  (phone pictures) prefers shirtless, nude still allowed. A kiss does not flag a group talk intimate.
+- Szereplőgyár shirtless scenes are ordered as `shirtless` (were `nudity`); its "Félmeztelen" option
+  is now really shirtless, and "Meztelen" is a separate option.
+- Placement gate (owner, same day): shirtless is placed like everyday for every character; only
+  nudity and sexual_activity still need `intimateAllowed` (assigned in-scope collection media).
+- The world-v1 vision contract is NOT changed. Owner rule (same day): an AI result of non_intimate
+  whose evidence says "bare chest" / "bare torso" (also hyphenated) counts as shirtless, applied when
+  read (media director, Képműhely, content queue) and to new video stills; never lowers nude or
+  explicit, never overrides an owner label, stored analyses are not rewritten. Older video stills
+  keep their saved level (their evidence was not stored).
+- Existing labels are not migrated: pictures marked nudity that are only shirtless are relabelled by hand.
+
+
 
 2026-11-22: adult switch removed; routines with activity and privacy; Palor can catch secrets
 
@@ -1659,6 +1702,66 @@ Owner: the game is adult from the start; the on/off "Felnőtt tartalom" switch o
 Routine cells may say what he does there (activity) and who may know (public / private = those close to him, level ≥2 with Palor / secret = only he). The activity enters his prompt and the owner's "Ki hol van"; on the player's screen only public ones, or ones Palor already discovered. When Palor finds him in person at a private (and Palor is not close) or secret routine, the scene opens with "RAJTAKAPOTT" (his own reaction by his nature), he gets a memory (importance 4), and later talks carry "PALOR TUDJA RÓLAD". Discoveries are rewindable (migration 038). The in-app proposal now also reads sexuality, intimacy, attraction, presented self-image and secrets; a proposal written outside the app (POST /api/play/schedules/:id/proposal) is checked the same way and still needs the owner's accept.
 docs/GROK_SECRETS_PROMPT.md: Grok proposes 3–5 secrets per character from the existing profile (at least one sexual/intimate, one other, one tied to a place and time so it can be caught), as Szellemprofil proposals for the owner to approve.
 Validation: tests/secret-routines, schedules; switch tests updated (intimacy, play-mode, play-stories, scene-images, play-assets); related tests: no new failures.
+
+## 2026-11-22: Missed commitments – personality-specific prompt integration regression
+
+Added tests/missed-commitments.test.mjs: six synthetic male profiles exercise the real talk and save-point HTTP routes against a local mock provider. A saved promise remains open before its deadline, then lapses and reaches the next conversation with the correct attachment/recognition/security/autonomy/low-attachment interpretation and communication style. An accepted missed date carries the corresponding interpretation too. Unknown scales add no invented event reading; other profiles' interpretations are excluded. Both reminders are marked noted and do not repeat on the next turn; the broken-promise agenda also stops repeating. Existing world-audit coverage retains promise fulfilment and rewind checks.
+
+Validation: node --test tests/missed-commitments.test.mjs tests/world-audit.test.mjs tests/character-distinctness.test.mjs tests/play-scenes.test.mjs – 26/26 passed on Windows. No runtime correction was necessary. This proves provider-input construction and state handling, not a live model's response quality. No paid calls, external uploads, live catalogue edits, migrations or application restart.
+
+## 2026-11-22: Character voice survives long-talk summaries (offline regression)
+
+Added tests/long-talk-voice.test.mjs: two contrasting synthetic male profiles, each in person and by phone, take 16 turns (32 stored lines). Every provider request retains the same complete own-profile block, including speech, voice card, behaviour rules, typical lines and four communication scales with their behavioural guidance. Other profiles' voices stay absent. Multiple running-summary updates are exercised; the initial line actually leaves the history window and the neutral summary enters subsequent prompts without supplying or replacing voice guidance. The role/voice instruction stays present. No runtime correction was needed.
+
+Validation: long-talk-voice, world-audit, character-distinctness, profile-prompt and missed-commitments tests: 34/34 passed on Windows. Uses the local mock provider and synthetic temporary databases only; the long-talk regression passes all four scenarios. Live reply style and model compliance remain unmeasured and belong to the separately approved provider-quality evaluation. No paid call, upload, live profile change or restart.
+
+## 2026-11-22: Five living-character follow-ups – measured prompts, evidence-based reactions and narrative pilots
+
+Owner requested the five follow-ups together: 30 conversation situations; more personality-specific event reactions; a complete consequence chain; directed relationship dimensions; three distinct narrative pilots. Implemented as additions to the existing engine, without a new dependency or a paid call. Details, weights, limitations and rollback: docs/LIVING_CHARACTERS_FOLLOWUP_2026-11-22.md.
+
+Conversation baseline: tests/conversation-regression.test.mjs has 10 acceptance checks in person, on the phone and in a group, 30/30 successful. From 200 synthetic memories all three relevant turning points reach the request; the maximum input estimate is 2076 tokens (4096 regression guard, not a universal runtime context limit). It also checks own voice, motives, player agency, explicit-field and private-note boundaries, offstage knowledge, profile separation and the summary fact gate. Group prompts now include each participant's own recalled memories; previously they were missing.
+
+app/social-experiences.mjs and additive migration 039 retain immutable event/conversation/line/memory-bound receipts, method social-experience-v1, personal interpretations and bounded directed changes in trust, familiarity, resentment, loyalty, attraction and boundary respect. Unknown dimensions remain unknown; scores are changes since recorded evidence, not invented canonical baselines. The same save-point call may propose up to three classifications: praise, criticism, rejection, concrete help, respected boundary and the character's own explicitly stated attraction. A conservative local Hungarian phrase whitelist requires the full source line and correct speaker, rejecting questions, reports, future deeds, unsupported classes and guest misattribution. Ambiguous paraphrases abstain. These are initial gameplay heuristics, not measured psychological parameters; canonical relationship texts and overall levels are preserved. No player feeling or reciprocal attraction is inferred. Relationship details expose the known changes and source quotes; 1:1/group prompts receive their own state.
+
+World news retains event, immediate source, meeting and hearing day. Significant evidenced news takes precedence over routine encounter records within the existing caps, with no extra provider call. Heard interpretations remain explicitly hearsay and never change relationship scores. Only a quote already present in the shareable event summary can contribute a heard reaction; no private transcript quote or attraction declaration is newly propagated. Knowledge lookup excludes events or reports from a later world day.
+
+Hidden conditions now support known relationship dimensions and recorded event knowledge; unknown stays undecided under negation. Owner-authored hidden events have an optional private flag, also available in the editor; its privacy follows the conversation event even when the summary model omits the flag. Private and intimate events never spread as news. Existing unflagged events are not reclassified.
+
+tests/narrative-pilots.test.mjs proves the complete firsthand deed -> world meeting -> relay -> different personal interpretation -> later conditional scene chain, with chronology, provenance, rewind and undo. Three synthetic story pilots (everyday conflict, private secret disclosure and approach) each have three tested free-text paths and different later callbacks; no forced romance or invented player consent. Fixtures stay in tests/fixtures/narrative-pilots.mjs and are not installed into the live world. This completes the requested pilots, not replacement of the entire legacy fixed-choice story engine.
+
+Before first migration of an existing database, a local SQLite online backup is integrity- and foreign-key-checked. Logical export/restore includes new receipts, world knowledge and hidden event definitions/reveals. An empty-catalogue restore of the full consequence chain is verified. Rewind and undo restore dimension evidence, hearing records and reveals. The down SQL drops only the derived experience table; an unused additive hidden-event privacy column can remain.
+
+Validation: 63/63 focused tests passed; the final full Windows run had 578 tests, 576 passed, only the two already observed failures in character-orders and scene-images remained (logs: %TEMP%/lu-five-tasks-final-suite-20261122.log). The final chronology/priority/back-up/restore paths are covered by the full run. No real service quality claim, new live characters, canon change, training, upload or paid dispatch. Runtime activation requires an application restart; no live migration has been asserted by these tests.
+
+Deployment verification: checked no active/busy work, requested the built-in restart, then verified the live social_experiences table and hidden_events.private column with a read-only connection. The actual pre-migration backup also passed integrity_check and foreign_key_check on read-back. Live code check: 0 changed files, state ok; home and Play module return 200; running/stuck jobs both 0. No live story fixtures or test conversations were inserted. The feature is active for subsequent normal use; the synthetic tests still do not certify live model quality.
+
+## 2026-11-22: Ordered follow-ups, step 6 – separate face/body review and measured body abstention
+
+Owner requested remaining tasks in order 6 → 1 → 3 → 4. Step 6 adds local independent face/body quality comparison, per-person region selection, current approved-reference/hash/crop checks, and attributed append-only human output reviews. Reviews are never canon promotion; pending reviews expire and are invalidated by changed source bytes or canon revision. The existing face method and existing generation gates are unchanged. No private media is uploaded and no new model is installed. The extra quality table is exported/restored and startup creates a verified local pre-migration backup.
+
+The optional new body measurement path uses the already installed DINOv2-small with aspect-preserving letterboxing (`local-dinov2-small-crop-letterbox-v1`); its scores always need human review. Existing body callers retain their old default preprocessing. A bounded offline read-only run on 12 current approved body references had 11 usable samples, 7 independent same-character pairs and 47 different-character pairs. At 0.8 the hit rate was 28.6%, false-alarm rate 8.5%; at 0.9 there were no hits. This fails to establish reliable body identity; no threshold or writer is enabled. Report outside OneDrive: %LOCALAPPDATA%/LivingUniverse/reports/body-quality-2026-11-22.json. Step 6 remains open for a stronger body method/reviewed benchmark; model installation still needs explicit owner approval. Separate review and benchmark regressions: 8/8 successful.
+
+## 2026-11-22: Random pop-up stories back to the written A–D graph
+
+Owner: the narrative (free-text) request was meant for the main conversations, not for the random encounter stories. Pop-up stories start as their written A–D graph again (`play-stories.mjs` startRun). The free-text narrative director stays installed and runs a story only when the play setting `story_mode` is `narrative` (default `graph`); narrative-director tests opt in to it.
+- Same day, owner: under the A–D choices a "Saját válasz…" field lets the player type his own answer. The AI first checks whether it fits a written choice or a later block (`narrative.matchWritten`); if so, a short bridge and the written path continues there. Otherwise a free-text scene continues the story from what already happened (`story_so_far`) and knows the blocks still ahead (`story_nodes`); when it naturally reaches one it returns `rejoin`, the free scene closes with `resume:true` (the story run stays open) and the written story continues from that block. Visited blocks are never rejoin targets.
+
+2026-11-23: Shared narration/world-fact gate verified
+
+Narrator and narrative sources stage typed, source-hash-bound proposals only. Explicit Creator approval creates a private event and validated effects atomically through the same commit gate used by simulation and closed conversation summaries. Receipts prevent double application; changed sources, unknown participants, invalid relationship directions and oversized changes are refused. Conversation memories retain subjective status; no automatic appearance/reference/canon writes. Rewind/undo and export/restore preserve proposals, later approval decisions and receipts. Creator review lives under World engine / Rejtett események. Details: docs/WORLD_FACT_GATE.md.
+
+Owner correction retained: preserve Claude's existing written-story/free-answer behavior; no replacement of the story system and no story-mode setting change. The former two image-related Windows test expectations now match the existing shirtless and stranger-flirt rules. Validation: full current suite 593/593 passing; six gate tests rerun with an additional real isolated restore assertion; synthetic browser approval/rejection checks at 1366 and 375 px pass. No paid calls, private uploads, model installs or live test data. Automatic body identity remains open after the inadequate bounded benchmark documented in docs/VISION_ENGINE.md.
+
+## 2026-11-23: Met on the town street – talk there, not at the destination
+
+Owner: someone met on the way within a town no longer "comes along" to the destination (Feri appeared in Norbi's house). When an encounter brings a person and the destination lies inside a town, Palor stops on that town's street; play state keeps `street_meet` (person, street node, day part) so the person counts as present there; the town map opens with a window (A: talk to him there – the talk opens as a window over the town map; B: walk on to the original destination). No appointment is booked for street meetings. Road encounters between towns without a town destination keep the old behaviour. Also: a written story continued with a free answer plays in the story's own scene, without the characters at Palor's current place.
+
+
+2026-11-23: Directed NPC-to-NPC relationship dimensions
+
+The shared fact gate now projects optional evidenced interactions from applied/accepted world events into the existing social_experiences table. Six existing kinds, personal weights and score bounds are reused. Both stable-ID participants must be NPCs; an exact full actor/recipient-attributed summary line and conservative speech/action validation are required. Unknown/ambiguous evidence abstains. Help/praise/criticism/rejection/boundary acts affect the recipient toward the actor; explicitly spoken attraction affects only its speaker toward its addressee. No reciprocal feelings, consent, automatic aggregate level, canon or biography changes. Serious events remain pending until accepted; hearsay changes no dimension. No new calls, schema or historical backfill.
+
+Receipts keep source event, quote, optional real memory and world-social-experience-v1 provenance, atomically with the fact-gate receipt. Interaction source hashes include the summary; duplicate application and changed-source replay are refused. Each NPC intention prompt gets only his own directed state; GM context identifies each perspective separately. Creator World / Relationships exposes directed scores and evidence; hidden dimension conditions optionally accept target_id. Rewind/undo and empty-catalogue export/restore verified. Full suite 598/598 passed; real local browser smoke at 1366/375 px passed using synthetic records only. Claude's story system and story settings preserved. Details and narrow recognition limits: docs/NPC_RELATIONSHIPS.md.
 
 
 2026-11-23: Closing voice reminder in every character prompt (owner)
@@ -1673,3 +1776,18 @@ ops/robot-player.mjs (npm run robot) plays random valid actions on a backup copy
 ops/ui-journeys.mjs (npm run journeys) clicks real player paths in Edge on the sandbox (port 4327, mock AI) at desktop and phone width: open Play, travel, talk, refresh mid-talk (nothing sent twice, talk resumes), double-click send (one turn only), wait, the phone page; after every step the checks plus browser console/page errors; a missing button is SKIPPED with its selector, never a silent pass. After Covel's e2e rules (MIT); written fresh.
 Owner decision: a character whose day puts him on a town's own street ("Utca"/"Street" directly under a town) is met there: walking inside that town, Palor runs into him in the existing street window (talk / walk on), once per day part each, also when the random road roll picks him. Stairwells and regions remain invalid places to stand. First robot run on a copy of the live world found Serge and Ricsi on "Budapest - street" by their routines; now valid.
 Validation: tests/invariants, street-people, robot-player (14 new tests); play-mode/dialog/group/travel/scenes/guests/resume/history/turn-revisions/distinctness: no new failures (play-stories' two connector tests fail identically without this change). Robot: 100 mock steps on the live copy, 0 rule breaks. Journeys and the live robot were not run here (Linux sandbox: no Edge, Windows-only key). Rollback: revert the commit.
+
+
+2026-11-23: Remaining tasks – schedules, clock consistency, real replies, body trial
+
+Owner deferred perception uncertainty/imperfect recall in favour of reliable basic information handling. Audited 74 active NPCs; filled 44 empty, source-supported weekday cells across nine routines, retained all existing cells and seasonal rules, and added two existing workplace links. Moon Ihan stays flexible by explicit owner instruction. Schedule acceptance now binds source/profile/places/current state and preserves proposals on failure; the editor prevents stale overwrites.
+
+Retain real time + action time (D1), existing routines/appointments/daily/conditional scheduling, and real-day cost caps. Fixed clock cache consistency after rollback/restore and actual clock rewind; undo restores clock and refuses new-branch changes even when game timestamps repeat. No new generic queue or continuous simulation.
+
+Owner-approved synthetic Grok test: first batch $0.0655494 had contaminated fixture history and is invalid as an independent comparison. Corrected isolation regression added; after owner continuation on the additional $0.25 proposal, 25 independent replies completed for $0.0521083. Lexical distinctness is high (0.9337–0.9791) but manual review shows repeated example lines and goals displacing direct answers. No claim of factual quality or before/after improvement.
+
+Expanded DINO body benchmark remains inadequate. Owner approved a local MediaPipe pose/silhouette trial and raised public download allowance to 1000 MB. Pinned artifacts installed outside OneDrive, no private uploads/paid calls/canon changes. Only 5/24 measurements usable, 14 WASM aborts, zero usable positive pairs: not a reliable identity replacement; live pipeline unchanged and body identity remains open. Full suite 618/618 passes. Evidence, costs, limitations and sources: docs/REMAINING_TASKS_REVIEW_2026-11-23.md.
+
+Parallel owner clock decision C was preserved: breaks hold at the next 07:00 unless continuous engine mode is on. Rewind action revisions ignore read-only activity heartbeats while still guarding real clock/story actions. Four logical-day test fixtures explicitly bypass the real-time break cap; live defaults remain unchanged. Combined policy/chronology checks 27/27 passed.
+
+Final combined validation: 621/621 tests passed, including the preserved break-cap behavior, real clock rewind/undo, logical-day fixture chronology and Creator schedule/whereabouts not counting as play. The body scope guard remains an abstention improvement, not a reliable body-identity solution.

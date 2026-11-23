@@ -2,6 +2,7 @@ import {promises as fs,readFileSync} from 'node:fs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {visualVersion} from './public/image-hash.js';
+import {figureSimilarityFilter} from './media-purpose.mjs';
 
 const exec=promisify(execFile);
 // No content reads: consult Windows cloud recall flags before opening a stream.
@@ -68,7 +69,7 @@ export function installDuplicates({db,all,one,run,fail,safeFile,fingerprint,isBu
     if(p==='/api/duplicates/groups'&&req.method==='GET'){
       const mode=url.searchParams.get('mode')||'exact',threshold=Number(url.searchParams.get('threshold')||6),offset=Math.max(0,Number(url.searchParams.get('offset'))||0);
       if(!['exact','similar'].includes(mode)||!Number.isInteger(threshold)||threshold<0||threshold>12)throw fail('Invalid comparison options');
-      const rows=all('SELECT m.*,f.signature,f.sha256,f.visual_hash,f.visual_version,f.width,f.height FROM active_media m JOIN media_fingerprints f ON f.media_id=m.id ORDER BY m.relative_path');
+      const rows=all(`SELECT m.*,f.signature,f.sha256,f.visual_hash,f.visual_version,f.width,f.height FROM active_media m JOIN media_fingerprints f ON f.media_id=m.id ${mode==='similar'?'WHERE '+figureSimilarityFilter(one):''} ORDER BY m.relative_path`);
       // Each fingerprint is still checked against its file, 32 at a time instead of one by one
       // (661 OneDrive files took ~350 ms sequentially); the order of results stays the same.
       const fresh=new Array(rows.length);

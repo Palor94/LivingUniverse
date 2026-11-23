@@ -78,11 +78,12 @@ export function anchorOf(participants,cid){
   return r&&[r.x,r.y,r.width,r.height].every(Number.isFinite)?{x:r.x,y:r.y,width:r.width,height:r.height,side}:{side};
 }
 // The highest content level each intimacy stage allows: none → everyday only, flirt →
-// nudity, intimate → explicit (analysis levels: non_intimate / nudity / sexual_activity).
+// shirtless and nudity, intimate → explicit (levels: content-levels.mjs).
 export const STAGE_ALLOW={none:'non_intimate',flirt:'nudity',intimate:'sexual_activity'};
-// Scene beats of an in-person conversation and the content level each one wants (0 everyday,
-// 1 nudity, 2 explicit); the stage still caps what may be shown.
-export const BEATS=['talk','flirt','kiss','undress','sex','after'],BEAT_WANT={talk:0,flirt:0,kiss:0,undress:1,sex:2,after:1};
+// Scene beats of an in-person conversation and the content level each one wants, as a rank of
+// LEVELS (0 everyday, 1 shirtless, 2 nudity, 3 explicit); the stage still caps what may be shown.
+// A kiss wants a shirtless picture (owner, 2026-11-22), so the scene warms up step by step.
+export const BEATS=['talk','flirt','kiss','undress','sex','after'],BEAT_WANT={talk:0,flirt:0,kiss:1,undress:2,sex:3,after:2};
 export const MAX_DAILY_RISES=3;
 export const PACES=['slower','continue','stop'],PACE_TEXT={slower:'*Palor lassít, és csak gyengéden közel marad hozzád.*',continue:'*Palor közelebb húz, és folytatná.*',stop:'*Palor megáll, és megkérdezi, minden rendben van-e.*'};
 export const cleanChoices=v=>(Array.isArray(v)?v:[]).filter(x=>typeof x==='string').map(x=>clip(x.replace(/[\u0000-\u001f\u007f]/g,' ').replace(/<[^>]{1,200}>/g,'').trim(),160)).filter(Boolean).slice(0,3);

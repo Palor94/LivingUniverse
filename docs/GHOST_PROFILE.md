@@ -90,7 +90,19 @@ Kompatibilitás: a Grok-fájlok type mezője a kind szinonimája; ellentmondó t
 
 A sikeres JSON-betöltés azonnal megnyitja az érintett javaslatot a szerkeszthető mezőnézetben. A fejléc jelzi, hogy ez még javaslat, nem elfogadott profil. A függő javaslatok felül külön választóval megnyithatók; a privát oldal proposal lekérdezési paraméterrel konkrét javaslatot is megnyit. A betöltés továbbra sem jelent jóváhagyást. A Barni-fájl éles böngészős próbáján 44 mező megjelent; a meglévő azonos javaslatot újrahasználta, elfogadás nélkül.
 
+### Profiljavaslatok átfésülése (2026-11-22)
+
+Legalább két függő javaslat esetén a profil felső javaslatsávjában és a bírálati ablak alsó gombsorában megjelenik a **Profiljavaslatok átfésülése** gomb. Egy karakter függő javaslatait egy új, külön elbírálandó javaslatba egyesíti. A csak egyszer szereplő mezőket változatlanul, helyben másolja; csak a több javaslatban szereplő mezőkhöz indít Grok API-hívást, mezőnként egyet. Ha nincs átfedés, nincs API-hívás és költség sem.
+
+A modell legújabbtól legrégebbiig kapja meg egyetlen mező javasolt értékeit. Az utasítás szerint a legújabb tartalom teljes egészében elsődleges. Ha egy régebbi mezőjavaslat bármely része tartalmilag ellentmond az újabb megtartott tartalomnak, az egész régebbi mezőjavaslat kimarad; csak a nem ellentmondó, nem ismétlődő részletek épülhetnek be. A szemantikai döntés modelljavaslat, ezért az eredmény további szerzői elbírálásra vár. Skálán a legújabb szám marad, nincs átlagolás; a legújabb üres szöveg nem töltődik vissza régiből. A korábbi kézi döntések védelme megmarad. Az egyesített modellmezők hipotézisek, és a felhasznált szerzői tartalom nem válik nyilvánossá.
+
+A küldés előtt látszik a mezők listája, a beállított Grok modell, a hívásszám és a válaszkerettel számított becsült USD-költség. A megerősítés ezeknek a javaslatszövegeknek a Grokhoz küldését és költségét engedélyezi. A meglévő Grok kapcsolatot és napi AI-költségkeretet használja; a világszimulációt nem kapcsolja be. Jóváhagyott profil, kánon, média és adminjegyzet nem kerül a kérésbe.
+
+A tíz percig érvényes terv rögzíti a bemenetet, a promptot, a modellt, az árazást és a módszerverziót. A futási állapot az alkalmazás helyi, exportált settings táblájában marad. Ugyanannak a tervnek az ismételt végrehajtása nem indít új hívást; futó, hibás vagy bizonytalan eredményű terv nem folytatódik automatikusan. Profil-, sablon-, javaslat- vagy modellváltozás megállítja a mentést. Csak teljes siker után, egy tranzakcióban jön létre az új függő javaslat, az eredetiek pedig `superseded` állapotban, az új javaslatra mutató hivatkozással megmaradnak. A mezőnként felhasznált és kihagyott javaslatazonosítók visszakövethetők. Elfogadott érték, profilverzió és vizuális kánon nem változik.
+
 ### Felugró kérdéssor
+
+A bírálati ablak minden lépésén és az összefoglalón elérhető a **Teljes javaslat elutasítása** gomb. Ez a teljes javaslatot elutasítottként lezárja, törli a hozzá tartozó böngészőlap-piszkozatot, és frissíti a profilt. Az elfogadott profiladatok változatlanok maradnak; a lezárt javaslat az előzményekben megmarad. Sikertelen kérésnél az ablak és a piszkozat megmarad.
 
 A javaslatok elbírálása felugró dialogban, mezőnként történik. Elfogadás, szerkesztés, kihagyás és visszalépés lehetséges. Az Elfogadom gomb még csak az áttekintés döntését jegyzi meg; adatbázisba kizárólag az összefoglaló külön jóváhagyó gombja ír. A kimaradó és át nem nézett mezők megmaradnak. A bezárás/folytatás a böngészőlap sessionStorage-piszkozatát használja, profil- és sablonverzióhoz kötve.
 

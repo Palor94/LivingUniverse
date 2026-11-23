@@ -65,7 +65,7 @@ test('talk: each reply carries a scene beat, suggested replies and a spark; the 
     assert.match(requests.at(-1).user,/reakciói/);
     // Album: the two scene pictures shown are unlocked; the nude one is still locked (counted, not shown).
     const album=(await call('/api/play/album/'+a.id)).data;
-    assert.equal(album.unlocked.length,2);assert.equal(album.total,3);assert.deepEqual(album.locked,{non_intimate:0,nudity:1,sexual_activity:0});
+    assert.equal(album.unlocked.length,2);assert.equal(album.total,3);assert.deepEqual(album.locked,{non_intimate:0,shirtless:0,nudity:1,sexual_activity:0});
     assert.ok(album.unlocked.every(m=>m.media_id!==id['n1.png']));
     assert.equal((await call('/api/play/album/00000000-0000-4000-8000-000000000000')).status,404);
     // Intimate scene (cycle 8): the beat may now reach undressing; the nude picture fits it.

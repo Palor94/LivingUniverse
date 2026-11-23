@@ -414,7 +414,7 @@ function placementDialog(placement){
 // moves the readable ones; unreadable names stay in the folder with the reason.
 function newImagesDialog(intake){
   const bad=intake.items.filter(i=>i.problem),good=intake.items.filter(i=>!i.problem);
-  const row=i=>`<li><small class="muted">${esc(i.relative.split(/[\\/]/).slice(2).join('\\'))}</small><br>${i.problem?`<span class="warn">${esc(t('new.problem.'+i.problem.code,{names:i.problem.names.join(', ')}))}</span>`:`→ <b>${esc(i.folder)}</b>${i.place?' · '+esc(i.place):''}${i.content?' · '+esc(i.content==='non_intimate'?'hétköznapi':i.content==='nudity'?'meztelen':'szex'):''}`}</li>`;
+  const row=i=>`<li><small class="muted">${esc(i.relative.split(/[\\/]/).slice(2).join('\\'))}</small><br>${i.problem?`<span class="warn">${esc(t('new.problem.'+i.problem.code,{names:i.problem.names.join(', ')}))}</span>`:`→ <b>${esc(i.folder)}</b>${i.place?' · '+esc(i.place):''}${i.content?' · '+esc(i.content==='non_intimate'?'hétköznapi':i.content==='shirtless'?'félmeztelen':i.content==='nudity'?'meztelen':'szex'):''}`}</li>`;
   openDialog(t('home.job.newimages'),`<p>${esc(t('new.lead',{folder:intake.folder}))}</p>`
     +(good.length?`<p>${esc(t('new.ready',{count:intake.ready}))}</p><ul class="place-list">${good.slice(0,12).map(row).join('')}</ul>`:'')
     +(bad.length?`<p>${esc(t('new.problems',{count:intake.count-intake.ready}))}</p><ul class="place-list">${bad.slice(0,12).map(row).join('')}</ul>`:'')

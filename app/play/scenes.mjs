@@ -1,6 +1,7 @@
 // Scene pictures, photo lists, the album and phone pictures for play mode, all chosen by the
 // media director (split from play-mode.mjs, 2026-11-11).
 import {clip} from '../world-common.mjs';
+import {LEVELS as LV} from '../content-levels.mjs';
 import {STAGE_ALLOW,BEATS,BEAT_WANT,PHONE_MOODS,anchorOf} from './rules.mjs';
 
 export function createPlayScenes({one,all,fail,w,director,intimacyStage,clock,tree,currentNode}){
@@ -23,7 +24,7 @@ export function createPlayScenes({one,all,fail,w,director,intimacyStage,clock,tr
     const cast=company?[cid,...company.filter(x=>x!==cid),...(pid?[pid]:[])]:pid&&pid!==cid?[cid,pid]:[cid];
     // The beat is also the ceiling: a flirt or a kiss never shows nudity, even when no everyday
     // picture is left (then the previous picture simply stays).
-    const LV=['non_intimate','nudity','sexual_activity'],allow=LV[Math.min(BEAT_WANT[beat],LV.indexOf(STAGE_ALLOW[stage]))];
+    const allow=LV[Math.min(BEAT_WANT[beat],LV.indexOf(STAGE_ALLOW[stage]))];
     const r=await director.pick({panel:'scene',characters:cast,location_id:here?.location_id||null,mood:BEAT_WANT[beat]?'intimate':'everyday',want:BEAT_WANT[beat],
       allow,context,daypart:daypart(),after:prev?.media_id||null,exclude:used,limit:1,onlyCast:true,samePlace:true});
     const i=r.items.find(x=>x.complete||!pid)||r.items[0];if(!i)return null;
@@ -36,7 +37,7 @@ export function createPlayScenes({one,all,fail,w,director,intimacyStage,clock,tr
     const nodes=await tree(),byId=new Map(nodes.map(n=>[n.id,n])),here=byId.get(nodeId)||currentNode(nodes);
     const pid=w.palor()?.id,stage=intimacyStage(cid);
     // With a beat (the moment of the conversation) the list wants that level and never exceeds it.
-    const LV=['non_intimate','nudity','sexual_activity'],beatCap=BEATS.includes(beat)?LV[Math.min(BEAT_WANT[beat],LV.indexOf(STAGE_ALLOW[stage]))]:STAGE_ALLOW[stage];
+    const beatCap=BEATS.includes(beat)?LV[Math.min(BEAT_WANT[beat],LV.indexOf(STAGE_ALLOW[stage]))]:STAGE_ALLOW[stage];
     const r=await director.pick({panel:'scene',characters:pid&&pid!==cid?[cid,pid]:[cid],location_id:here?.location_id||null,mood:intimateWanted?'intimate':'everyday',...(BEATS.includes(beat)?{want:BEAT_WANT[beat]}:{}),
       allow:beatCap,progress:intimateWanted?sceneProgress(cid):null,context,daypart:daypart(),after,limit:30,onlyCast:true,samePlace:true});
     const list=r.items.map(i=>{let doc=null;try{doc=JSON.parse(one('SELECT d.document_json FROM world_review_sources s JOIN world_review_documents d ON d.source_id=s.id WHERE s.media_id=? ORDER BY s.rowid DESC LIMIT 1',i.media_id)?.document_json||'null');}catch{}
@@ -56,7 +57,7 @@ export function createPlayScenes({one,all,fail,w,director,intimacyStage,clock,tr
     const r=await director.pick({panel:'scene',characters:pid&&pid!==cid?[cid,pid]:[cid],mood:'intimate',allow:STAGE_ALLOW[stage],limit:400,diverse:false});
     const seen=new Map(all('SELECT media_id,seen_at FROM play_seen WHERE character_id=?',cid).map(x=>[x.media_id,x.seen_at]));
     const unlocked=r.items.filter(i=>seen.has(i.media_id)).map(i=>({media_id:i.media_id,kind:i.kind,level:i.level,seen_at:seen.get(i.media_id),blur:i.level!=='non_intimate'})).sort((a,b)=>b.seen_at.localeCompare(a.seen_at));
-    const locked={non_intimate:0,nudity:0,sexual_activity:0};for(const i of r.items)if(!seen.has(i.media_id))locked[i.level]++;
+    const locked=Object.fromEntries(LV.map(l=>[l,0]));for(const i of r.items)if(!seen.has(i.media_id))locked[i.level]++;
     return {character_id:cid,stage,unlocked,total:r.items.length,locked,hidden_by_stage:r.hidden};
   }
   async function sharedPhotos(cid,limit=24){

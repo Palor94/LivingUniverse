@@ -59,6 +59,11 @@ test('optional hashing caches work, skips online originals, preserves identity, 
     await call('/api/duplicates/analyze',{ids:[ids['offline.mp4']],allow_download:true});assert.equal((await call('/api/duplicates/groups')).cached,4);
     const backup=await call('/api/export');await app.close();await start(path.join(temp,'restored'));await call('/api/restore',backup);assert.equal((await call('/api/duplicates/groups')).total,1);assert.equal((await call('/api/duplicates/groups?mode=similar&threshold=1')).total,2);
     assert.deepEqual((await call('/api/media/'+ids['one.png'])).reviews,before.reviews);assert.equal((await call('/api/media/'+ids['one.png'])).notes,before.notes);assert.equal((await call('/api/media/'+ids['one.png'])).tags,before.tags);assert.equal((await call('/api/media/'+ids['one.png'])).categorization_complete,true);assert.equal((await call('/api/characters/'+c.id)).canon.id,canon.id);
+    // Imported expression sources stay out of visual suggestions, while exact byte copies remain detectable.
+    for(const id of [ids['one.png'],ids['copy.png'],ids['near.png']])app.db.prepare("INSERT INTO play_asset_sources VALUES(?,'figure','x')").run(id);
+    assert.equal((await call('/api/duplicates/groups?mode=similar&threshold=1')).total,0);
+    assert.equal((await call('/api/duplicates/groups?mode=exact')).total,1);
+    app.db.prepare('DELETE FROM play_asset_sources').run();
     // Cache invalidation uses actual filesystem metadata, not the last scanner baseline.
     await fs.writeFile(path.join(root,'copy.png'),'changed image bytes');groups=await call('/api/duplicates/groups');assert.equal(groups.total,0);assert.equal(groups.stale,1);await call('/api/duplicates/analyze',{ids:[ids['copy.png']]});assert.equal((await call('/api/duplicates/groups')).total,0);
     await fs.unlink(path.join(root,'near.png'));assert.equal((await call('/api/duplicates/groups?mode=similar')).total,0);

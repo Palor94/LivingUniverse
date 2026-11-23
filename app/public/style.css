@@ -1231,3 +1231,8 @@ p.dev-warn,li.dev-warn{color:#e7c27d}p.dev-bad,li.dev-bad{color:var(--danger)}
 .talk-line.other{align-self:flex-start;background:var(--panel);border:1px dashed var(--line-strong)}
 .rel-talk>summary{cursor:pointer;font-size:13px;color:var(--muted)}
 .talk-act{color:var(--muted)}
+.ps-free{padding:0 18px 12px}
+.ps-free summary{cursor:pointer;opacity:.75;font-size:14px;padding:4px 0}
+.ps-free form{display:grid;gap:8px;margin-top:6px}
+.ps-free textarea{width:100%;box-sizing:border-box;border-radius:10px;padding:8px;font:inherit;background:rgba(255,255,255,.05);color:inherit;border:1px solid rgba(255,255,255,.14)}
+.ps-free button{justify-self:start}
