@@ -18,6 +18,7 @@ import {ROLE_TEXT,describeActivity,moodOf,LEVEL_STYLE,CLOSENESS_RULES,TIME_MOOD,
 import {createPlayScenes} from './play/scenes.mjs';
 import {palorVoice,palorCard,speechOf,PALOR_VOICE_HEAD,CHOICE_RULES} from './play/palor-voice.mjs';
 import {castProfileTexts} from './profile-prompt.mjs';
+import {voiceReminder,groupVoiceReminder} from './voice-reminder.mjs';
 import {innerInstruction} from './inner-state.mjs';
 import {appraisalLines,appraiseEvent} from './appraisal.mjs';
 import {agendaFor} from './agenda.mjs';
@@ -1300,7 +1301,9 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       ...(narrated.length?['A JELENET LEÍRÁSA (a játék narrátora írta; ez történik most, ebből folytasd, ne ismételd szó szerint):\n'+narrated.join('\n')]:[]),
       ...(ownLast.length>=2?['A TE UTOLSÓ VÁLASZAID – ezek mondatait, fordulatait és képeit most NE ismételd, mondj mást, másképp:\n'+ownLast.join('\n')]:[]),
       ...(prevChoices.length||palorLast.length>=2?['A "choices" NE ismételje ezeket (előző javaslatok és Palor korábbi mondatai):\n'+[...prevChoices,...palorLast].map(x=>'- '+x).join('\n')]:[]),
-      opener?(channel==='phone'?'Palor most felhívott. Vedd fel, és szólalj meg te elsőként.':'Palor most lép oda hozzád, még nem szólt. Vedd észre, és szólalj meg te elsőként, ahhoz illően, amit éppen csinálsz.'):'Palor: '+text].join('\n\n');
+      opener?(channel==='phone'?'Palor most felhívott. Vedd fel, és szólalj meg te elsőként.':'Palor most lép oda hozzád, még nem szólt. Vedd észre, és szólalj meg te elsőként, ahhoz illően, amit éppen csinálsz.'):'Palor: '+text,
+      // Closing voice reminder (2026-11-23): last in the prompt, where the model weighs it most.
+      ...(()=>{const r=voiceReminder(c.profile);return r?[r]:[];})()].join('\n\n');
     // 600 tokens: reply plus mood, beat, spark and three suggested lines, in Hungarian. If the
     // answer is still cut short, keep the reply that arrived and default the rest.
     // 700 since 2026-11-15: the scene-state line rides along too.
@@ -1419,7 +1422,8 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
         const lastAt=c=>{for(let i=history.length-1;i>=0;i--)if(history[i].speaker_id===c.id||history[i].speaker_name===c.name)return i;return -1;};
         const next=[...people].sort((x,y)=>lastAt(x)-lastAt(y))[0];
         return `KI SZÓLAL MEG: Palor senkit nem szólított meg név szerint; elsőként ${next.name} válaszoljon (ő szólalt meg a legrégebben), a többiek csak akkor, ha természetes.`;})()]),
-      opener?'Palor most lép oda a társasághoz, még nem szólt. Vegyék észre.':'Palor: '+text].join('\n\n');
+      opener?'Palor most lép oda a társasághoz, még nem szólt. Vegyék észre.':'Palor: '+text,
+      ...(()=>{const r=groupVoiceReminder(people);return r?[r]:[];})()].join('\n\n');
     // 650 since 2026-11-15: suggestions may be longer (up to 18 words, actions too).
     const out=await w.ask(system,user,650);
     const replies=(Array.isArray(out?.replies)?out.replies:[]).map(r=>({id:matchPerson(people,r?.name),text:clip(String(r?.text??'').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g,' ').replace(/<[^>]{1,200}>/g,''),800)})).filter(r=>r.id&&r.text).slice(0,3);
