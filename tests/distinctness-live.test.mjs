@@ -9,6 +9,9 @@ test('frozen synthetic live benchmark enforces budget, hash, exclusive receipt a
   const dir=await mkdtemp(path.join(os.tmpdir(),'lu-live-benchmark-test-'));t.after(()=>rm(dir,{recursive:true,force:true}));
   const {plan,sha256}=await prepare({model:'grok-4.20-non-reasoning',prices:{input:1.25,cached_input:0.2,output:2.5}});
   assert.equal(plan.jobs.length,25);assert.equal(plan.private_data,false);assert.ok(plan.reserved_usd>plan.estimated_usd);
+  assert.equal(plan.reasoning_effort,null);assert.equal(plan.prompt_method,'current-question-first-v2-current-turn-knowledge');
+  assert.ok(plan.jobs.every(j=>j.request.system.includes('Palor mostani üzenetét is hallod')),'current utterances must be a permitted source even without prior memories');
+  assert.ok(plan.jobs.every(j=>!j.request.system.includes('Csak azt tudod Palorról, ami a kapcsolatodban és az emlékeidben szerepel')),'the old exclusive knowledge rule is gone');
   assert.ok(plan.jobs.every(j=>!j.request.user.includes('Szintetikus tesztválasz.')),'independent cases must contain no earlier mock responses');
   assert.ok(plan.jobs.every(j=>j.request.user.includes('(most kezdődik)')),'each case starts a separate synthetic conversation');
   let calls=0;const provider={name:'xai',model:plan.model,complete:async()=>{calls++;return {text:'{"reply":"Eltérő szintetikus mondat."}',usage:{input:10,output:10,cached:0},finish:'stop'};}};
@@ -21,4 +24,9 @@ test('frozen synthetic live benchmark enforces budget, hash, exclusive receipt a
   const stopped=JSON.parse(await readFile(receipt,'utf8'));assert.equal(stopped.status,'stopped');assert.equal(stopped.jobs.length,1);assert.equal(stopped.reserved_usd,plan.jobs[0].reserved_usd);
   await assert.rejects(execute({...args,provider:uncertain,receipt}),/EEXIST/);assert.equal(calls,26);
   const expired={...plan,expires_at:'2000-01-01T00:00:00Z'};await assert.rejects(execute({...args,plan:expired,expectedHash:hashPlan(expired),receipt:path.join(dir,'expired.json')}),/PLAN/);
+  const wrongEffort={...plan,reasoning_effort:'none'};
+  await assert.rejects(execute({...args,plan:wrongEffort,expectedHash:hashPlan(wrongEffort),receipt:path.join(dir,'changed-effort.json')}),/PLAN/);
+  const invalidExpiry={...plan,expires_at:'invalid'};
+  await assert.rejects(execute({...args,plan:invalidExpiry,expectedHash:hashPlan(invalidExpiry),receipt:path.join(dir,'invalid-expiry.json')}),/PLAN/);
+  assert.equal(calls,26,'changed model settings and invalid expiry never dispatch');
 });

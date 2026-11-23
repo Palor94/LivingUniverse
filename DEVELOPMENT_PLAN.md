@@ -117,3 +117,7 @@ Applied/accepted world events can now produce evidence-bound NPC-to-NPC changes 
 ## 2026-11-23: Schedule and clock consistency review
 
 Reviewed all 74 active NPCs, applied 44 source-backed additions without replacing existing schedule cells, and retained an explicit flexible routine where the owner requested it. Added stale-source/version protection and transactional approval. Clock follows committed/restored state; explicit rewind and safe undo now move the actual clock consistently. Real-response baseline completed with documented relevance failures; reliable automatic body identity remains unproven after the bounded local trial. Perception uncertainty/imperfect recall is deferred by the owner. Details: docs/REMAINING_TASKS_REVIEW_2026-11-23.md.
+
+## 2026-11-23: Conversation relevance and next body candidate
+
+Preserved the existing voice reminder while adding current-question priority across one-to-one, phone and group prompts; goals and example lines must not replace an answer. Corrected Grok 4.7 to supported low reasoning. Owner approved a finite synthetic comparison under $0.90; no live model switch or uncertain-call retry. Full code checks: 622/622. Public body-download cap now 5 GB. SAM 3D Body's pinned source is staged locally; model access awaits Meta review and CPU portability on this Windows/AMD host remains unproven. Details and exact result/limitations: docs/CONVERSATION_MODEL_REVIEW_2026-11-23.md.

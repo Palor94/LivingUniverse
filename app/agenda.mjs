@@ -15,8 +15,8 @@ export function agendaFor({lapsed=[],inner=null,profile=null,early=true,person='
   else if(inner?.concerns?.length)aim=`beszélni arról, ami foglalkoztat${you?'':'ja'}: ${clip(inner.concerns[0],160)}`;
   else{const g=profile?.values?.goals?.value;if(typeof g==='string'&&g.trim())aim=`közelebb jutni a ${you?'célodhoz':'céljához'}: ${clip(g.trim(),160)}`;}
   if(!aim)return '';aim=aim.replace(/[.!?…\s]+$/,'');
-  if(!you)return `A SAJÁT CÉLJA MOST: ${aim}.`;
+  if(!you)return `A SAJÁT CÉLJA MOST: ${aim}. Előbb a mostani megszólításra reagáljon; a célját csak odaillően hozza szóba, témaváltással ne kerülje meg a kérdést.`;
   return `A SAJÁT CÉLOD EBBEN A BESZÉLGETÉSBEN: ${aim}. `+(early
-    ?'Magadtól hozd szóba az első néhány válaszodban, a saját módodon (egyenesen vagy célozgatva, a természeted szerint); ne várd meg, hogy Palor kérdezzen. Ha a helyzet tényleg nem engedi, halaszd.'
-    :'Ha még nem került szóba, és illik, hozd szóba; ha már szóba került, ne ismételd.');
+    ?'Magadtól hozd szóba, amikor az aktuális kérdésre vagy helyzetre már érdemben reagáltál, és természetesen kapcsolódik; a saját módodon kezdeményezz, de a céloddal ne kerüld meg Palor kérdését. Ha nem illik ide, halaszd.'
+    :'Előbb az aktuális kérdésre vagy helyzetre reagálj. Ha a cél még nem került szóba, és illik, hozd szóba; ha már szóba került, ne ismételd.');
 }

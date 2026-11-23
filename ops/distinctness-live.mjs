@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {pathToFileURL} from 'node:url';
 import {createApp} from '../app/server.mjs';
-import {createMockProvider,createXaiProvider,readXaiKey,estimateTokens,priceOf} from '../app/world-ai.mjs';
+import {createMockProvider,createXaiProvider,readXaiKey,estimateTokens,priceOf,TEXT_MODELS} from '../app/world-ai.mjs';
 import {distinctness} from '../app/character-distinctness.mjs';
 import {CAST} from '../tests/fixtures/distinctness-cast.mjs';
 
@@ -18,7 +18,9 @@ export const SCENARIOS=[
   {id:'knowledge',text:'Nem beszéltem neked mások titkairól. Mit tudsz biztosan, és mit nem tudhatsz?'}
 ];
 export const hashPlan=p=>createHash('sha256').update(JSON.stringify(p)).digest('hex');
-export async function prepare({model,prices}){
+export async function prepare({model,prices,maxTokens=null}){
+  if(!TEXT_MODELS[model]||!prices||!['input','cached_input','output'].every(k=>Number.isFinite(prices[k])&&prices[k]>=0))throw Error('VERIFIED_PRICES_REQUIRED');
+  if(maxTokens!==null&&(!Number.isSafeInteger(maxTokens)||maxTokens<700||maxTokens>2000))throw Error('OUTPUT_CAP_INVALID');
   const temp=await mkdtemp(path.join(os.tmpdir(),'lu-live-distinct-'));let app;
   try{
     const root=path.join(temp,'media');await mkdir(root);
@@ -43,15 +45,18 @@ export async function prepare({model,prices}){
       app.db.prepare("UPDATE play_conversations SET rewound_at='synthetic-case-isolation' WHERE rewound_at IS NULL").run();
       const n=requests.length;await api('/api/play/talk',{character_id:c.id,channel:'in_person',text:scenario.text});
       if(requests.length!==n+1)throw Error('UNEXPECTED_REQUEST_COUNT');
-      const request=requests[n],inputEstimate=estimateTokens(request.system+'\n'+request.user),inputBound=Buffer.byteLength(request.system+'\n'+request.user,'utf8')+256;
+      const request={...requests[n],...(maxTokens===null?{}:{maxTokens})},inputEstimate=estimateTokens(request.system+'\n'+request.user),inputBound=Buffer.byteLength(request.system+'\n'+request.user,'utf8')+256;
       jobs.push({id:scenario.id+'-'+jobs.length,scenario:scenario.id,character:c.name,request,input_estimate:inputEstimate,input_bound:inputBound,estimated_usd:priceOf({input:inputEstimate,output:request.maxTokens},prices),reserved_usd:priceOf({input:inputBound,output:request.maxTokens},prices)});
     }
     const plan={kind:'synthetic-distinctness-v2',isolation:'independent',provider:'xai',model,prices,price_source:'https://docs.x.ai/developers/pricing',price_checked:'2026-11-23',created_at:new Date().toISOString(),expires_at:new Date(Date.now()+24*60*60_000).toISOString(),temperature:0.9,private_data:false,jobs,estimated_usd:jobs.reduce((n,j)=>n+j.estimated_usd,0),reserved_usd:jobs.reduce((n,j)=>n+j.reserved_usd,0),note:'Current real-response baseline; lexical difference is not a quality score. No historical before/after replies exist. No live database writes, private character data or images.'};
+    plan.reasoning_effort=TEXT_MODELS[model].reasoning??null;
+    plan.prompt_method='current-question-first-v2-current-turn-knowledge';
+    plan.note='Five synthetic male profiles, five independent scenarios each. Compare relevance, supported facts and repeated card examples manually; lexical difference is not answer quality. No live database writes, private character data or images. Output cap includes any model reasoning.';
     return {plan,sha256:hashPlan(plan)};
   }finally{await app?.close();await rm(temp,{recursive:true,force:true});}
 }
 export async function execute({plan,expectedHash,maxUsd,ackCost=false,receipt,provider}){
-  if(!ackCost||hashPlan(plan)!==expectedHash||plan.kind!=='synthetic-distinctness-v2'||plan.isolation!=='independent'||plan.private_data!==false||plan.provider!=='xai'||plan.jobs.length!==25||Date.parse(plan.expires_at)<=Date.now())throw Error('APPROVAL_OR_PLAN_INVALID');
+  if(!ackCost||hashPlan(plan)!==expectedHash||plan.kind!=='synthetic-distinctness-v2'||plan.isolation!=='independent'||plan.private_data!==false||plan.provider!=='xai'||plan.jobs.length!==25||!Number.isFinite(Date.parse(plan.expires_at))||Date.parse(plan.expires_at)<=Date.now()||plan.reasoning_effort!==(TEXT_MODELS[plan.model]?.reasoning??null))throw Error('APPROVAL_OR_PLAN_INVALID');
   if(!Number.isFinite(maxUsd)||maxUsd<plan.reserved_usd||!Number.isFinite(plan.reserved_usd))throw Error('BUDGET_TOO_SMALL');
   if(!provider||provider.name!=='xai'||provider.model!==plan.model)throw Error('PROVIDER_MISMATCH');
   for(const j of plan.jobs){const bound=Buffer.byteLength(j.request.system+'\n'+j.request.user,'utf8')+256;if(j.input_bound!==bound||j.reserved_usd!==priceOf({input:bound,output:j.request.maxTokens},plan.prices))throw Error('JOB_BUDGET_CHANGED');}
@@ -75,8 +80,9 @@ async function main(args){
   const mode=args[0],file=args[1];if(!['prepare','run'].includes(mode)||!file)throw Error('USAGE: prepare PLAN.json | run PLAN.json HASH MAX_USD --ack-cost');
   if(path.resolve(file).toLowerCase().includes('onedrive'))throw Error('LOCAL_REPORT_REQUIRED');
   if(mode==='prepare'){
-    const s=await fetch('http://127.0.0.1:4317/api/world-engine').then(r=>r.json()),out=await prepare({model:s.settings.model,prices:s.settings.model==='grok-4.20-non-reasoning'?{input:1.25,cached_input:0.2,output:2.5}:null});if(!out.plan.prices)throw Error('VERIFIED_PRICES_REQUIRED');
-    await mkdir(path.dirname(path.resolve(file)),{recursive:true});await writeFile(file,JSON.stringify(out,null,2));console.log(JSON.stringify({file,sha256:out.sha256,model:out.plan.model,jobs:out.plan.jobs.length,estimated_usd:out.plan.estimated_usd,reserved_usd:out.plan.reserved_usd}));
+    const model=args[2]||(await fetch('http://127.0.0.1:4317/api/world-engine').then(r=>r.json())).settings.model;
+    const out=await prepare({model,prices:TEXT_MODELS[model]?.prices,maxTokens:model==='grok-4.7'?2000:null});
+    await mkdir(path.dirname(path.resolve(file)),{recursive:true});await writeFile(file,JSON.stringify(out,null,2),{flag:'wx'});console.log(JSON.stringify({file,sha256:out.sha256,model:out.plan.model,reasoning_effort:out.plan.reasoning_effort,jobs:out.plan.jobs.length,estimated_usd:out.plan.estimated_usd,reserved_usd:out.plan.reserved_usd}));
   }else{
     const {plan}=JSON.parse(await readFile(file,'utf8'));const key=await readXaiKey(path.join(process.env.LOCALAPPDATA,'LivingUniverse','desktop-catalogue'));
     const result=await execute({plan,expectedHash:args[2],maxUsd:Number(args[3]),ackCost:args.includes('--ack-cost'),receipt:file+'.receipt.json',provider:createXaiProvider({key,model:plan.model})});console.log(JSON.stringify({status:result.status,actual_usd:result.actual_usd,metrics:result.metrics}));

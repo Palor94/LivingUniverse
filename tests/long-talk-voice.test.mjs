@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createApp} from '../app/server.mjs';
 import {createMockProvider} from '../app/world-ai.mjs';
+import {conversationFocus} from '../app/conversation-focus.mjs';
 
 const entry=value=>({value,interpretation:'',kind:'hypothesis',source:'synthetic test',visibility:'creator'});
 const cast=[
@@ -54,6 +55,10 @@ test('long talks retain their own voice and communication scales across repeated
         for(const phrase of person.phrases)assert.ok(profile.includes(phrase),'communication guidance remains: '+phrase);
         for(const other of cast.filter(x=>x!==person))assert.ok(!profile.includes(other.values.play_voice),'another character’s voice must not leak');
         assert.match(req.system,/Maradj a szerepben, a saját hangodon és beszédstílusodban/);
+        assert.ok(req.system.startsWith(conversationFocus()),'response priority is also a system instruction');
+        assert.ok(req.system.includes('ÉS a mostani beszélgetésből, Palor aktuális üzenetéből'));
+        assert.ok(req.user.endsWith(conversationFocus()),'current question priority survives long-talk summaries and voice reminders');
+        assert.ok(req.user.indexOf('Palor: ')<req.user.lastIndexOf('A MOSTANI MEGSZÓLALÁS ELSŐBBSÉGE:'));
       }
       assert.equal(conv.lines.length,32);
       assert.ok(prompts.filter(r=>r.system.includes('"memo"')).length>=2,'multiple summary updates were exercised');

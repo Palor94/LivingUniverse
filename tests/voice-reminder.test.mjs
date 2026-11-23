@@ -3,6 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {voiceReminder,groupVoiceReminder,REMINDER_HEAD,GROUP_REMINDER_HEAD} from '../app/voice-reminder.mjs';
+import {conversationFocus} from '../app/conversation-focus.mjs';
 
 const prof=values=>({values:Object.fromEntries(Object.entries(values).map(([k,v])=>[k,{value:v}]))});
 const full=prof({play_voice:'Rövid, száraz mondatok.',play_rules:'Ha dicsérik, témát vált.',play_contradiction:'Kemény, de a kutyájával lágy.',speech:'ignored when the card voice exists'});
@@ -24,8 +25,11 @@ test('group reminder lists each person, skips people without material, keeps lin
   assert.ok(r.length<900);
   assert.equal(groupVoiceReminder([{name:'Béla',profile:prof({})}]),'');
 });
-test('both prompts end with the reminder (it is the last block)',async()=>{
+test('both prompts keep the voice reminder followed by current-turn priority',async()=>{
   const src=await readFile(new URL('../app/play-mode.mjs',import.meta.url),'utf8');
-  assert.ok(/'Palor: '\+text,\s*\n\s*\/\/ Closing voice reminder[^\n]*\n\s*\.\.\.\(\(\)=>\{const r=voiceReminder\(c\.profile\)/.test(src));
-  assert.ok(/'Palor: '\+text,\s*\n\s*\.\.\.\(\(\)=>\{const r=groupVoiceReminder\(people\)[^\n]*\]\.join\('\\n\\n'\)/.test(src));
+  assert.ok(/voiceReminder\(c\.profile\)[^\n]*\n\s*conversationFocus\(\{opener\}\)/.test(src));
+  assert.ok(/groupVoiceReminder\(people\)[^\n]*\n\s*conversationFocus\(\{opener,group:true\}\)/.test(src));
+  assert.match(conversationFocus(),/Először Palor legutóbbi kérdésére/);
+  assert.match(conversationFocus({group:true}),/A megszólított szereplő először/);
+  assert.match(conversationFocus({opener:true}),/Palor még nem szólt/);
 });

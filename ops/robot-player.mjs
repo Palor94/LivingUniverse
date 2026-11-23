@@ -88,7 +88,7 @@ async function main(){
   const report={started:new Date().toISOString(),seed,live,model:live?arg('model',DEFAULT_MODEL):'mock',steps:0,actions:{},http_errors:[],refused:0,invariant_issues:new Map(),reply_issues:[],talks:[],cost:null};
   const trail=[];const note=t=>{trail.push(t);if(trail.length>8)trail.shift();};
   async function call(method,route,body){
-    const r=await fetch(origin+route,{method,headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+    let r;try{r=await fetch(origin+route,{method,signal:AbortSignal.timeout(Number(arg('call-timeout-s','90'))*1000),headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});}catch(e){report.http_errors.push({step:report.steps,route,status:0,error:'NO ANSWER within '+arg('call-timeout-s','90')+'s (stuck request)',trail:[...trail]});console.log(`  step ${report.steps}: ${route} did not answer, skipping`);return null;}
     const data=await r.json().catch(()=>null);
     if(r.status>=500)report.http_errors.push({step:report.steps,route,status:r.status,error:data?.error||'',trail:[...trail]});
     else if(r.status>=400)report.refused++;
@@ -128,7 +128,7 @@ async function main(){
       const inv=await call('GET','/api/play/invariants');
       for(const e of [...(inv?.errors||[]).map(x=>({...x,level:'error'})),...(inv?.warnings||[]).map(x=>({...x,level:'warning'}))]){
         const k=e.code+'|'+e.ids.join(',');if(!report.invariant_issues.has(k))report.invariant_issues.set(k,{...e,first_step:report.steps,day:inv.day,slot:inv.slot,trail:[...trail],times:0});report.invariant_issues.get(k).times++;}
-      if((s+1)%25===0)console.log(`step ${s+1}/${steps}${guard?` – $${guard.state.spent.toFixed(3)} spent`:''}`);
+      if((s+1)%5===0)console.log(`step ${s+1}/${steps}${guard?` – $${guard.state.spent.toFixed(3)} spent`:''}`);
     }
   }finally{
     await app.close();

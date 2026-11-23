@@ -19,9 +19,10 @@ export const TEXT_MODELS=Object.freeze({
   'grok-4.20-non-reasoning':{label:'Grok 4.20 – gyors',prices:{input:1.25,cached_input:0.20,output:2.50}},
   // reasoning (2026-11-15): grok-4.3 thinks before answering by default (docs.x.ai: default
   // effort "low", "none" supported). A talk needs a quick natural reply, not hidden thinking that
-  // is billed and delays the first word, so it is switched off for these models.
+  // is billed and delays the first word, so it is switched off where supported.
   'grok-4.3':{label:'Grok 4.3',prices:{input:1.25,cached_input:0.20,output:2.50},reasoning:'none'},
-  'grok-4.7':{label:'Grok 4.7 – a legújabb',prices:{input:2.00,cached_input:0.50,output:6.00},reasoning:'none'}
+  // 2026-11-23 official model docs: 4.7 supports low/medium/high/xhigh, not none.
+  'grok-4.7':{label:'Grok 4.7 – a legújabb',prices:{input:2.00,cached_input:0.50,output:6.00},reasoning:'low'}
 });
 export const pricesFor=(model,fallback=DEFAULT_PRICES)=>TEXT_MODELS[model]?.prices||fallback;
 

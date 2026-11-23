@@ -26,3 +26,13 @@ test('the xAI provider sends the chosen model id',async()=>{
   let sent;const p=createXaiProvider({key:'test-key-123',model:'grok-4.3',fetchImpl:async(u,init)=>{sent=JSON.parse(init.body);return {ok:true,json:async()=>({choices:[{message:{content:'{}'}}],usage:{}})};}});
   await p.complete({system:'s',user:'u'});assert.equal(sent.model,'grok-4.3');assert.equal(p.model,'grok-4.3');
 });
+
+test('Grok 4.7 uses its supported low reasoning effort in regular and streaming calls',async()=>{
+  const sent=[];const p=createXaiProvider({key:'synthetic-key',model:'grok-4.7',fetchImpl:async(u,init)=>{
+    const body=JSON.parse(init.body);sent.push(body);
+    return body.stream?{ok:true,body:[Buffer.from('data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')]}:{ok:true,json:async()=>({choices:[{message:{content:'{}'}}],usage:{}})};
+  }});
+  await p.complete({system:'s',user:'u'});await p.complete({system:'s',user:'u',onDelta:()=>{}});
+  assert.deepEqual(sent.map(x=>x.reasoning_effort),['low','low']);
+  assert.ok(sent.every(x=>x.model==='grok-4.7'));
+});

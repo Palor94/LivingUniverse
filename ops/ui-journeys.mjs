@@ -46,7 +46,7 @@ export const JOURNEYS=[
     {name:'open Play',run:async page=>{await page.goto(origin+'/#/play');await page.waitForLoadState('networkidle');}},
     {name:'wait one day part',selector:'[data-play-wait=next_slot]',open:'.play-wait-menu summary',run:async(page,el)=>{await el.click();await page.waitForLoadState('networkidle');}}]},
   {id:'phone-page',steps:[
-    {name:'open the phone Play page',run:async page=>{await page.goto(origin+'/play');await page.waitForLoadState('networkidle');}}]}
+    {name:'open the phone Play page',run:async page=>{const r=await fetch(origin+'/play');if(r.status===404)return 'SKIPPED: the phone page is served by the mobile listener, which the sandbox turns off';await page.goto(origin+'/play');await page.waitForLoadState('networkidle');}}]}
 ];
 
 async function main(){

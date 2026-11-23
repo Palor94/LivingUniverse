@@ -150,3 +150,7 @@ Same-person reference pairs: median 0.61 (lowest tenth below 0.13, i.e. some ref
 different-person pairs: median 0.05, 99th percentile 0.34, highest 0.67 (Dezső–Pákozdi). The
 real risk is not confusing two known characters but taking an unknown face for a known one.
 Linked pictures carry image-level links, so their "0 wrong" is an upper bound on quality, not proof.
+
+## 2026-11-23: Next offline body-shape candidate
+
+Owner approved the recommended SAM 3D Body ViT-H local trial and raised public downloads to 5 GB. This is a source/preflight candidate, not a live identity-method switch. Pinned source and cumulative artifact ledger stay in AppData; no private uploads, training, automatic identity passes or canon writes. The owner submitted the gated Hugging Face request; the authenticated page says Meta review is pending. Core CUDA transfers must be ported and CPU compatibility measured on this Windows/integrated-AMD host before a bounded reference trial. Existing face/body methods stay in place. Exact scope, source hash and blockers: [review](CONVERSATION_MODEL_REVIEW_2026-11-23.md), `ops/sam3d-body-plan.mjs`.

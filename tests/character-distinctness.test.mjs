@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createApp} from '../app/server.mjs';
 import {createMockProvider} from '../app/world-ai.mjs';
+import {conversationFocus} from '../app/conversation-focus.mjs';
 import {defaultTemplate} from '../app/ghost-profile.mjs';
 import {innerCoverage,characterOnly,distinctness,similarity} from '../app/character-distinctness.mjs';
 import {appraisalLines,appraiseEvent} from '../app/appraisal.mjs';
@@ -64,6 +65,15 @@ test('same situation, five people: inner life reaches the 1:1 prompt and the gro
   // and the five motives out; the baseline is recorded in DECISIONS.md (2026-11-21, E1).
   const g=await call('/api/play/group-talk',{opener:true});assert.equal(g.status,200,JSON.stringify(g.data));
   const groupUser=requests.filter(r=>r.system.includes('társas jelenetét')).at(-1).user;
+  assert.ok(groupUser.endsWith(conversationFocus({opener:true,group:true})),'group opener retains voice and current-turn priority');
+  const next=await call('/api/play/group-talk',{conversation_id:g.data.id,text:'Teszt Béla, ráérsz segíteni, vagy dolgozol?'});
+  assert.equal(next.status,200,JSON.stringify(next.data));
+  const follow=requests.filter(r=>r.system.includes('társas jelenetét')).at(-1).user;
+  const groupSystem=requests.filter(r=>r.system.includes('társas jelenetét')).at(-1).system;
+  assert.ok(groupSystem.startsWith(conversationFocus({group:true})));
+  assert.ok(groupSystem.includes('Palor aktuális üzenetéből dolgozz'));
+  assert.ok(follow.endsWith(conversationFocus({group:true})),'addressed group reply uses the same priority after history and voice');
+  assert.ok(follow.includes('Teszt Béla, ráérsz segíteni, vagy dolgozol?'));
   const blocks=Object.fromEntries(groupUser.split(/\n(?=## )/).filter(b=>b.startsWith('## ')).map(b=>[b.slice(3,b.indexOf('\n')),b]));
   const inGroup=people.filter(c=>blocks[c.name]);assert.ok(inGroup.length>=2);
   const groupCoverage=inGroup.map(c=>({name:c.name,...innerCoverage(blocks[c.name],profileOf(c.values))}));
