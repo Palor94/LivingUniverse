@@ -19,6 +19,7 @@ import {createPlayScenes} from './play/scenes.mjs';
 import {palorVoice,palorCard,speechOf,PALOR_VOICE_HEAD,CHOICE_RULES} from './play/palor-voice.mjs';
 import {castProfileTexts} from './profile-prompt.mjs';
 import {voiceReminder,groupVoiceReminder} from './voice-reminder.mjs';
+import {checkInvariants} from './invariants.mjs';
 import {innerInstruction} from './inner-state.mjs';
 import {appraisalLines,appraiseEvent} from './appraisal.mjs';
 import {agendaFor} from './agenda.mjs';
@@ -526,6 +527,18 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
     return k?REASON_TEXT[k]||null:null;}
   // His routine's activity here and now (when the weekly routine put him here and it says one).
   const routineActivity=(cid,locationId)=>{const r=positions().why?.get(cid);return r?.kind==='schedule'&&r.activity&&(!locationId||r.location_id===locationId)?r:null;};
+  // Consistency checks (2026-11-23): the facts each screen reads, handed to app/invariants.mjs.
+  async function invariantsReport(){
+    const nodes=await tree(),here=currentNode(nodes),k=clock(),slotId=SLOTS[k.slot_index].id,org=origins(nodes),byIdInv=new Map(nodes.map(n=>[n.id,n]));
+    const nodeFacts=nodes.map(n=>({id:n.id,parent_id:n.parent_id||null,location_id:n.location_id||null,name:n.name,short_name:n.short_name,archived:!!n.archived,
+      walk_through:isPassage(n)||isRegion(n),town_street:isPassage(n)&&/^(utca|street)$/i.test(String(n.short_name||n.name).trim())&&!!n.parent_id&&townOf(byIdInv,n.parent_id)?.id===n.parent_id,has_entry_room:!!originChild(nodes,n.id,org)?.location_id,in_wardrobe:n.location_id?inWardrobe(n.location_id):false}));
+    const cast=w.meetable().map(c=>({id:c.id,name:c.name,wardrobe_only:wardrobeOnly({...c,race:raceOf(c.id)})}));
+    const sm=streetMeet(),present=here?presentAt(here):[];if(sm&&here&&sm.node_id===here.id&&!present.includes(sm.character_id))present.push(sm.character_id);
+    const openConversations=all("SELECT id,character_id,channel,mode,participants_json FROM play_conversations WHERE status='open' AND rewound_at IS NULL").map(c=>{let participants=[];try{participants=JSON.parse(c.participants_json||'[]');}catch{}return {...c,participants};});
+    const groupLinesWithoutSpeaker=one("SELECT count(*) n FROM play_lines l JOIN play_conversations c ON c.id=l.conversation_id WHERE c.mode='group' AND c.rewound_at IS NULL AND l.speaker='character' AND NOT EXISTS(SELECT 1 FROM play_line_speaker s WHERE s.line_id=l.id)").n;
+    const appointmentsWithoutPlace=all("SELECT a.id,a.character_id FROM play_appointments a WHERE a.world_day=? AND a.slot=? AND a.status='accepted' AND (a.location_id IS NULL OR NOT EXISTS(SELECT 1 FROM locations l WHERE l.id=a.location_id))",k.day,slotId);
+    return {day:k.day,slot:slotId,...checkInvariants({nodes:nodeFacts,cast,positions:positions(),palorNodeId:here?.id||null,streetMeet:sm,presentAtPalor:present,openConversations,groupLinesWithoutSpeaker,appointmentsWithoutPlace})};
+  }
   // Owner view (S1): every meetable character in each part of today, with the reason, plus the gaps.
   function whereabouts(){
     const k=clock(),cast=w.meetable(),name=id=>one('SELECT name FROM locations WHERE id=?',id)?.name||null;
@@ -1702,6 +1715,7 @@ export function installPlayMode({db,one,all,run,transaction,fail,dataDir,root=nu
       return json({media:await director.forEvent(row,{repick:body.verdict!==1})}),true;}
     if(p==='/api/play/readiness'&&m==='GET')return json(await readiness()),true;
     if(p==='/api/play/whereabouts'&&m==='GET')return json(whereabouts()),true;
+    if(p==='/api/play/invariants'&&m==='GET')return json(await invariantsReport()),true;
     {const wm=p.match(/^\/api\/play\/characters\/([a-f0-9-]{36})\/whispers$/i);if(wm){if(m==='GET')return json({whispers:whispers(wm[1])}),true;if(m==='POST')return json(addWhisper(wm[1],body)),true;}}
     if(p==='/api/play/schedules/import'&&m==='POST')return json(schedules.importFile(body?.file)),true;
     {const sc=p.match(/^\/api\/play\/schedules\/([a-f0-9-]{36})(?:\/(undo|propose|proposal|proposal\/accept|proposal\/reject))?$/i);

@@ -11,7 +11,9 @@
     "perf": "node ops/perf-baseline.mjs",
     "dbdiff": "node ops/db-diff.mjs",
     "coverage": "node ops/test.mjs --coverage",
-    "shots": "node ops/ui-shots.mjs"
+    "shots": "node ops/ui-shots.mjs",
+    "journeys": "node ops/ui-journeys.mjs",
+    "robot": "node ops/robot-player.mjs"
   },
   "engines": {
     "node": ">=24"
